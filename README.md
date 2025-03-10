@@ -70,34 +70,34 @@ Run with `./scrape.py` or just `scrape` if symlinked.
 
 - **Pornhub: Massy Sweet’s Pornstar Page 🦉🙋🏼‍♀️**
   ```bash
-  ./scrape.py ph pornstar "Massy Sweet"
+  scrape ph pornstar "Massy Sweet"
   # OR
-  ./scrape.py https://www.pornhub.com/pornstar/Massy-Sweet
+  scrape https://www.pornhub.com/pornstar/Massy-Sweet
   ```
 
 - **Incestflix: Lily LaBeau + PrimalFetish Videos 👩‍❤️‍💋‍👨🤫**
   ```bash
-  ./scrape.py if search "Lily Labeau & PrimalFetish"
+  scrape if search "Lily Labeau & PrimalFetish"
   # OR
-  ./scrape.py https://www.incestflix.com/tag/Lily-Labeau/and/PrimalFetish
+  scrape https://www.incestflix.com/tag/Lily-Labeau/and/PrimalFetish
   ```
 
 - **Lonefun: "Real Incest" Tag Results 🧬❣️**
   ```bash
-  ./scrape.py lf tag "real incest"
+  scrape lf tag "real incest"
   # OR
-  ./scrape.py https://lonefun.com/@real+incest
+  scrape https://lonefun.com/@real+incest
   ```
 
 - **Motherless: Specific Video 🙊🙈**
   ```bash
-  ./scrape.py https://motherless.com/2ABC9F3
+  scrape https://motherless.com/2ABC9F3
   ```
 
 ### Fallback Mode 😅
 For unsupported sites, `yt-dlp` kicks in as a fallback:
 ```bash
-./scrape.py https://someUnsupportedSite.com/video/12345
+scrape https://someUnsupportedSite.com/video/12345
 ```
 
 ---

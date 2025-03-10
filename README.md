@@ -104,15 +104,15 @@ scrape https://someUnsupportedSite.com/video/12345
 
 ## Supported Sites & Modes 🌐
 
-| Site Code | Site             | Modes Available                  |
-|-----------|------------------|----------------------------------|
-| `9v`      | 9vids.com        | `search`, `tag`                  |
-| `if`      | incestflix.com   | `search` (use `&` for multi-term) |
-| `lf`      | lonefun.com      | `search`, `tag`                  |
-| `ml`      | motherless.com   | `search`, `category`, `user`, `group` |
-| `ph`      | pornhub.com      | `search`, `category`, `channel`, `model`, `pornstar` |
-| `sb`      | spankbang.com    | `search`, `model`, `tag`         |
-
+| Site Code | Site                     | Modes Available                  |
+|-----------|--------------------------|----------------------------------|
+| `9v`      | 9vids.com                | `search`, `tag`                  |
+| `if`      | incestflix.com           | `search` (use `&` for multi-term) |
+| `lf`      | lonefun.com              | `search`, `tag`                  |
+| `ml`      | motherless.com           | `search`, `category`, `user`, `group` |
+| `ph`      | pornhub.com              | `search`, `category`, `channel`, `model`, `pornstar` |
+| `sb`      | spankbang.com            | `search`, `model`, `tag`         |
+| `triv`    | toprealincestvideos.com  | `search`                         |
 ---
 
 ## Advanced Configuration ⚙️

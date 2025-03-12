@@ -19,6 +19,11 @@ modes:
     url_pattern_pages: "/tag/{search}/page/{page}"
     max_pages: 999
     scraper: list_scraper
+  tag:
+    url_pattern: "/tag/{tag}"
+    url_pattern_pages: "/tag/{tag}/page/{page}"
+    max_pages: 999
+    scraper: list_scraper
 
 download:
   method: "curl"

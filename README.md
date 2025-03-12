@@ -9,8 +9,8 @@ A Python-based tool to scrape and download adult content from various websites s
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) for video downloads
 - [wget](https://www.gnu.org/software/wget/) or [curl](https://curl.se/) for alternative downloads
 - [ffmpeg](https://ffmpeg.org/) for M3U8 stream downloads
-- Optional: [Selenium](https://pypi.org/project/selenium/) + [Chromedriver](https://chromedriver.chromium.org/) for JS-heavy sites, iframe piercing, and M3U8 URL extraction 🧑🏼‍💻
-- Optional: [webdriver-manager](https://pypi.org/project/webdriver-manager/) for automatic ChromeDriver management (included in `requirements.txt`)
+- Optional: [Selenium](https://pypi.org/project/selenium/) + [Chromedriver](https://chromedriver.chromium.org/) for JS-heavy sites
+- Optional: [webdriver-manager](https://pypi.org/project/webdriver-manager/) for automatic ChromeDriver management (in `requirements.txt`)
 - Optional: Conda for environment management 🐼
 
 All Python dependencies are in `requirements.txt`.
@@ -27,42 +27,34 @@ All Python dependencies are in `requirements.txt`.
 
 2. **Install Dependencies 🚀**
    - **With Conda (Recommended):**
-	 ```bash
-	 conda create -n smutscrape python=3.10.13
-	 conda activate smutscrape
-	 pip install -r requirements.txt
-	 ```
+     ```bash
+     conda create -n smutscrape python=3.10.13
+     conda activate smutscrape
+     pip install -r requirements.txt
+     ```
    - **With pip:**
-	 ```bash
-	 pip3 install -r requirements.txt
-	 ```
+     ```bash
+     pip3 install -r requirements.txt
+     ```
 
    Install additional tools:
    ```bash
    # On Ubuntu/Debian
-   sudo apt-get install yt-dlp wget curl ffmpeg chromium  # chromium provides Chrome
+   sudo apt-get install yt-dlp wget curl ffmpeg chromium
    # On macOS with Homebrew
    brew install yt-dlp wget curl ffmpeg google-chrome
    ```
 
    For Selenium (optional):
-   - By default, `webdriver-manager` auto-downloads ChromeDriver matching your Chrome version.
-   - Alternatively, install ChromeDriver manually (e.g., via `brew install chromedriver` on macOS or `sudo apt-get install chromium-driver` on Debian) and specify the path in `config.yaml`.
-   - Or use a Selenium Chrome container:
-	 ```bash
-	 docker run -d -p 4444:4444 --shm-size=2g --name selenium-chrome selenium/standalone-chrome
-	 ```
+   - `webdriver-manager` auto-downloads ChromeDriver by default.
+   - Or install manually (e.g., `brew install chromedriver`) and set `chromedriver_path` in `config.yaml`.
 
 3. **Configure `config.yaml` ⚙️**
    ```bash
    cp example-config.yaml config.yaml
    nano config.yaml
    ```
-   Key sections to tweak:
-   - `download_destinations` 💾 (e.g., local, SMB)
-   - `ignored` 🚫 (terms to skip)
-   - `vpn` 🤫 (for privacy)
-   - `selenium.chromedriver_path` ⚙️ (optional; overrides `webdriver-manager`)
+   Tweak `download_destinations`, `ignored`, `vpn`, or `selenium.chromedriver_path`.
 
 4. **Make Executable 🚀**
    ```bash
@@ -70,7 +62,6 @@ All Python dependencies are in `requirements.txt`.
    ```
 
 5. **Optional: Add Symlink 🔗**
-   Run `scrape` from anywhere:
    ```bash
    sudo ln -s $(realpath ./scrape.py) /usr/local/bin/scrape
    ```
@@ -80,7 +71,7 @@ All Python dependencies are in `requirements.txt`.
 ## Usage 🚀
 
 ### Basic Commands
-Run with `./scrape.py` or just `scrape` if symlinked.
+Run with `./scrape.py` or `scrape` if symlinked.
 
 - **Pornhub: Massy Sweet’s Pornstar Page 🦉🙋🏼‍♀️**
   ```bash
@@ -115,8 +106,29 @@ Run with `./scrape.py` or just `scrape` if symlinked.
   scrape https://toprealincestvideos.com/en/search/?search=sister
   ```
 
+- **FamilySexVideos: Search "Teen" 👩‍🏫**
+  ```bash
+  scrape fsv search "teen"
+  # OR
+  scrape https://familysexvideos.org/en/search/?search=teen
+  ```
+
+- **XVideos: Tag "Amateur" 🎥**
+  ```bash
+  scrape xv tags "amateur"
+  # OR
+  scrape https://www.xvideos.com/tags/amateur
+  ```
+
+- **XNXX: Channel "Naughty America" 📺**
+  ```bash
+  scrape xnxx channel "naughty-america"
+  # OR
+  scrape https://www.xnxx.com/channels/naughty-america
+  ```
+
 ### Fallback Mode 😅
-For unsupported sites, `yt-dlp` kicks in as a fallback:
+For unsupported sites, `yt-dlp` kicks in:
 ```bash
 scrape https://someUnsupportedSite.com/video/12345
 ```
@@ -130,94 +142,65 @@ scrape https://someUnsupportedSite.com/video/12345
 | `9v`      | 9vids.com                | `video`, `search`, `tag`                     |
 | `fs`      | family-sex.me            | `video`, `tag`, `search`                     |
 | `fphd`    | familypornhd.com         | `video`, `tag`                               |
-| `if`      | incestflix.com           | `video`, `search` (use `&` for multi-term)   |
+| `fsv`     | familysexvideos.org      | `video`, `search`                            |
+| `if`      | incestflix.com           | `video`, `search`, `tag`                     |
 | `lf`      | lonefun.com              | `video`, `search`, `tag`                     |
 | `ml`      | motherless.com           | `video`, `search`, `category`, `user`, `group` |
 | `ph`      | pornhub.com              | `video`, `model`, `category`, `category_alt`, `channel`, `search`, `pornstar` |
 | `sb`      | spankbang.com            | `video`, `model`, `search`, `tag`            |
 | `triv`    | toprealincestvideos.com  | `video`, `search`                            |
+| `xnxx`    | xnxx.com                 | `video`, `search`, `channel`, `pornstar`, `tag` |
+| `xv`      | xvideos.com              | `video`, `search`, `channels`, `models`, `tags` |
 
 ---
 
 ## Advanced Configuration ⚙️
 
 ### Download Methods 📥
-Choose your download tool in each site’s `.yaml`:
-- `yt-dlp`: Default, robust for most sites.
-- `wget`: Lightweight, good for direct URLs.
-- `curl`: Alternative for direct downloads.
-- `ffmpeg`: Ideal for M3U8 streams (e.g., `familypornhd.com`).
-
-Example:
-```yaml
-download:
-  method: "ffmpeg"
-```
+Set in each site’s `.yaml`: `yt-dlp` (default), `wget`, `curl`, or `ffmpeg` (for M3U8 streams).
 
 ### Selenium & Chromedriver 🕵️‍♂️
 For JS-heavy sites or M3U8 streams:
-- Enable with `use_selenium: true` in the site’s `.yaml`.
-- Used to:
-  - **Pierce Iframes**: Extracts URLs from iframe `src` (e.g., `familypornhd.com`).
-  - **Gather M3U8 URLs**: Captures `.m3u8` streams via network logs (requires `m3u8_mode: true`).
-- Configure in `config.yaml`:
-  - By default, `webdriver-manager` auto-downloads ChromeDriver if `chromedriver_path` is omitted.
-  - Specify `chromedriver_path` to override (e.g., for manual installs):
-	```yaml
-	selenium:
-	  mode: "local"  # or "remote" for Docker
-	  chromedriver_path: "/usr/bin/chromedriver"  # Optional, e.g., Debian path
-	  chrome_binary: "/usr/lib/chromium/chromium"  # Optional, e.g., Debian Chrome
-	```
+- Enable with `use_selenium: true` in site config.
+- Used for iframe piercing or M3U8 URL extraction (`m3u8_mode: true`).
+- In `config.yaml`, set `selenium.chromedriver_path` or rely on `webdriver-manager`.
 
 ### Filtering Content 🚫
-Skip unwanted videos by adding terms to `ignored` in `config.yaml`:
+Skip terms in `config.yaml`:
 ```yaml
 ignored:
   - "JOI"
   - "Femdom"
-  - "Virtual Sex"
-  - "Scat"
 ```
 
 ### Pagination 📄
-- **URL-Based**: Define `url_pattern_pages` in a mode (e.g., `/s/{search}/{page}/?o=all/` for SpankBang).
-- **Selector-Based**: Use `list_scraper.pagination.next_page` (e.g., `li.page_next a` for Pornhub).
-- Prioritizes `url_pattern_pages` if both are present.
+Pagination is automatic. For modes with `url_pattern_pages` (e.g., `xnxx`’s `search`), resume from a specific page:
+```bash
+scrape if tag "ms" --start_on_page 69
+```
 
 ### VPN Support 🔒
-Stay anonymous with VPN integration (e.g., ProtonVPN):
+Enable in `config.yaml`:
 ```yaml
 vpn:
   enabled: true
   vpn_bin: "/usr/bin/protonvpn-cli"
   start_cmd: "{vpn_bin} connect"
-  stop_cmd: "{vpn_bin} disconnect"
-  new_node_cmd: "{vpn_bin} connect --random"
-  new_node_time: 300  # Reconnect every 5 minutes
+  new_node_time: 300
 ```
-Set `enabled: false` to disable.
 
 ### Download Destinations 📁
-Prioritize storage options:
+Set in `config.yaml`:
 ```yaml
 download_destinations:
-  - type: smb
-	server: "192.168.50.5"
-	share: "Media"
-	username: "user"
-	password: "pass"
-  - type: local
-	path: "~/.xxx"
+  - type: "local"
+    path: "~/.xxx"
 ```
-The first working destination is used.
 
 ### Overwriting Files
-Add `--overwrite_files` to the command or set `no_overwrite: false` in the site’s `.yaml` to overwrite existing files.
+Use `--overwrite_files` or set `no_overwrite: false` in site config.
 
 ---
 
 ## Disclaimer ⚠️
-You’re on your own with this one. Scrape responsibly! 🧠💭
-```
-
+Scrape responsibly! You’re on your own. 🧠💭

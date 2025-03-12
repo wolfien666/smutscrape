@@ -176,7 +176,7 @@ def get_selenium_driver(general_config, force_new=False):
 	return general_config['selenium_driver']
 
 
-def process_video_page(url, site_config, general_config, overwrite_files=False, headers=None):
+def process_video_page(url, site_config, general_config, overwrite_files=False, headers=None, list_title=None):
 	global last_vpn_action_time
 	vpn_config = general_config.get('vpn', {})
 	if vpn_config.get('enabled', False):
@@ -239,11 +239,15 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 		video_url = data.get('download_url', url)
 		logger.debug(f"Video URL to download: {video_url}")
 	
+	# Title fallback: use extracted title, then list_title, then 'Untitled'
+	video_title = data.get('title', '').strip() or list_title or 'Untitled'
+	data['title'] = video_title  # Ensure data reflects the final title
+	
 	if should_ignore_video(data, general_config['ignored']):
-		logger.info(f"Ignoring video: {data.get('title', url)}")
+		logger.info(f"Ignoring video: {video_title}")
 		return
 	
-	file_name = construct_filename(data.get('title', 'Untitled'), site_config, general_config)
+	file_name = construct_filename(video_title, site_config, general_config)
 	destination_config = general_config['download_destinations'][0]
 	overwrite = overwrite_files or site_config.get('overwrite_files', general_config.get('overwrite_files', False))
 	

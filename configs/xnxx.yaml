@@ -40,8 +40,7 @@ download:
 scrapers:
   video_scraper:
     title:
-      selector: "h1.page-title"  # Updated
-      post_process: "lambda x: x.split(' - ')[0] if ' - ' in x else x"  # Clean title
+      selector: "div.video-title strong"  # Updated to match HTML
 
   list_scraper:
     video_container:

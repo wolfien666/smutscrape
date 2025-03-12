@@ -1,0 +1,52 @@
+name: FamilyPorn
+domain: familyporn.tv
+base_url: "https://familyporn.tv"
+selector_style: css
+no_overwrite: true
+use_selenium: true
+
+url_encoding_rules:
+  " ": "-"
+  "%20": "-"
+
+modes:
+  video:
+    url_pattern: "/{video_id}/"  # Video URLs are relative paths like "/video-title-123/"
+    scraper: video_scraper
+  search:
+    scraper: list_scraper
+    url_pattern: "/search/{search}/"
+  category:
+    scraper: list_scraper
+    url_pattern: "/categories/{category}/"
+  model:
+    scraper: list_scraper
+    url_pattern: "/models/{model}/"
+
+download:
+  method: "requests"  # Custom method to match the second script’s direct download
+
+scrapers:
+  video_scraper:
+    title:
+      selector: "head title"  # Fallback; ideally, use meta tags if available
+    download_url:
+      selector: "#kt_player > div.fp-player > video"
+      attribute: "src"
+
+  list_scraper:
+    video_container:
+      selector:
+        - "#list_videos_common_videos_list_items"  # For models and categories
+        - "#list_videos_videos_list_search_result_items"  # For search
+    video_item:
+      selector: "li.item > div.thumb-horizontal > a.link"
+      fields:
+        url:
+          attribute: "href"
+        title:
+          attribute: "title"
+    pagination:
+      next_page:
+        selector: "a.next"  # Assuming WordPress-style pagination; adjust if needed
+        attribute: "href"

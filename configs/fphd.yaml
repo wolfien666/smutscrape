@@ -15,6 +15,11 @@ modes:
     url_pattern_pages: "/tag/{tag}/page/{page}"
     max_pages: 999
     scraper: list_scraper
+  search:
+    url_pattern: "/?s={search}"
+    url_pattern_pages: "/page/2/?s={search}"
+    max_pages: 999
+    scraper: list_scraper
 
 download:
   method: "ffmpeg"

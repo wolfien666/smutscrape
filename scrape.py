@@ -146,7 +146,6 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
     
     if site_config.get('m3u8_mode', False) and driver:
         video_scraper = site_config['scrapers']['video_scraper']
-        # Check for iframe in any scraper field (e.g., title or download_url)
         iframe_config = None
         for field, config in video_scraper.items():
             if isinstance(config, dict) and 'iframe' in config:
@@ -155,25 +154,25 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
         if iframe_config:
             logger.debug(f"Piercing iframe '{iframe_config['selector']}' for M3U8 extraction")
             driver.get(url)
-            time.sleep(random.uniform(1, 2))  # Initial page load
+            time.sleep(random.uniform(1, 2))
             try:
                 iframe = driver.find_element(By.CSS_SELECTOR, iframe_config['selector'])
                 iframe_url = iframe.get_attribute("src")
                 if iframe_url:
                     logger.info(f"Found iframe with src: {iframe_url}")
                     driver.get(iframe_url)
-                    time.sleep(random.uniform(1, 2))  # Allow iframe to load
-                    url = iframe_url  # Update url to iframe src
+                    time.sleep(random.uniform(1, 2))
+                    url = iframe_url
                 else:
                     logger.debug("Iframe found but no src attribute.")
             except Exception as e:
                 logger.debug(f"No iframe found or error piercing: {e}")
-        m3u8_url, cookies = extract_m3u8_urls(driver, url, site_config)  # Pass site_config for consistency
+        m3u8_url, cookies = extract_m3u8_urls(driver, url, site_config)
         if m3u8_url:
             video_url = m3u8_url
             headers = headers or general_config.get('headers', {}).copy()
             headers["Cookie"] = cookies
-            headers["Referer"] = url  # Use the current URL (iframe or original)
+            headers["Referer"] = url
             headers["User-Agent"] = general_config.get('selenium_user_agent', random.choice(general_config['user_agents']))
             soup = fetch_page(url, general_config['user_agents'], headers, use_selenium, driver)
             if soup:
@@ -209,7 +208,8 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
         if not overwrite and file_exists_on_smb(destination_config, smb_destination_path):
             logger.info(f"File '{file_name}' exists on SMB share. Skipping.")
             return
-        temp_dir = os.path.join(os.getcwd(), 'temp_downloads')
+        # Use temporary_storage from config, default to ./.tmp_downloads
+        temp_dir = destination_config.get('temporary_storage', os.path.join(os.getcwd(), '.tmp_downloads'))
         os.makedirs(temp_dir, exist_ok=True)
         destination_path = os.path.join(temp_dir, file_name)
     else:

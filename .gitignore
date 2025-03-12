@@ -1,6 +1,7 @@
 # Personal configuration
 config.yaml
 temp_downloads/
+.temp/
 
 # Python cache and build artifacts
 __pycache__/

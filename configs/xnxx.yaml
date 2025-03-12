@@ -3,7 +3,7 @@ domain: xnxx.com
 base_url: "https://www.xnxx.com"
 selector_style: css
 no_overwrite: true
-use_selenium: false
+use_selenium: true  # Enable for dynamic loading
 
 url_encoding_rules:
   " ": "-"
@@ -29,6 +29,10 @@ modes:
     scraper: list_scraper
     url_pattern: "/tags/{tag}"
     url_pattern_pages: "/tags/{tag}/{page}"
+  pornmaker:
+    scraper: list_scraper
+    url_pattern: "/porn-maker/{pornmaker}"
+    url_pattern_pages: "/porn-maker/{pornmaker}#_videos,page-{page}"
 
 download:
   method: "yt-dlp"
@@ -48,7 +52,7 @@ scrapers:
         url:
           attribute: "href"
         title:
-          selector: "div.thumb-under a"
+          attribute: "title"  # Fixed: Use title attribute of the <a> tag
     pagination:
       next_page:
         selector: "div.pagination a.next"

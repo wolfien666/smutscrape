@@ -8,7 +8,7 @@ m3u8_mode: true
 
 modes:
   video:
-    url_pattern: "/{video}"
+    url_pattern: "/{video_id}/"
     scraper: video_scraper
   tag:
     url_pattern: "/tag/{tag}/"
@@ -48,4 +48,3 @@ scrapers:
         title:
           attribute: "text"
 
-video_key_pattern: "/"

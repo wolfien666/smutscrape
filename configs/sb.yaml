@@ -9,7 +9,7 @@ url_encoding_rules:
 
 modes:
   video:
-    url_pattern: "/{video}/video/{title}"
+    url_pattern: "/{video_id}/video/{title}"
     scraper: video_scraper
   model:
     url_pattern: "/pornstar/{model}/"
@@ -55,5 +55,4 @@ scrapers:
           selector: "a.thumb"
           attribute: "href"
 
-video_key_pattern: "/"
 name_suffix: " - SpankBang"

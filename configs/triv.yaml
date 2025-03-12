@@ -10,7 +10,7 @@ url_encoding_rules:
 
 modes:
   video:
-    url_pattern: "/video/{video}/"
+    url_pattern: "/video/{video_id}/"
     scraper: video_scraper
   search:
     url_pattern: "/search/?search={search}"

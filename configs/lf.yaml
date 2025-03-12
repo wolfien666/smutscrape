@@ -12,7 +12,7 @@ url_encoding_rules:
 
 modes:
   video:
-    url_pattern: "/watch/{video}"
+    url_pattern: "/watch/{video_id}"
     scraper: video_scraper
   search:
     url_pattern: "/search?keyword={search}"
@@ -60,4 +60,3 @@ scrapers:
         duration:
           selector: "div.duration"
 
-video_key_pattern: "/watch/"

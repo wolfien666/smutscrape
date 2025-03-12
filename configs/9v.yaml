@@ -9,7 +9,7 @@ no_overwrite: true
 
 modes:
   video:
-    url_pattern: "{video}"
+    url_pattern: "{video_id}"
     scraper: video_scraper
   search:
     url_pattern: "/?s={search}"
@@ -48,7 +48,6 @@ scrapers:
         selector: "a.next.page-numbers"
         attribute: "href"
 
-video_key_pattern: "/"
 
 url_encoding_rules:
   " ": "-"

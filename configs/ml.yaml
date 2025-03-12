@@ -11,7 +11,7 @@ url_encoding_rules:
 
 modes:
   video:
-    url_pattern: "/{video}"
+    url_pattern: "/{video_id}"
     scraper: video_scraper
   search:
     url_pattern: "/search?term={search}&type=videos&range=0&size=0&sort=date"

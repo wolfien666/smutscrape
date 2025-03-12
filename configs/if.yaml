@@ -56,4 +56,3 @@ scrapers:
         title:
           attribute: "title"
 
-video_key_pattern: "/watch/"

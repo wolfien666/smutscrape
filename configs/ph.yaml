@@ -11,7 +11,7 @@ url_encoding_rules:
 
 modes:
   video:
-    url_pattern: "/view_video.php?viewkey={video}"
+    url_pattern: "/view_video.php?viewkey={video_id}"
     scraper: video_scraper
   model:
     url_pattern: "/model/{model}/videos"
@@ -72,4 +72,3 @@ scrapers:
         selector: "li.page_next a"
         attribute: "href"
 
-video_key_pattern: "/view_video.php?viewkey="

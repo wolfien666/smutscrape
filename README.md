@@ -80,11 +80,18 @@ Run with `./scrape.py` or `scrape` if symlinked.
   scrape https://www.pornhub.com/pornstar/massy-sweet
   ```
 
-- **Incestflix: Lily LaBeau + PrimalFetish Videos 👩‍❤️‍💋‍👨🤫**
+- **Incestflix: Mother/Son/Daughter Videos, Page 69 👩‍👧‍👦**
   ```bash
-  scrape if search "Lily Labeau & PrimalFetish"
+  scrape if tag "MSD" --start_on_page 69
   # OR
-  scrape https://www.incestflix.com/tag/Lily-Labeau/and/PrimalFetish
+  scrape https://incestflix.com/tag/msd
+  ```
+
+- **FamilyPornHD: MissaX Videos 👒**
+  ```bash
+  scrape fphd studio "MissaX"
+  # OR
+  scrape https://familypornhd.com/category/missax/
   ```
 
 - **Lonefun: "Real Incest" Tag Results 🧬❣️**
@@ -106,27 +113,6 @@ Run with `./scrape.py` or `scrape` if symlinked.
   scrape https://toprealincestvideos.com/en/search/?search=sister
   ```
 
-- **FamilySexVideos: Search "Teen" 👩‍🏫**
-  ```bash
-  scrape fsv search "teen"
-  # OR
-  scrape https://familysexvideos.org/en/search/?search=teen
-  ```
-
-- **XVideos: Tag "Amateur" 🎥**
-  ```bash
-  scrape xv tags "amateur"
-  # OR
-  scrape https://www.xvideos.com/tags/amateur
-  ```
-
-- **XNXX: Channel "Naughty America" 📺**
-  ```bash
-  scrape xnxx channel "naughty-america"
-  # OR
-  scrape https://www.xnxx.com/channels/naughty-america
-  ```
-
 ### Fallback Mode 😅
 For unsupported sites, `yt-dlp` kicks in:
 ```bash
@@ -141,7 +127,7 @@ scrape https://someUnsupportedSite.com/video/12345
 |-----------|--------------------------|----------------------------------------------|
 | `9v`      | 9vids.com                | `video`, `search`, `tag`                     |
 | `fs`      | family-sex.me            | `video`, `search`, `tag`                     |
-| `fphd`    | familypornhd.com         | `video`, `tag`                               |
+| `fphd`    | familypornhd.com         | `video`, `category`, `tag`, `studio`         |
 | `fsv`     | familysexvideos.org      | `video`, `search`                            |
 | `if`      | incestflix.com           | `video`, `search`, `tag`                     |
 | `lf`      | lonefun.com              | `video`, `search`, `tag`                     |
@@ -174,7 +160,7 @@ ignored:
 ```
 
 ### Pagination 📄
-Pagination is automatic. For modes with `url_pattern_pages` (e.g., `xnxx`’s `search`), resume from a specific page:
+Pagination is automatic. For modes with `url_pattern_pages`, resume from a specific page:
 ```bash
 scrape if tag "ms" --start_on_page 69
 ```

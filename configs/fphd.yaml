@@ -20,6 +20,11 @@ modes:
     url_pattern_pages: "/page/2/?s={search}"
     max_pages: 999
     scraper: list_scraper
+  studio:
+    url_pattern: "/category/{studio}"
+    url_pattern_pages: "/category/{studio}/{page}/"
+    max_pages: 99 
+    scrape: list_scraper 
 
 download:
   method: "ffmpeg"

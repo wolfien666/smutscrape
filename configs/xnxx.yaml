@@ -1,0 +1,55 @@
+name: XNXX
+domain: xnxx.com
+base_url: "https://www.xnxx.com"
+selector_style: css
+no_overwrite: true
+use_selenium: false
+
+url_encoding_rules:
+  " ": "-"
+  "%20": "-"
+
+modes:
+  video:
+    url_pattern: "/{video}/"
+    scraper: video_scraper
+  search:
+    scraper: list_scraper
+    url_pattern: "/search/{search}"
+    url_pattern_pages: "/search/{search}/{page}"
+  channel:
+    scraper: list_scraper
+    url_pattern: "/channels/{channel}"
+    url_pattern_pages: "/channels/{channel}/{page}"
+  pornstar:
+    scraper: list_scraper
+    url_pattern: "/pornstar/{pornstar}"
+    url_pattern_pages: "/pornstar/{pornstar}/{page}"
+  tag:
+    scraper: list_scraper
+    url_pattern: "/tags/{tag}"
+    url_pattern_pages: "/tags/{tag}/{page}"
+
+download:
+  method: "yt-dlp"
+
+scrapers:
+  video_scraper:
+    title:
+      selector: "title"
+
+  list_scraper:
+    video_container:
+      selector:
+        - "div.mozaique.cust-nb-cols"
+    video_item:
+      selector: "div.thumb-under a"
+      fields:
+        url:
+          attribute: "href"
+        title:
+          selector: "div.thumb-under a"
+    pagination:
+      next_page:
+        selector: "div.pagination a.next"
+        attribute: "href"

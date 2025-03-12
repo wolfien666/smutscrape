@@ -3,7 +3,7 @@ domain: xnxx.com
 base_url: "https://www.xnxx.com"
 selector_style: css
 no_overwrite: true
-use_selenium: true  # Enable for dynamic loading
+use_selenium: true
 
 url_encoding_rules:
   " ": "-"
@@ -40,19 +40,20 @@ download:
 scrapers:
   video_scraper:
     title:
-      selector: "title"
+      selector: "h1.page-title"  # Updated
+      post_process: "lambda x: x.split(' - ')[0] if ' - ' in x else x"  # Clean title
 
   list_scraper:
     video_container:
       selector:
-        - "div.mozaique.cust-nb-cols"
+        - "div#psvideos div.mozaique.cust-nb-cols"
     video_item:
       selector: "div.thumb-under a"
       fields:
         url:
           attribute: "href"
         title:
-          attribute: "title"  # Fixed: Use title attribute of the <a> tag
+          attribute: "title"
     pagination:
       next_page:
         selector: "div.pagination a.next"

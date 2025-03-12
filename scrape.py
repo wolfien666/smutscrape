@@ -51,40 +51,40 @@ def process_title(title, invalid_chars):
 	return title
 
 def construct_filename(title, site_config, general_config):
-    prefix = site_config.get('name_prefix', '')
-    suffix = site_config.get('name_suffix', '')
-    extension = general_config['file_naming']['extension']
-    invalid_chars = general_config['file_naming']['invalid_chars']
-    max_chars = general_config['file_naming'].get('max_chars', 255)  # Default to 255 if not specified
-    
-    # Process title by removing invalid characters
-    processed_title = process_title(title, invalid_chars)
-    
-    # Calculate available length for the title
-    fixed_length = len(prefix) + len(suffix) + len(extension)
-    max_title_chars = min(max_chars, 255) - fixed_length  # Hard cap at 255 chars total
-    
-    if max_title_chars <= 0:
-        logger.warning(f"Fixed filename parts ({fixed_length} chars) exceed max_chars ({max_chars}); truncating to fit.")
-        max_title_chars = max(1, 255 - fixed_length)  # Ensure at least 1 char for title if possible
-    
-    # Truncate title if necessary
-    if len(processed_title) > max_title_chars:
-        processed_title = processed_title[:max_title_chars].rstrip()
-        logger.debug(f"Truncated title to {max_title_chars} chars: {processed_title}")
-    
-    # Construct final filename
-    filename = f"{prefix}{processed_title}{suffix}{extension}"
-    
-    # Double-check byte length (Linux limit is 255 bytes, not chars)
-    while len(filename.encode('utf-8')) > 255:
-        excess = len(filename.encode('utf-8')) - 255
-        trim_chars = excess // 4 + 1  # Rough estimate for UTF-8; adjust conservatively
-        processed_title = processed_title[:-trim_chars].rstrip()
-        filename = f"{prefix}{processed_title}{suffix}{extension}"
-        logger.debug(f"Filename exceeded 255 bytes; trimmed to: {filename}")
-    
-    return filename
+	prefix = site_config.get('name_prefix', '')
+	suffix = site_config.get('name_suffix', '')
+	extension = general_config['file_naming']['extension']
+	invalid_chars = general_config['file_naming']['invalid_chars']
+	max_chars = general_config['file_naming'].get('max_chars', 255)  # Default to 255 if not specified
+	
+	# Process title by removing invalid characters
+	processed_title = process_title(title, invalid_chars)
+	
+	# Calculate available length for the title
+	fixed_length = len(prefix) + len(suffix) + len(extension)
+	max_title_chars = min(max_chars, 255) - fixed_length  # Hard cap at 255 chars total
+	
+	if max_title_chars <= 0:
+		logger.warning(f"Fixed filename parts ({fixed_length} chars) exceed max_chars ({max_chars}); truncating to fit.")
+		max_title_chars = max(1, 255 - fixed_length)  # Ensure at least 1 char for title if possible
+	
+	# Truncate title if necessary
+	if len(processed_title) > max_title_chars:
+		processed_title = processed_title[:max_title_chars].rstrip()
+		logger.debug(f"Truncated title to {max_title_chars} chars: {processed_title}")
+	
+	# Construct final filename
+	filename = f"{prefix}{processed_title}{suffix}{extension}"
+	
+	# Double-check byte length (Linux limit is 255 bytes, not chars)
+	while len(filename.encode('utf-8')) > 255:
+		excess = len(filename.encode('utf-8')) - 255
+		trim_chars = excess // 4 + 1  # Rough estimate for UTF-8; adjust conservatively
+		processed_title = processed_title[:-trim_chars].rstrip()
+		filename = f"{prefix}{processed_title}{suffix}{extension}"
+		logger.debug(f"Filename exceeded 255 bytes; trimmed to: {filename}")
+	
+	return filename
 
 def construct_url(base_url, pattern, site_config, **kwargs):
 	encoding_rules = site_config.get('url_encoding_rules', {})
@@ -414,10 +414,14 @@ def fetch_page(url, user_agents, headers, use_selenium=False, driver=None, retry
 			return None
 		logger.debug(f"Fetching URL (selenium): {url}")
 		try:
-			# Use iframe piercing if enabled in site_config
-			final_url = pierce_iframe(driver, url, globals().get('site_config', {}))
-			logger.debug(f"Final URL after iframe piercing: {final_url}")
-			time.sleep(random.uniform(2, 4))  # Additional wait after iframe load
+			site_config = globals().get('site_config', {})
+			if site_config.get('iframe', {}).get('enabled'):
+				final_url = pierce_iframe(driver, url, site_config)
+			else:
+				driver.get(url)
+				final_url = url
+			logger.debug(f"Final URL after iframe handling: {final_url}")
+			time.sleep(random.uniform(2, 4))
 			return BeautifulSoup(driver.page_source, 'html.parser')
 		except Exception as e:
 			if retry_count < 2 and 'general_config' in globals():
@@ -471,99 +475,99 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 	return data
 
 def process_list_page(url, site_config, general_config, current_page=1, mode=None, identifier=None, overwrite_files=False, headers=None):
-    use_selenium = site_config.get('use_selenium', False)
-    driver = get_selenium_driver(general_config) if use_selenium else None
-    soup = fetch_page(url, general_config['user_agents'], headers if headers else {}, use_selenium, driver)
-    if soup is None:
-        return None, None
-    
-    list_scraper = site_config['scrapers']['list_scraper']
-    base_url = site_config['base_url']
-    container = None
-    for selector in list_scraper['video_container']['selector']:
-        container = soup.select_one(selector)
-        if container:
-            break
-    if not container:
-        logger.error(f"Could not find video container at {url}")
-        return None, None
-    
-    video_elements = container.select(list_scraper['video_item']['selector'])
-    if not video_elements:
-        logger.info(f"No videos found on page {current_page}")
-        return None, None
-    
-    for video_element in video_elements:
-        video_data = extract_data(video_element, list_scraper['video_item']['fields'], driver, site_config)
-        if 'url' in video_data:
-            video_url = video_data['url']
-            if not video_url.startswith(('http://', 'https://')):
-                video_url = f"http:{video_url}" if video_url.startswith('//') else urllib.parse.urljoin(base_url, video_url)
-        elif 'video_key' in video_data:
-            video_url = construct_url(base_url, site_config['modes']['video']['url_pattern'], site_config, video_id=video_data['video_key'])
-        else:
-            logger.warning("Unable to construct video URL")
-            continue
-        video_title = video_data.get('title', '') or video_element.text.strip()
-        logger.info(f"Found video: {video_title} - {video_url}")
-        process_video_page(video_url, site_config, general_config, overwrite_files, headers)
-    
-    # Determine pagination method
-    if mode not in site_config['modes']:
-        logger.debug(f"No pagination for mode '{mode}' as it’s not defined in site_config['modes']")
-        return None, None
-    
-    mode_config = site_config['modes'][mode]
-    scraper_pagination = list_scraper.get('pagination', {})
-    url_pattern_pages = mode_config.get('url_pattern_pages')
-    max_pages = mode_config.get('max_pages', scraper_pagination.get('max_pages', float('inf')))
-    
-    if current_page >= max_pages:
-        logger.debug(f"Stopping pagination: current_page={current_page} >= max_pages={max_pages}")
-        return None, None
-    
-    next_url = None
-    if url_pattern_pages:
-        # URL pattern-based pagination
-        if scraper_pagination:
-            logger.warning(f"Both 'url_pattern_pages' and 'list_scraper.pagination' are defined; prioritizing 'url_pattern_pages'")
-        encoded_identifier = identifier
-        for original, replacement in site_config.get('url_encoding_rules', {}).items():
-            encoded_identifier = encoded_identifier.replace(original, replacement)
-        next_url = construct_url(
-            base_url,
-            url_pattern_pages,
-            site_config,
-            **{mode: encoded_identifier, 'page': current_page + 1}
-        )
-        logger.debug(f"Generated next page URL (pattern-based): {next_url}")
-    elif scraper_pagination:
-        # Scraper-based pagination
-        if 'subsequent_pages' in scraper_pagination:
-            encoded_identifier = identifier
-            for original, replacement in site_config.get('url_encoding_rules', {}).items():
-                encoded_identifier = encoded_identifier.replace(original, replacement)
-            url_pattern = mode_config['url_pattern']
-            next_url = scraper_pagination['subsequent_pages'].format(
-                url_pattern=url_pattern, page=current_page + 1, search=encoded_identifier
-            )
-            next_url = urllib.parse.urljoin(base_url, next_url)
-            logger.debug(f"Generated next page URL (subsequent_pages): {next_url}")
-        elif 'next_page' in scraper_pagination:
-            next_page_config = scraper_pagination['next_page']
-            next_page = soup.select_one(next_page_config.get('selector', ''))
-            if next_page:
-                next_url = next_page.get(next_page_config.get('attribute', 'href'))
-                if next_url and not next_url.startswith(('http://', 'https://')):
-                    next_url = urllib.parse.urljoin(base_url, next_url)
-                logger.debug(f"Found next page URL (selector-based): {next_url}")
-            else:
-                logger.debug(f"No 'next' element found with selector '{next_page_config.get('selector')}'")
-    
-    if next_url:
-        return next_url, current_page + 1
-    logger.debug("No next page URL generated; stopping pagination")
-    return None, None
+	use_selenium = site_config.get('use_selenium', False)
+	driver = get_selenium_driver(general_config) if use_selenium else None
+	soup = fetch_page(url, general_config['user_agents'], headers if headers else {}, use_selenium, driver)
+	if soup is None:
+		return None, None
+	
+	list_scraper = site_config['scrapers']['list_scraper']
+	base_url = site_config['base_url']
+	container = None
+	for selector in list_scraper['video_container']['selector']:
+		container = soup.select_one(selector)
+		if container:
+			break
+	if not container:
+		logger.error(f"Could not find video container at {url}")
+		return None, None
+	
+	video_elements = container.select(list_scraper['video_item']['selector'])
+	if not video_elements:
+		logger.info(f"No videos found on page {current_page}")
+		return None, None
+	
+	for video_element in video_elements:
+		video_data = extract_data(video_element, list_scraper['video_item']['fields'], driver, site_config)
+		if 'url' in video_data:
+			video_url = video_data['url']
+			if not video_url.startswith(('http://', 'https://')):
+				video_url = f"http:{video_url}" if video_url.startswith('//') else urllib.parse.urljoin(base_url, video_url)
+		elif 'video_key' in video_data:
+			video_url = construct_url(base_url, site_config['modes']['video']['url_pattern'], site_config, video_id=video_data['video_key'])
+		else:
+			logger.warning("Unable to construct video URL")
+			continue
+		video_title = video_data.get('title', '') or video_element.text.strip()
+		logger.info(f"Found video: {video_title} - {video_url}")
+		process_video_page(video_url, site_config, general_config, overwrite_files, headers)
+	
+	# Determine pagination method
+	if mode not in site_config['modes']:
+		logger.debug(f"No pagination for mode '{mode}' as it’s not defined in site_config['modes']")
+		return None, None
+	
+	mode_config = site_config['modes'][mode]
+	scraper_pagination = list_scraper.get('pagination', {})
+	url_pattern_pages = mode_config.get('url_pattern_pages')
+	max_pages = mode_config.get('max_pages', scraper_pagination.get('max_pages', float('inf')))
+	
+	if current_page >= max_pages:
+		logger.debug(f"Stopping pagination: current_page={current_page} >= max_pages={max_pages}")
+		return None, None
+	
+	next_url = None
+	if url_pattern_pages:
+		# URL pattern-based pagination
+		if scraper_pagination:
+			logger.warning(f"Both 'url_pattern_pages' and 'list_scraper.pagination' are defined; prioritizing 'url_pattern_pages'")
+		encoded_identifier = identifier
+		for original, replacement in site_config.get('url_encoding_rules', {}).items():
+			encoded_identifier = encoded_identifier.replace(original, replacement)
+		next_url = construct_url(
+			base_url,
+			url_pattern_pages,
+			site_config,
+			**{mode: encoded_identifier, 'page': current_page + 1}
+		)
+		logger.debug(f"Generated next page URL (pattern-based): {next_url}")
+	elif scraper_pagination:
+		# Scraper-based pagination
+		if 'subsequent_pages' in scraper_pagination:
+			encoded_identifier = identifier
+			for original, replacement in site_config.get('url_encoding_rules', {}).items():
+				encoded_identifier = encoded_identifier.replace(original, replacement)
+			url_pattern = mode_config['url_pattern']
+			next_url = scraper_pagination['subsequent_pages'].format(
+				url_pattern=url_pattern, page=current_page + 1, search=encoded_identifier
+			)
+			next_url = urllib.parse.urljoin(base_url, next_url)
+			logger.debug(f"Generated next page URL (subsequent_pages): {next_url}")
+		elif 'next_page' in scraper_pagination:
+			next_page_config = scraper_pagination['next_page']
+			next_page = soup.select_one(next_page_config.get('selector', ''))
+			if next_page:
+				next_url = next_page.get(next_page_config.get('attribute', 'href'))
+				if next_url and not next_url.startswith(('http://', 'https://')):
+					next_url = urllib.parse.urljoin(base_url, next_url)
+				logger.debug(f"Found next page URL (selector-based): {next_url}")
+			else:
+				logger.debug(f"No 'next' element found with selector '{next_page_config.get('selector')}'")
+	
+	if next_url:
+		return next_url, current_page + 1
+	logger.debug("No next page URL generated; stopping pagination")
+	return None, None
 
 def should_ignore_video(data, ignored_terms):
 	for term in ignored_terms:
@@ -867,124 +871,124 @@ def match_url_to_mode(url, site_config):
 	return None, None
 
 def main():
-    parser = argparse.ArgumentParser(description='Video Scraper')
-    parser.add_argument('args', nargs='+', help='Site identifier and mode, or direct URL')
-    parser.add_argument('--debug', action='store_true', help='Enable debug logging')
-    parser.add_argument('--overwrite_files', action='store_true', help='Overwrite existing files')
-    parser.add_argument('--start_on_page', type=int, default=1, help='Starting page number for URL-based pagination')
-    args = parser.parse_args()
-    log_level = "DEBUG" if args.debug else "INFO"
-    logger.remove()
-    logger.add(sys.stderr, level=log_level)
-    general_config = load_config(os.path.join(SCRIPT_DIR, 'config.yaml'))
-    
-    try:
-        if len(args.args) == 1 and args.args[0].startswith(('http://', 'https://')):
-            url = args.args[0]
-            matched_site_config = None
-            for site_config_file in os.listdir(CONFIG_DIR):
-                if site_config_file.endswith('.yaml'):
-                    site_config = load_site_config(site_config_file[:-5])
-                    if site_config['base_url'] in url:
-                        matched_site_config = site_config
-                        break
-            if matched_site_config:
-                headers = general_config.get('headers', {}).copy()
-                headers['User-Agent'] = random.choice(general_config['user_agents'])
-                mode, scraper = match_url_to_mode(url, matched_site_config)
-                if mode:
-                    logger.info(f"Matched URL to mode '{mode}' with scraper '{scraper}'")
-                    if mode == 'video':
-                        process_video_page(url, matched_site_config, general_config, args.overwrite_files, headers)
-                    else:
-                        identifier = url.split('/')[-1].split('.')[0]  # Adjust based on URL structure
-                        current_page = args.start_on_page
-                        mode_config = matched_site_config['modes'][mode]
-                        # Construct initial URL based on start_on_page
-                        if current_page > 1 and mode_config.get('url_pattern_pages'):
-                            encoded_identifier = identifier
-                            for original, replacement in matched_site_config.get('url_encoding_rules', {}).items():
-                                encoded_identifier = encoded_identifier.replace(original, replacement)
-                            url = construct_url(
-                                matched_site_config['base_url'],
-                                mode_config['url_pattern_pages'],
-                                matched_site_config,
-                                **{mode: encoded_identifier, 'page': current_page}
-                            )
-                            logger.info(f"Starting at custom page {current_page}: {url}")
-                        # If starting at page 1, use url_pattern as is (no change needed)
-                        while url:
-                            next_page, new_page_number = process_list_page(
-                                url, matched_site_config, general_config, current_page,
-                                mode, identifier, args.overwrite_files, headers
-                            )
-                            if next_page is None:
-                                break
-                            url = next_page
-                            current_page = new_page_number
-                            time.sleep(general_config['sleep']['between_pages'])
-                else:
-                    logger.warning("URL didn't match any mode; assuming video page.")
-                    process_video_page(url, matched_site_config, general_config, args.overwrite_files, headers)
-            else:
-                process_fallback_download(url, general_config, args.overwrite_files)
-    
-        elif len(args.args) >= 3:
-            site, mode, identifier = args.args[0], args.args[1], ' '.join(args.args[2:])
-            site_config = load_site_config(site)
-            headers = general_config.get('headers', {})
-            handle_vpn(general_config, 'start')
-            if mode not in site_config['modes']:
-                logger.error(f"Unsupported mode '{mode}' for site '{site}'")
-                sys.exit(1)
-            mode_config = site_config['modes'][mode]
-            current_page = args.start_on_page
-            # Construct initial URL: use url_pattern for page 1, url_pattern_pages for > 1
-            if current_page > 1 and mode_config.get('url_pattern_pages'):
-                url = construct_url(
-                    site_config['base_url'],
-                    mode_config['url_pattern_pages'],
-                    site_config,
-                    **{mode: identifier, 'page': current_page}
-                )
-                logger.info(f"Starting at custom page {current_page}: {url}")
-            else:
-                url = construct_url(
-                    site_config['base_url'],
-                    mode_config['url_pattern'],
-                    site_config,
-                    **{mode: identifier} if mode != 'video' else {'video_id': identifier}
-                )
-                if current_page > 1:
-                    logger.warning(f"Starting page {current_page} requested, but no 'url_pattern_pages' defined; starting at page 1")
-            if mode == 'video':
-                process_video_page(url, site_config, general_config, args.overwrite_files, headers)
-            else:
-                while url:
-                    next_page, new_page_number = process_list_page(
-                        url, site_config, general_config, current_page, mode,
-                        identifier, args.overwrite_files, headers
-                    )
-                    if next_page is None:
-                        break
-                    url = next_page
-                    current_page = new_page_number
-                    time.sleep(general_config['sleep']['between_pages'])
-        else:
-            logger.error("Invalid arguments. Provide site, mode, and identifier, or a URL.")
-            sys.exit(1)
-    except KeyboardInterrupt:
-        logger.warning("Interrupted by user.")
-    except Exception as e:
-        logger.error(f"Error: {e}")
-    finally:
-        if 'selenium_driver' in general_config and general_config['selenium_driver'] is not None:
-            try:
-                general_config['selenium_driver'].quit()
-                logger.info("Selenium driver closed cleanly.")
-            except Exception as e:
-                logger.warning(f"Failed to close Selenium driver: {e}")
-        logger.info("Scraping completed.")
+	parser = argparse.ArgumentParser(description='Video Scraper')
+	parser.add_argument('args', nargs='+', help='Site identifier and mode, or direct URL')
+	parser.add_argument('--debug', action='store_true', help='Enable debug logging')
+	parser.add_argument('--overwrite_files', action='store_true', help='Overwrite existing files')
+	parser.add_argument('--start_on_page', type=int, default=1, help='Starting page number for URL-based pagination')
+	args = parser.parse_args()
+	log_level = "DEBUG" if args.debug else "INFO"
+	logger.remove()
+	logger.add(sys.stderr, level=log_level)
+	general_config = load_config(os.path.join(SCRIPT_DIR, 'config.yaml'))
+	
+	try:
+		if len(args.args) == 1 and args.args[0].startswith(('http://', 'https://')):
+			url = args.args[0]
+			matched_site_config = None
+			for site_config_file in os.listdir(CONFIG_DIR):
+				if site_config_file.endswith('.yaml'):
+					site_config = load_site_config(site_config_file[:-5])
+					if site_config['base_url'] in url:
+						matched_site_config = site_config
+						break
+			if matched_site_config:
+				headers = general_config.get('headers', {}).copy()
+				headers['User-Agent'] = random.choice(general_config['user_agents'])
+				mode, scraper = match_url_to_mode(url, matched_site_config)
+				if mode:
+					logger.info(f"Matched URL to mode '{mode}' with scraper '{scraper}'")
+					if mode == 'video':
+						process_video_page(url, matched_site_config, general_config, args.overwrite_files, headers)
+					else:
+						identifier = url.split('/')[-1].split('.')[0]  # Adjust based on URL structure
+						current_page = args.start_on_page
+						mode_config = matched_site_config['modes'][mode]
+						# Construct initial URL based on start_on_page
+						if current_page > 1 and mode_config.get('url_pattern_pages'):
+							encoded_identifier = identifier
+							for original, replacement in matched_site_config.get('url_encoding_rules', {}).items():
+								encoded_identifier = encoded_identifier.replace(original, replacement)
+							url = construct_url(
+								matched_site_config['base_url'],
+								mode_config['url_pattern_pages'],
+								matched_site_config,
+								**{mode: encoded_identifier, 'page': current_page}
+							)
+							logger.info(f"Starting at custom page {current_page}: {url}")
+						# If starting at page 1, use url_pattern as is (no change needed)
+						while url:
+							next_page, new_page_number = process_list_page(
+								url, matched_site_config, general_config, current_page,
+								mode, identifier, args.overwrite_files, headers
+							)
+							if next_page is None:
+								break
+							url = next_page
+							current_page = new_page_number
+							time.sleep(general_config['sleep']['between_pages'])
+				else:
+					logger.warning("URL didn't match any mode; assuming video page.")
+					process_video_page(url, matched_site_config, general_config, args.overwrite_files, headers)
+			else:
+				process_fallback_download(url, general_config, args.overwrite_files)
+	
+		elif len(args.args) >= 3:
+			site, mode, identifier = args.args[0], args.args[1], ' '.join(args.args[2:])
+			site_config = load_site_config(site)
+			headers = general_config.get('headers', {})
+			handle_vpn(general_config, 'start')
+			if mode not in site_config['modes']:
+				logger.error(f"Unsupported mode '{mode}' for site '{site}'")
+				sys.exit(1)
+			mode_config = site_config['modes'][mode]
+			current_page = args.start_on_page
+			# Construct initial URL: use url_pattern for page 1, url_pattern_pages for > 1
+			if current_page > 1 and mode_config.get('url_pattern_pages'):
+				url = construct_url(
+					site_config['base_url'],
+					mode_config['url_pattern_pages'],
+					site_config,
+					**{mode: identifier, 'page': current_page}
+				)
+				logger.info(f"Starting at custom page {current_page}: {url}")
+			else:
+				url = construct_url(
+					site_config['base_url'],
+					mode_config['url_pattern'],
+					site_config,
+					**{mode: identifier} if mode != 'video' else {'video_id': identifier}
+				)
+				if current_page > 1:
+					logger.warning(f"Starting page {current_page} requested, but no 'url_pattern_pages' defined; starting at page 1")
+			if mode == 'video':
+				process_video_page(url, site_config, general_config, args.overwrite_files, headers)
+			else:
+				while url:
+					next_page, new_page_number = process_list_page(
+						url, site_config, general_config, current_page, mode,
+						identifier, args.overwrite_files, headers
+					)
+					if next_page is None:
+						break
+					url = next_page
+					current_page = new_page_number
+					time.sleep(general_config['sleep']['between_pages'])
+		else:
+			logger.error("Invalid arguments. Provide site, mode, and identifier, or a URL.")
+			sys.exit(1)
+	except KeyboardInterrupt:
+		logger.warning("Interrupted by user.")
+	except Exception as e:
+		logger.error(f"Error: {e}")
+	finally:
+		if 'selenium_driver' in general_config and general_config['selenium_driver'] is not None:
+			try:
+				general_config['selenium_driver'].quit()
+				logger.info("Selenium driver closed cleanly.")
+			except Exception as e:
+				logger.warning(f"Failed to close Selenium driver: {e}")
+		logger.info("Scraping completed.")
 
 if __name__ == "__main__":
 	main()

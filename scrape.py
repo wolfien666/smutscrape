@@ -70,9 +70,14 @@ def construct_url(base_url, pattern, site_config, **kwargs):
     path = pattern.format(**encoded_kwargs)
     return urllib.parse.urljoin(base_url, path)
 
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+
 def get_selenium_driver(general_config, force_new=False):
-    # Get chromedriver_path from the 'selenium' sub-dict, with a fallback
-    chromedriver = general_config.get('selenium', {}).get('chromedriver_path', '/usr/local/bin/chromedriver')
+    selenium_config = general_config.get('selenium', {})
+    chromedriver_path = selenium_config.get('chromedriver_path')  # None if not specified
     
     create_new = force_new or 'selenium_driver' not in general_config
     if not create_new:
@@ -89,6 +94,7 @@ def get_selenium_driver(general_config, force_new=False):
                 general_config['selenium_driver'].quit()
             except:
                 pass
+        
         chrome_options = Options()
         chrome_options.add_argument("--headless")
         chrome_options.add_argument("--no-sandbox")
@@ -97,22 +103,29 @@ def get_selenium_driver(general_config, force_new=False):
         chrome_options.add_argument("--window-size=1920,1080")
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
         chrome_options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
-    
-        selenium_config = general_config.get('selenium', {'mode': 'local'})
+        
         chrome_binary = selenium_config.get('chrome_binary')
         if chrome_binary:
             chrome_options.binary_location = chrome_binary
             logger.debug(f"Set Chrome binary location to: {chrome_binary}")
-    
+        
         try:
-            logger.info(f"Using ChromeDriver at: {chromedriver}")
-            service = Service(executable_path=chromedriver)
+            if chromedriver_path:
+                # Use user-specified ChromeDriver path
+                logger.info(f"Using user-specified ChromeDriver at: {chromedriver_path}")
+                service = Service(executable_path=chromedriver_path)
+            else:
+                # Fallback to webdriver_manager
+                logger.info("No chromedriver_path specified; using webdriver_manager to fetch ChromeDriver")
+                service = Service(ChromeDriverManager().install())
+                logger.info(f"Using ChromeDriver at: {service.path}")
+            
             driver = webdriver.Chrome(service=service, options=chrome_options)
             logger.info(f"Initialized Selenium driver with Chrome version: {driver.capabilities['browserVersion']}")
         except Exception as e:
             logger.error(f"Failed to initialize Selenium driver: {e}")
             return None
-    
+        
         driver.execute_script("""
             (function() {
                 let open = XMLHttpRequest.prototype.open;
@@ -131,6 +144,7 @@ def get_selenium_driver(general_config, force_new=False):
     general_config['selenium_user_agent'] = user_agent
     logger.debug(f"Selenium User-Agent: {user_agent}")
     return general_config['selenium_driver']
+
 
 def process_video_page(url, site_config, general_config, overwrite_files=False, headers=None):
     global last_vpn_action_time
@@ -227,7 +241,7 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
         elif destination_config['type'] == 'local':
             apply_permissions(destination_path, destination_config)
     time.sleep(general_config['sleep']['between_videos'])
-    
+
 
 def download_with_ffmpeg(url, destination_path, general_config, headers=None):
     headers = headers or {}

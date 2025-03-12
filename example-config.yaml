@@ -38,8 +38,8 @@ selenium:
   mode: "local"                       # "local" or "remote" (e.g., Docker)
   # chromedriver_path: "/usr/bin/chromedriver"  # Optional: Path to ChromeDriver; omit to use webdriver-manager
   # chrome_binary: "/usr/lib/chromium/chromium"  # Optional: Path to Chrome binary (e.g., for Debian)
-  # host: "127.0.0.1"                  # Remote Selenium host (if mode is "remote")
-  # port: "4444"                       # Remote Selenium port (if mode is "remote")
+  host: "127.0.0.1"                  # Remote Selenium host (if mode is "remote")
+  port: "4444"                       # Remote Selenium port (if mode is "remote")
 
 # VPN settings for anonymous scraping (omit or set enabled: false if not used)
 vpn:

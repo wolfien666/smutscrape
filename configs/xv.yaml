@@ -16,14 +16,14 @@ modes:
   search:
     url_pattern: "/?k={search}"
     scraper: list_scraper
-  channels:
-    url_pattern: "/channels/{channels}"
+  channel:
+    url_pattern: "/channels/{channel}"
     scraper: list_scraper
-  models:
-    url_pattern: "/models/{models}"
+  model:
+    url_pattern: "/models/{model}"
     scraper: list_scraper
-  tags:
-    url_pattern: "/tags/{tags}"
+  tag:
+    url_pattern: "/tags/{tag}"
     scraper: list_scraper
 
 download:

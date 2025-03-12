@@ -10,6 +10,7 @@ A Python-based tool to scrape and download adult content from various websites s
 - [wget](https://www.gnu.org/software/wget/) or [curl](https://curl.se/) for alternative downloads
 - [ffmpeg](https://ffmpeg.org/) for M3U8 stream downloads
 - Optional: [Selenium](https://pypi.org/project/selenium/) + [Chromedriver](https://chromedriver.chromium.org/) for JS-heavy sites, iframe piercing, and M3U8 URL extraction 🧑🏼‍💻
+- Optional: [webdriver-manager](https://pypi.org/project/webdriver-manager/) for automatic ChromeDriver management (included in `requirements.txt`)
 - Optional: Conda for environment management 🐼
 
 All Python dependencies are in `requirements.txt`.
@@ -26,30 +27,31 @@ All Python dependencies are in `requirements.txt`.
 
 2. **Install Dependencies 🚀**
    - **With Conda (Recommended):**
-     ```bash
-     conda create -n smutscrape python=3.10.13
-     conda activate smutscrape
-     pip install -r requirements.txt
-     ```
+	 ```bash
+	 conda create -n smutscrape python=3.10.13
+	 conda activate smutscrape
+	 pip install -r requirements.txt
+	 ```
    - **With pip:**
-     ```bash
-     pip3 install -r requirements.txt
-     ```
+	 ```bash
+	 pip3 install -r requirements.txt
+	 ```
 
    Install additional tools:
    ```bash
    # On Ubuntu/Debian
-   sudo apt-get install yt-dlp wget curl ffmpeg
+   sudo apt-get install yt-dlp wget curl ffmpeg chromium  # chromium provides Chrome
    # On macOS with Homebrew
-   brew install yt-dlp wget curl ffmpeg
+   brew install yt-dlp wget curl ffmpeg google-chrome
    ```
 
    For Selenium (optional):
-   - Install Chromedriver manually or via `webdriver_manager` (included in `requirements.txt`).
-   - Or run a Selenium Chrome container:
-     ```bash
-     docker run -d -p 4444:4444 --shm-size=2g --name selenium-chrome selenium/standalone-chrome
-     ```
+   - By default, `webdriver-manager` auto-downloads ChromeDriver matching your Chrome version.
+   - Alternatively, install ChromeDriver manually (e.g., via `brew install chromedriver` on macOS or `sudo apt-get install chromium-driver` on Debian) and specify the path in `config.yaml`.
+   - Or use a Selenium Chrome container:
+	 ```bash
+	 docker run -d -p 4444:4444 --shm-size=2g --name selenium-chrome selenium/standalone-chrome
+	 ```
 
 3. **Configure `config.yaml` ⚙️**
    ```bash
@@ -60,7 +62,7 @@ All Python dependencies are in `requirements.txt`.
    - `download_destinations` 💾 (e.g., local, SMB)
    - `ignored` 🚫 (terms to skip)
    - `vpn` 🤫 (for privacy)
-   - `selenium.chromedriver_path` ⚙️ (if using Selenium)
+   - `selenium.chromedriver_path` ⚙️ (optional; overrides `webdriver-manager`)
 
 4. **Make Executable 🚀**
    ```bash
@@ -159,12 +161,14 @@ For JS-heavy sites or M3U8 streams:
   - **Pierce Iframes**: Extracts URLs from iframe `src` (e.g., `familypornhd.com`).
   - **Gather M3U8 URLs**: Captures `.m3u8` streams via network logs (requires `m3u8_mode: true`).
 - Configure in `config.yaml`:
-  ```yaml
-  selenium:
-    chromedriver_path: "/usr/local/bin/chromedriver"
-    mode: "local"  # or "remote" for Docker
-    chrome_binary: "/path/to/chrome"  # Optional
-  ```
+  - By default, `webdriver-manager` auto-downloads ChromeDriver if `chromedriver_path` is omitted.
+  - Specify `chromedriver_path` to override (e.g., for manual installs):
+	```yaml
+	selenium:
+	  mode: "local"  # or "remote" for Docker
+	  chromedriver_path: "/usr/bin/chromedriver"  # Optional, e.g., Debian path
+	  chrome_binary: "/usr/lib/chromium/chromium"  # Optional, e.g., Debian Chrome
+	```
 
 ### Filtering Content 🚫
 Skip unwanted videos by adding terms to `ignored` in `config.yaml`:
@@ -199,12 +203,12 @@ Prioritize storage options:
 ```yaml
 download_destinations:
   - type: smb
-    server: "192.168.50.5"
-    share: "Media"
-    username: "user"
-    password: "pass"
+	server: "192.168.50.5"
+	share: "Media"
+	username: "user"
+	password: "pass"
   - type: local
-    path: "~/.xxx"
+	path: "~/.xxx"
 ```
 The first working destination is used.
 

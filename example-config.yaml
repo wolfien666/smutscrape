@@ -1,65 +1,78 @@
-download_destinations: # This is an ordered list of priorities. The script will download to the first destination that it is able to successfully.
-  - type: smb # Omit this section if you're not using an SMB share
-    server: "192.168.50.5" # Replace this with the IP of your SMB share if you're using one
-    share: "Media" # Replace this with the name of your SMB share if you're using one
-    path: "XXX" # Replace this with the folder on your SMB share where videos should be saved
-    username: "SMB_User" # Replace this with the SMB username
-    password: "SMB_Password" # Replace this with the SMB password
-    permissions: # Optionally, specify user, group, and RW permissions
-      uid: 1000 # Numerical user ID
-      gid: 3003 # Numerical group ID (media group)
-      mode: "750" # File permissions
-  - type: webdav # Omit this section if you're not using a webdav share
-    url: "https://example.com/webdav" # Replace this with the URL to your webdav share
-    path: "videos" # Replace this with the folder on your webdav share where videos should be saved
-    username: "user" # Replace this with the webdav username
-    password: "password" # Replace this with the webdav password
-  - type: local
-    path: "~/.xxx" # Replace this with the local folder where videos should be saved
+# Where to save downloaded files. The script tries these destinations in order until one works.
+download_destinations:
+  # SMB share (omit if not needed)
+  - type: smb
+    server: "192.168.50.5"      # IP or hostname of your SMB server
+    share: "Media"              # Name of the SMB share
+    path: "XXX"                 # Folder within the share to save videos
+    username: "SMB_User"        # SMB username
+    password: "SMB_Password"    # SMB password
+    permissions:                # Optional: Set file ownership and permissions
+      uid: 1000                 # User ID (numeric)
+      gid: 3003                 # Group ID (numeric, e.g., media group)
+      mode: "750"               # Permissions (e.g., rwxr-x---)
 
+  # WebDAV share (omit if not needed)
+  - type: webdav
+    url: "https://example.com/webdav"  # Full URL to your WebDAV server
+    path: "videos"                    # Folder within WebDAV to save videos
+    username: "user"                  # WebDAV username
+    password: "password"              # WebDAV password
+
+  # Local filesystem (default fallback)
+  - type: local
+    path: "~/.xxx"                    # Local folder to save videos (e.g., /home/user/.xxx)
+
+# Whether to overwrite existing files (default: false preserves files)
 overwrite_files: false
 
-ignored: # The script will avoid videos with these tags.
+# Tags to skip during scraping (case-insensitive)
+ignored:
   - "JOI"
   - "Virtual Sex"
   - "Scat"
 
+# Selenium configuration for sites requiring JavaScript or M3U8 streams
 selenium:
-  mode: "local"
-  chromedriver_path: "/usr/local/bin/chromedriver"
-  chrome_binary: "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
-  host: "10.13.37.11" # Only used if mode is "remote"
-  port: "4444" # Only used if mode is "remote"
+  mode: "local"                       # "local" or "remote" (e.g., Docker)
+  # chromedriver_path: "/usr/bin/chromedriver"  # Optional: Path to ChromeDriver; omit to use webdriver-manager
+  # chrome_binary: "/usr/lib/chromium/chromium"  # Optional: Path to Chrome binary (e.g., for Debian)
+  host: "127.0.0.1"                  # Remote Selenium host (if mode is "remote")
+  port: "4444"                       # Remote Selenium port (if mode is "remote")
 
-vpn: #
-  enabled: true
-  vpn_bin: "/usr/bin/protonvpn-cli" # Replace this with the path to your VPN, if used, and update the keys below accordingly.
-  start_cmd: "{vpn_bin} connect"
-  stop_cmd: "{vpn_bin} disconnect"
-  new_node_cmd: "{vpn_bin} connect --random"
-  new_node_time: 300
+# VPN settings for anonymous scraping (omit or set enabled: false if not used)
+vpn:
+  enabled: false                     # Set to true to enable VPN
+  vpn_bin: "/usr/bin/vpn-client"     # Path to VPN executable (e.g., /usr/bin/protonvpn-cli)
+  start_cmd: "{vpn_bin} connect"     # Command to start VPN
+  stop_cmd: "{vpn_bin} disconnect"   # Command to stop VPN
+  new_node_cmd: "{vpn_bin} connect --random"  # Command to switch VPN node
+  new_node_time: 300                 # Seconds between node switches (e.g., 5 minutes)
 
-## STOP! There's generally no need to configure anything past here. ##
+# ---- Advanced settings below (usually no need to change) ----
 
+# Timing delays to avoid overwhelming sites
 sleep:
-  between_videos: 3
-  between_pages: 5
+  between_videos: 3                  # Seconds to wait between video downloads
+  between_pages: 5                   # Seconds to wait between page requests
 
+# File naming conventions
 file_naming:
-  invalid_chars: '/:*?"<>|'''
-  extension: ".mp4"
+  invalid_chars: '/:*?"<>|'''        # Characters to remove from filenames
+  extension: ".mp4"                  # Default file extension
 
+# User-Agent strings for HTTP requests (rotated randomly)
 user_agents:
-  - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
   - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
   - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Safari/605.1.15"
   - "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36"
   - "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:90.0) Gecko/20100101 Firefox/90.0"
 
+# HTTP headers for requests
 headers:
   Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
   Accept-Language: "en-US,en;q=0.5"
   Accept-Encoding: "gzip, deflate, br"
-  DNT: "1"
+  DNT: "1"                           # Do Not Track
   Connection: "keep-alive"
   Upgrade-Insecure-Requests: "1"

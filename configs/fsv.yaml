@@ -1,0 +1,45 @@
+name: FamilySexVideos
+domain: familysexvideos.org
+base_url: "https://familysexvideos.org"
+selector_style: css
+no_overwrite: true
+use_selenium: true
+
+url_encoding_rules:
+  " ": "-"
+  "%20": "-"
+
+modes:
+  video:
+    url_pattern: "/en/video/{video_id}/"  
+    scraper: video_scraper
+  search:
+    scraper: list_scraper
+    url_pattern: "/en/search/?search={search}"
+
+download:
+  method: "wget"  
+
+scrapers:
+  video_scraper:
+    title:
+      selector: "head title"
+    download_url:
+      selector: "video#my-player_html5_api source[type='video/mp4']"
+      attribute: "src"
+
+  list_scraper:
+    video_container:
+      selector:
+        - "div.thumb"
+    video_item:
+      selector: "a.trd"
+      fields:
+        url:
+          attribute: "href"
+        title:
+          selector: "head title"  
+    pagination:
+      next_page:
+        selector: "a.next.page-numbers"
+        attribute: "href"

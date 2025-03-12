@@ -9,7 +9,7 @@ url_encoding_rules:
 
 modes:
   video:
-    url_pattern: "/{video_id}/video/{title}"
+    url_pattern: "/{video}/video/{title}"
     scraper: video_scraper
   model:
     url_pattern: "/pornstar/{model}/"

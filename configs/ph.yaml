@@ -11,7 +11,7 @@ url_encoding_rules:
 
 modes:
   video:
-    url_pattern: "/view_video.php?viewkey={video_id}"
+    url_pattern: "/view_video.php?viewkey={video}"
     scraper: video_scraper
   model:
     url_pattern: "/model/{model}/videos"

@@ -140,7 +140,7 @@ scrape https://someUnsupportedSite.com/video/12345
 | Site Code | Site                     | Modes Available                              |
 |-----------|--------------------------|----------------------------------------------|
 | `9v`      | 9vids.com                | `video`, `search`, `tag`                     |
-| `fs`      | family-sex.me            | `video`, `tag`, `search`                     |
+| `fs`      | family-sex.me            | `video`, `search`, `tag`                     |
 | `fphd`    | familypornhd.com         | `video`, `tag`                               |
 | `fsv`     | familysexvideos.org      | `video`, `search`                            |
 | `if`      | incestflix.com           | `video`, `search`, `tag`                     |
@@ -150,7 +150,7 @@ scrape https://someUnsupportedSite.com/video/12345
 | `sb`      | spankbang.com            | `video`, `model`, `search`, `tag`            |
 | `triv`    | toprealincestvideos.com  | `video`, `search`                            |
 | `xnxx`    | xnxx.com                 | `video`, `search`, `channel`, `pornstar`, `tag` |
-| `xv`      | xvideos.com              | `video`, `search`, `channels`, `models`, `tags` |
+| `xv`      | xvideos.com              | `video`, `search`, `channel`, `model`, `tag` |
 
 ---
 

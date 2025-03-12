@@ -871,7 +871,7 @@ def main():
     parser.add_argument('args', nargs='+', help='Site identifier and mode, or direct URL')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
     parser.add_argument('--overwrite_files', action='store_true', help='Overwrite existing files')
-    parser.add_argument('--start_on_page', type=int, default=1, help='Starting page number for URL-based pagination (default: 1)')
+    parser.add_argument('--start_on_page', type=int, default=1, help='Starting page number for URL-based pagination')
     args = parser.parse_args()
     log_level = "DEBUG" if args.debug else "INFO"
     logger.remove()
@@ -898,10 +898,24 @@ def main():
                         process_video_page(url, matched_site_config, general_config, args.overwrite_files, headers)
                     else:
                         identifier = url.split('/')[-1].split('.')[0]  # Adjust based on URL structure
-                        current_page = args.start_on_page  # Use the provided start page
+                        current_page = args.start_on_page
+                        mode_config = matched_site_config['modes'][mode]
+                        # Construct initial URL based on start_on_page
+                        if current_page > 1 and mode_config.get('url_pattern_pages'):
+                            encoded_identifier = identifier
+                            for original, replacement in matched_site_config.get('url_encoding_rules', {}).items():
+                                encoded_identifier = encoded_identifier.replace(original, replacement)
+                            url = construct_url(
+                                matched_site_config['base_url'],
+                                mode_config['url_pattern_pages'],
+                                matched_site_config,
+                                **{mode: encoded_identifier, 'page': current_page}
+                            )
+                            logger.info(f"Starting at custom page {current_page}: {url}")
+                        # If starting at page 1, use url_pattern as is (no change needed)
                         while url:
                             next_page, new_page_number = process_list_page(
-                                url, matched_site_config, general_config, current_page, 
+                                url, matched_site_config, general_config, current_page,
                                 mode, identifier, args.overwrite_files, headers
                             )
                             if next_page is None:
@@ -923,20 +937,34 @@ def main():
             if mode not in site_config['modes']:
                 logger.error(f"Unsupported mode '{mode}' for site '{site}'")
                 sys.exit(1)
-            # Construct the initial URL with the start page for non-video modes
-            url_pattern = site_config['modes'][mode].get('url_pattern_pages', site_config['modes'][mode]['url_pattern'])
-            url = construct_url(
-                site_config['base_url'], 
-                url_pattern if mode != 'video' and 'url_pattern_pages' in site_config['modes'][mode] else site_config['modes'][mode]['url_pattern'],
-                site_config, 
-                **{mode: identifier, 'page': args.start_on_page} if mode != 'video' and 'url_pattern_pages' in site_config['modes'][mode] else {mode: identifier} if mode != 'video' else {'video_id': identifier}
-            )
+            mode_config = site_config['modes'][mode]
+            current_page = args.start_on_page
+            # Construct initial URL: use url_pattern for page 1, url_pattern_pages for > 1
+            if current_page > 1 and mode_config.get('url_pattern_pages'):
+                url = construct_url(
+                    site_config['base_url'],
+                    mode_config['url_pattern_pages'],
+                    site_config,
+                    **{mode: identifier, 'page': current_page}
+                )
+                logger.info(f"Starting at custom page {current_page}: {url}")
+            else:
+                url = construct_url(
+                    site_config['base_url'],
+                    mode_config['url_pattern'],
+                    site_config,
+                    **{mode: identifier} if mode != 'video' else {'video_id': identifier}
+                )
+                if current_page > 1:
+                    logger.warning(f"Starting page {current_page} requested, but no 'url_pattern_pages' defined; starting at page 1")
             if mode == 'video':
                 process_video_page(url, site_config, general_config, args.overwrite_files, headers)
             else:
-                current_page = args.start_on_page  # Start at the specified page
                 while url:
-                    next_page, new_page_number = process_list_page(url, site_config, general_config, current_page, mode, identifier, args.overwrite_files, headers)
+                    next_page, new_page_number = process_list_page(
+                        url, site_config, general_config, current_page, mode,
+                        identifier, args.overwrite_files, headers
+                    )
                     if next_page is None:
                         break
                     url = next_page

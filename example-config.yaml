@@ -17,14 +17,19 @@ download_destinations: # This is an ordered list of priorities. The script will 
   - type: local
     path: "~/.xxx" # Replace this with the local folder where videos should be saved
 
+overwrite_files: false
+
 ignored: # The script will avoid videos with these tags.
   - "JOI"
   - "Virtual Sex"
   - "Scat"
 
-chromedriver: # For sites that require it (e.g. Motherless), enter the host and port for chromedriver/selenium. Recommend running on Docker via ./chromedriver/docker-compose.yaml
-  host: "localhost"
-  port: "4444"
+selenium:
+  mode: "local"
+  chromedriver_path: "/usr/local/bin/chromedriver"
+  chrome_binary: "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+  host: "10.13.37.11" # Only used if mode is "remote"
+  port: "4444" # Only used if mode is "remote"
 
 vpn: #
   enabled: true

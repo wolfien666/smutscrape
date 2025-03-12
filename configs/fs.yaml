@@ -1,0 +1,47 @@
+name: FamilySex
+domain: family-sex.me
+base_url: "https://family-sex.me"
+selector_style: css
+no_overwrite: true
+use_selenium: true
+
+url_encoding_rules:
+  " ": "-"
+  "%20": "-"
+
+modes:
+  video:
+    url_pattern: "/vids/{video}"
+    scraper: video_scraper
+  tag:
+    scraper: list_scraper
+    url_pattern: "/porn/{tag}.html"
+    url_pattern_pages: "/porn/{tag}-{page}.html"
+    max_pages: 999
+  search:
+    url_pattern: "/search/{search}/"
+    scraper: list_scraper
+
+download:
+  method: "wget"
+
+scrapers:
+  video_scraper:
+    title:
+      selector: "head title"
+    download_url:
+      iframe: "iframe"
+      selector: "div.fp-player video"
+      attribute: "src"
+
+  list_scraper:
+    video_container:
+      selector:
+        - "div.cvmthumbz"
+    video_item:
+      selector: "a[target='_self'].v"
+      fields:
+        url:
+          attribute: "href"
+        title:
+          selector: "div span:first-child"

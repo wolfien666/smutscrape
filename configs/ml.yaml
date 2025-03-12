@@ -15,15 +15,23 @@ modes:
     scraper: video_scraper
   search:
     url_pattern: "/search?term={search}&type=videos&range=0&size=0&sort=date"
+    url_pattern_pages: "/search?term={search}&type=videos&range=0&size=0&sort=date&page={page}"
+    max_pages: 999
     scraper: list_scraper
   category:
     url_pattern: "/porn/{category}/videos"
+    url_pattern_pages: "/porn/{category}/videos&page={page}"
+    max_pages: 999
     scraper: list_scraper
   user:
     url_pattern: "/u/{user}?t=v"
+    url_pattern_pages: "/u/{user}?t=v&page={page}"
+    max_pages: 999
     scraper: user_uploads_scraper
   group:
     url_pattern: "/gv/{group}"
+    url_pattern_pages: "/gv/{group}?page={page}"
+    max_pages: 999
     scraper: group_video_list_scraper
 
 download:
@@ -50,10 +58,6 @@ scrapers:
           attribute: "href"
         title:
           attribute: "title"
-    pagination:
-      first_page: "{url_pattern}"
-      subsequent_pages: "{url_pattern}&page={page}"
-      max_pages: 999
 
   user_uploads_scraper:
     video_container:
@@ -74,11 +78,6 @@ scrapers:
           selector: ".caption.left.misc a.uploader"
         views:
           selector: ".caption.left.misc span.hits span.value"
-    pagination:
-      first_page: "{url_pattern}"
-      # Member page pagination is different - we need to check if this pattern works
-      subsequent_pages: "{url_pattern}&page={page}"
-      max_pages: 999
 
   group_video_list_scraper:
     video_container:
@@ -100,12 +99,6 @@ scrapers:
         views:
           selector: ".caption.left.misc span.hits span.value"
         group_name:
-          # Extract the group name from the URL, if needed
           selector: ".desktop-thumb.video.medium a.img-container"
           attribute: "href"
-          # This is a pattern to extract, would need processing in your script
           pattern: "/g/([^/]+)/"
-    pagination:
-      first_page: "{url_pattern}"
-      subsequent_pages: "{url_pattern}?page={page}" # Notice this is ?page= not &page=
-      max_pages: 999

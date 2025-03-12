@@ -3,7 +3,7 @@ domain: toprealincestvideos.com
 base_url: "https://toprealincestvideos.com/en/"
 selector_style: css
 no_overwrite: true
-use_selenium: false  # Assuming yt-dlp can handle it; adjust if needed
+use_selenium: false
 
 url_encoding_rules:
   " ": "%20"
@@ -15,6 +15,9 @@ modes:
   search:
     url_pattern: "/search/?search={search}"
     scraper: list_scraper
+  category:
+    url_pattern: "/search/?search={category}"
+    scraper: list_scraper
 
 download:
   method: "yt-dlp"
@@ -22,9 +25,9 @@ download:
 scrapers:
   video_scraper:
     title:
-      selector: "head title"  # Adjust if there's a better title selector
+      selector: "head title"
     download_url:
-      selector: "meta[property='og:video']"  # Placeholder; adjust based on actual video page
+      selector: "meta[property='og:video']"
       attribute: "content"
 
   list_scraper:
@@ -41,5 +44,5 @@ scrapers:
           selector: "p"
     pagination:
       next_page:
-        selector: "a.next"  # Adjust based on actual pagination element
+        selector: "ul.pages-navigation li.next-prev a:has(i.la-angle-right)"
         attribute: "href"

@@ -1,0 +1,41 @@
+name: FamilyPornHD
+domain: familypornhd.com
+base_url: "https://www.familypornhd.com"
+selector_style: css
+no_overwrite: true
+use_selenium: true
+m3u8_mode: true
+
+modes:
+  video:
+    url_pattern: "/{video}"
+    scraper: video_scraper
+  tag:
+    url_pattern: "/tag/{tag}/"
+    url_pattern_pages: "/tag/{tag}/page/{page}"
+    max_pages: 999
+    scraper: list_scraper
+
+download:
+  method: "ffmpeg"
+
+scrapers:
+  video_scraper:
+    title:
+      selector: "head title"
+    download_url:
+      iframe: "iframe"
+
+  list_scraper:
+    video_container:
+      selector:
+        - "ul.g1-collection-items"
+    video_item:
+      selector: "li.g1-collection-item article h3.entry-title a"
+      fields:
+        url:
+          attribute: "href"
+        title:
+          attribute: "text"
+
+video_key_pattern: "/"

@@ -28,6 +28,8 @@ from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.chrome.service import Service
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 CONFIG_DIR = os.path.join(SCRIPT_DIR, 'configs')
@@ -69,14 +71,18 @@ def construct_url(base_url, pattern, site_config, **kwargs):
     return urllib.parse.urljoin(base_url, path)
 
 def get_selenium_driver(general_config, force_new=False):
+    # Get chromedriver_path from the 'selenium' sub-dict, with a fallback
+    chromedriver = general_config.get('selenium', {}).get('chromedriver_path', '/usr/local/bin/chromedriver')
+    
     create_new = force_new or 'selenium_driver' not in general_config
     if not create_new:
         try:
             driver = general_config['selenium_driver']
-            driver.current_url
+            driver.current_url  # Test if the driver is still valid
         except Exception as e:
             logger.warning(f"Existing Selenium driver invalid: {e}")
             create_new = True
+    
     if create_new:
         if 'selenium_driver' in general_config:
             try:
@@ -89,17 +95,260 @@ def get_selenium_driver(general_config, force_new=False):
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--window-size=1920,1080")
-        host = general_config['chromedriver']['host']
-        port = general_config['chromedriver']['port']
-        selenium_url = f"http://{host}:{port}/wd/hub"
+        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+        chrome_options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
+    
+        selenium_config = general_config.get('selenium', {'mode': 'local'})
+        chrome_binary = selenium_config.get('chrome_binary')
+        if chrome_binary:
+            chrome_options.binary_location = chrome_binary
+            logger.debug(f"Set Chrome binary location to: {chrome_binary}")
+    
         try:
-            driver = webdriver.Remote(command_executor=selenium_url, options=chrome_options)
-            general_config['selenium_driver'] = driver
-            logger.info(f"Connected to Selenium at {selenium_url}")
+            logger.info(f"Using ChromeDriver at: {chromedriver}")
+            service = Service(executable_path=chromedriver)
+            driver = webdriver.Chrome(service=service, options=chrome_options)
+            logger.info(f"Initialized Selenium driver with Chrome version: {driver.capabilities['browserVersion']}")
         except Exception as e:
-            logger.error(f"Failed to connect to Selenium at {selenium_url}: {e}")
-            general_config['selenium_driver'] = None
+            logger.error(f"Failed to initialize Selenium driver: {e}")
+            return None
+    
+        driver.execute_script("""
+            (function() {
+                let open = XMLHttpRequest.prototype.open;
+                XMLHttpRequest.prototype.open = function(method, url) {
+                    if (url.includes(".m3u8")) {
+                        console.log("🔥 Found M3U8 via XHR:", url);
+                    }
+                    return open.apply(this, arguments);
+                };
+            })();
+        """)
+        general_config['selenium_driver'] = driver
+    
+    # Store User-Agent for later use
+    user_agent = driver.execute_script("return navigator.userAgent;")
+    general_config['selenium_user_agent'] = user_agent
+    logger.debug(f"Selenium User-Agent: {user_agent}")
     return general_config['selenium_driver']
+
+def process_video_page(url, site_config, general_config, overwrite_files=False, headers=None):
+    global last_vpn_action_time
+    vpn_config = general_config.get('vpn', {})
+    if vpn_config.get('enabled', False):
+        current_time = time.time()
+        if current_time - last_vpn_action_time > vpn_config.get('new_node_time', 300):
+            handle_vpn(general_config, 'new_node')
+    
+    logger.info(f"Processing video page: {url}")
+    use_selenium = site_config.get('use_selenium', False)
+    driver = get_selenium_driver(general_config) if use_selenium else None
+    
+    if site_config.get('m3u8_mode', False) and driver:
+        video_scraper = site_config['scrapers']['video_scraper']
+        # Check for iframe in any scraper field (e.g., title or download_url)
+        iframe_config = None
+        for field, config in video_scraper.items():
+            if isinstance(config, dict) and 'iframe' in config:
+                iframe_config = {'enabled': True, 'selector': config['iframe']}
+                break
+        if iframe_config:
+            logger.debug(f"Piercing iframe '{iframe_config['selector']}' for M3U8 extraction")
+            driver.get(url)
+            time.sleep(random.uniform(1, 2))  # Initial page load
+            try:
+                iframe = driver.find_element(By.CSS_SELECTOR, iframe_config['selector'])
+                iframe_url = iframe.get_attribute("src")
+                if iframe_url:
+                    logger.info(f"Found iframe with src: {iframe_url}")
+                    driver.get(iframe_url)
+                    time.sleep(random.uniform(1, 2))  # Allow iframe to load
+                    url = iframe_url  # Update url to iframe src
+                else:
+                    logger.debug("Iframe found but no src attribute.")
+            except Exception as e:
+                logger.debug(f"No iframe found or error piercing: {e}")
+        m3u8_url, cookies = extract_m3u8_urls(driver, url, site_config)  # Pass site_config for consistency
+        if m3u8_url:
+            video_url = m3u8_url
+            headers = headers or general_config.get('headers', {}).copy()
+            headers["Cookie"] = cookies
+            headers["Referer"] = url  # Use the current URL (iframe or original)
+            headers["User-Agent"] = general_config.get('selenium_user_agent', random.choice(general_config['user_agents']))
+            soup = fetch_page(url, general_config['user_agents'], headers, use_selenium, driver)
+            if soup:
+                data = extract_data(soup, video_scraper, driver, site_config)
+            else:
+                data = {'title': url.split('/')[-1]}
+        else:
+            logger.error("Failed to extract M3U8 URL; aborting.")
+            return
+    else:
+        soup = fetch_page(url, general_config['user_agents'], headers or {}, use_selenium, driver)
+        if soup is None and use_selenium:
+            logger.warning("Selenium failed; retrying with requests")
+            soup = fetch_page(url, general_config['user_agents'], headers or {}, False, None)
+        if soup is None:
+            logger.error(f"Failed to fetch video page: {url}")
+            return
+        data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config)
+        logger.debug(f"Extracted video data: {data}")
+        video_url = data.get('download_url', url)
+        logger.debug(f"Video URL to download: {video_url}")
+    
+    if should_ignore_video(data, general_config['ignored']):
+        logger.info(f"Ignoring video: {data.get('title', url)}")
+        return
+    
+    file_name = construct_filename(data.get('title', 'Untitled'), site_config, general_config)
+    destination_config = general_config['download_destinations'][0]
+    overwrite = overwrite_files or site_config.get('overwrite_files', general_config.get('overwrite_files', False))
+    
+    if destination_config['type'] == 'smb':
+        smb_destination_path = os.path.join(destination_config['path'], file_name)
+        if not overwrite and file_exists_on_smb(destination_config, smb_destination_path):
+            logger.info(f"File '{file_name}' exists on SMB share. Skipping.")
+            return
+        temp_dir = os.path.join(os.getcwd(), 'temp_downloads')
+        os.makedirs(temp_dir, exist_ok=True)
+        destination_path = os.path.join(temp_dir, file_name)
+    else:
+        destination_path = os.path.join(destination_config['path'], file_name)
+        if not overwrite and os.path.exists(destination_path):
+            logger.info(f"File '{file_name}' exists locally. Skipping.")
+            return
+    
+    download_method = site_config['download'].get('method', 'yt-dlp')
+    logger.info(f"Downloading: {file_name}")
+    if download_file(video_url, destination_path, download_method, general_config, site_config, headers=headers):
+        if destination_config['type'] == 'smb':
+            upload_to_smb(destination_path, smb_destination_path, destination_config, overwrite)
+            os.remove(destination_path)
+        elif destination_config['type'] == 'local':
+            apply_permissions(destination_path, destination_config)
+    time.sleep(general_config['sleep']['between_videos'])
+    
+
+def download_with_ffmpeg(url, destination_path, general_config, headers=None):
+    headers = headers or {}
+    ffmpeg_headers = (
+        f"User-Agent: {headers.get('User-Agent', random.choice(general_config['user_agents']))}"
+        f"\nReferer: {headers.get('Referer', 'https://bestwish.lol/Bhow0r6jyqdeR')}"
+    )
+    if "Cookie" in headers and headers["Cookie"]:
+        ffmpeg_headers += f"\nCookie: {headers['Cookie']}"
+    
+    command = [
+        "ffmpeg",
+        "-headers", ffmpeg_headers,
+        "-i", url,
+        "-c", "copy",
+        "-bsf:a", "aac_adtstoasc",
+        destination_path
+    ]
+    
+    logger.debug(f"Executing FFmpeg command: {' '.join(shlex.quote(arg) for arg in command)}")
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+    pbar = tqdm(total=100, unit='%', desc="Downloading (FFmpeg)")
+    last_percent = 0
+    try:
+        for line in process.stderr:
+            logger.debug(f"FFmpeg output: {line.strip()}")
+            if 'frame=' in line or 'size=' in line:
+                if last_percent < 90:
+                    last_percent += random.uniform(1, 5)
+                    pbar.update(min(last_percent, 100) - pbar.n)
+        pbar.n = 100
+    except KeyboardInterrupt:
+        process.terminate()
+        pbar.close()
+        return False
+    pbar.close()
+    return_code = process.wait()
+    if return_code != 0:
+        logger.error(f"FFmpeg failed with return code {return_code}")
+    else:
+        logger.info("FFmpeg download completed successfully")
+    return return_code == 0
+
+
+def pierce_iframe(driver, url, site_config):
+    """
+    Attempts to pierce into an iframe if specified in site_config.
+    Returns the final URL loaded (iframe src or original URL).
+    """
+    iframe_config = site_config.get('iframe', {})
+    if not iframe_config.get('enabled', False):
+        logger.debug("Iframe piercing disabled in site_config.")
+        driver.get(url)
+        return url
+    
+    logger.debug(f"Attempting iframe piercing for: {url}")
+    driver.get(url)
+    time.sleep(random.uniform(1, 2))  # Initial page load
+    
+    try:
+        iframe_selector = iframe_config.get('selector', 'iframe')  # Default to 'iframe' tag
+        iframe = driver.find_element(By.CSS_SELECTOR, iframe_selector)
+        iframe_url = iframe.get_attribute("src")
+        if iframe_url:
+            logger.info(f"Found iframe with src: {iframe_url}")
+            driver.get(iframe_url)
+            time.sleep(random.uniform(1, 2))  # Allow iframe to load
+            return iframe_url
+        else:
+            logger.debug("Iframe found but no src attribute.")
+            return url
+    except Exception as e:
+        logger.debug(f"No iframe found or error piercing: {e}")
+        return url
+
+def extract_m3u8_urls(driver, url, site_config):
+    logger.debug(f"Extracting M3U8 URLs from: {url}")
+    # URL is already loaded (iframe or original) by process_video_page
+    driver.get(url)  # Redundant but ensures we’re on the right page
+    
+    driver.execute_script("""
+        (function() {
+            let open = XMLHttpRequest.prototype.open;
+            XMLHttpRequest.prototype.open = function(method, url) {
+                if (url.includes(".m3u8")) {
+                    console.log("🔥 Found M3U8 via XHR:", url);
+                }
+                return open.apply(this, arguments);
+            };
+        })();
+    """)
+    
+    logger.debug("Waiting for network requests...")
+    time.sleep(5)  # Adjustable via site_config if needed
+    
+    logs = driver.get_log("performance")
+    m3u8_urls = []
+    logger.debug(f"Analyzing {len(logs)} performance logs")
+    for log in logs:
+        try:
+            message = json.loads(log["message"])["message"]
+            if "Network.responseReceived" in message["method"]:
+                request_url = message["params"]["response"]["url"]
+                logger.debug(f"Network response: {request_url}")
+                if ".m3u8" in request_url:
+                    m3u8_urls.append(request_url)
+                    logger.info(f"Found M3U8 URL: {request_url}")
+        except KeyError:
+            logger.debug("Skipping log entry due to missing keys")
+            continue
+    
+    if not m3u8_urls:
+        logger.warning("No M3U8 URLs detected in network traffic")
+        return None, None
+    
+    best_m3u8 = sorted(m3u8_urls, key=lambda u: "1920x1080" in u, reverse=True)[0]
+    cookies_list = driver.get_cookies()
+    cookies_str = "; ".join([f"{c['name']}={c['value']}" for c in cookies_list])
+    logger.debug(f"Cookies after load: {cookies_str if cookies_str else 'None'}")
+    logger.info(f"Selected best M3U8: {best_m3u8}")
+    return best_m3u8, cookies_str
 
 def fetch_page(url, user_agents, headers, use_selenium=False, driver=None, retry_count=0):
     if not use_selenium:
@@ -121,8 +370,10 @@ def fetch_page(url, user_agents, headers, use_selenium=False, driver=None, retry
             return None
         logger.debug(f"Fetching URL (selenium): {url}")
         try:
-            driver.get(url)
-            time.sleep(random.uniform(2, 4))
+            # Use iframe piercing if enabled in site_config
+            final_url = pierce_iframe(driver, url, globals().get('site_config', {}))
+            logger.debug(f"Final URL after iframe piercing: {final_url}")
+            time.sleep(random.uniform(2, 4))  # Additional wait after iframe load
             return BeautifulSoup(driver.page_source, 'html.parser')
         except Exception as e:
             if retry_count < 2 and 'general_config' in globals():
@@ -133,18 +384,32 @@ def fetch_page(url, user_agents, headers, use_selenium=False, driver=None, retry
             logger.error(f"Failed to fetch {url} with Selenium: {e}")
             return None
 
-def extract_data(soup, selectors):
+def extract_data(soup, selectors, driver=None, site_config=None):
     data = {}
     for field, config in selectors.items():
         if isinstance(config, str):
             elements = soup.select(config)
         elif isinstance(config, dict):
-            if 'selector' in config:
+            if 'iframe' in config and driver and site_config:
+                # Pierce into the specified iframe for this field
+                iframe_selector = config['iframe']
+                logger.debug(f"Piercing iframe '{iframe_selector}' for field '{field}'")
+                try:
+                    iframe = driver.find_element(By.CSS_SELECTOR, iframe_selector)
+                    driver.switch_to.frame(iframe)
+                    iframe_soup = BeautifulSoup(driver.page_source, 'html.parser')
+                    elements = iframe_soup.select(config.get('selector', ''))
+                    driver.switch_to.default_content()  # Return to main context
+                except Exception as e:
+                    logger.error(f"Failed to pierce iframe '{iframe_selector}' for '{field}': {e}")
+                    elements = []
+            elif 'selector' in config:
                 elements = soup.select(config['selector'])
             elif 'attribute' in config:
                 elements = [soup]
             else:
                 elements = []
+        
         if elements:
             if isinstance(config, dict) and 'attribute' in config:
                 value = elements[0].get(config['attribute'])
@@ -185,7 +450,7 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
         return None, None
     
     for video_element in video_elements:
-        video_data = extract_data(video_element, list_scraper['video_item']['fields'])
+        video_data = extract_data(video_element, list_scraper['video_item']['fields'], driver, site_config)
         if 'url' in video_data:
             video_url = video_data['url']
             if not video_url.startswith(('http://', 'https://')):
@@ -199,25 +464,61 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
         logger.info(f"Found video: {video_title} - {video_url}")
         process_video_page(video_url, site_config, general_config, overwrite_files, headers)
     
-    pagination_config = list_scraper.get('pagination', {})
-    max_pages = pagination_config.get('max_pages', float('inf'))
-    if current_page < max_pages:
-        if mode in site_config['modes']:
+    # Determine pagination method
+    if mode not in site_config['modes']:
+        logger.debug(f"No pagination for mode '{mode}' as it’s not defined in site_config['modes']")
+        return None, None
+    
+    mode_config = site_config['modes'][mode]
+    scraper_pagination = list_scraper.get('pagination', {})
+    url_pattern_pages = mode_config.get('url_pattern_pages')
+    max_pages = mode_config.get('max_pages', scraper_pagination.get('max_pages', float('inf')))
+    
+    if current_page >= max_pages:
+        logger.debug(f"Stopping pagination: current_page={current_page} >= max_pages={max_pages}")
+        return None, None
+    
+    next_url = None
+    if url_pattern_pages:
+        # URL pattern-based pagination
+        if scraper_pagination:
+            logger.warning(f"Both 'url_pattern_pages' and 'list_scraper.pagination' are defined; prioritizing 'url_pattern_pages'")
+        encoded_identifier = identifier
+        for original, replacement in site_config.get('url_encoding_rules', {}).items():
+            encoded_identifier = encoded_identifier.replace(original, replacement)
+        next_url = construct_url(
+            base_url,
+            url_pattern_pages,
+            site_config,
+            **{mode: encoded_identifier, 'page': current_page + 1}
+        )
+        logger.debug(f"Generated next page URL (pattern-based): {next_url}")
+    elif scraper_pagination:
+        # Scraper-based pagination
+        if 'subsequent_pages' in scraper_pagination:
             encoded_identifier = identifier
             for original, replacement in site_config.get('url_encoding_rules', {}).items():
                 encoded_identifier = encoded_identifier.replace(original, replacement)
-            url_pattern = site_config['modes'][mode]['url_pattern'].format(**{mode: encoded_identifier})
-        else:
-            url_pattern = url
-        if 'subsequent_pages' in pagination_config:
-            next_url = pagination_config['subsequent_pages'].format(url_pattern=url_pattern, page=current_page + 1, search=encoded_identifier)
-        else:
-            next_page = soup.select_one(pagination_config.get('next_page', {}).get('selector', ''))
-            next_url = next_page.get(pagination_config.get('next_page', {}).get('attribute', '')) if next_page else None
-        if next_url:
-            if not next_url.startswith(('http://', 'https://')):
-                next_url = urllib.parse.urljoin(base_url, next_url)
-            return next_url, current_page + 1
+            url_pattern = mode_config['url_pattern']
+            next_url = scraper_pagination['subsequent_pages'].format(
+                url_pattern=url_pattern, page=current_page + 1, search=encoded_identifier
+            )
+            next_url = urllib.parse.urljoin(base_url, next_url)
+            logger.debug(f"Generated next page URL (subsequent_pages): {next_url}")
+        elif 'next_page' in scraper_pagination:
+            next_page_config = scraper_pagination['next_page']
+            next_page = soup.select_one(next_page_config.get('selector', ''))
+            if next_page:
+                next_url = next_page.get(next_page_config.get('attribute', 'href'))
+                if next_url and not next_url.startswith(('http://', 'https://')):
+                    next_url = urllib.parse.urljoin(base_url, next_url)
+                logger.debug(f"Found next page URL (selector-based): {next_url}")
+            else:
+                logger.debug(f"No 'next' element found with selector '{next_page_config.get('selector')}'")
+    
+    if next_url:
+        return next_url, current_page + 1
+    logger.debug("No next page URL generated; stopping pagination")
     return None, None
 
 def should_ignore_video(data, ignored_terms):
@@ -238,58 +539,6 @@ def should_ignore_video(data, ignored_terms):
                         return True
     return False
 
-def process_video_page(url, site_config, general_config, overwrite_files=False, headers=None):
-    global last_vpn_action_time
-    vpn_config = general_config.get('vpn', {})
-    if vpn_config.get('enabled', False):
-        current_time = time.time()
-        if current_time - last_vpn_action_time > vpn_config.get('new_node_time', 300):
-            handle_vpn(general_config, 'new_node')
-    
-    logger.info(f"Processing video page: {url}")
-    use_selenium = site_config.get('use_selenium', False)
-    driver = get_selenium_driver(general_config) if use_selenium else None
-    soup = fetch_page(url, general_config['user_agents'], headers if headers else {}, use_selenium, driver)
-    if soup is None and use_selenium:
-        logger.warning("Selenium failed; retrying with requests")
-        soup = fetch_page(url, general_config['user_agents'], headers if headers else {}, False, None)
-    if soup is None:
-        logger.error(f"Failed to fetch video page: {url}")
-        return
-    
-    data = extract_data(soup, site_config['scrapers']['video_scraper'])
-    if should_ignore_video(data, general_config['ignored']):
-        logger.info(f"Ignoring video: {data.get('title', url)}")
-        return
-
-    video_url = data.get('download_url', url)
-    file_name = construct_filename(data.get('title', 'Untitled'), site_config, general_config)
-    destination_config = general_config['download_destinations'][0]
-    no_overwrite = site_config.get('no_overwrite', False)
-    
-    if destination_config['type'] == 'smb':
-        smb_destination_path = os.path.join(destination_config['path'], file_name)
-        if no_overwrite and file_exists_on_smb(destination_config, smb_destination_path):
-            logger.info(f"File '{file_name}' exists on SMB share. Skipping.")
-            return
-        temp_dir = os.path.join(os.getcwd(), 'temp_downloads')
-        os.makedirs(temp_dir, exist_ok=True)
-        destination_path = os.path.join(temp_dir, file_name)
-    else:
-        destination_path = os.path.join(destination_config['path'], file_name)
-        if no_overwrite and os.path.exists(destination_path):
-            logger.info(f"File '{file_name}' exists locally. Skipping.")
-            return
-    
-    download_method = site_config['download'].get('method', 'yt-dlp')
-    logger.info(f"Downloading: {file_name}")
-    if download_file(video_url, destination_path, download_method, general_config):
-        if destination_config['type'] == 'smb':
-            upload_to_smb(destination_path, smb_destination_path, destination_config, no_overwrite)
-            os.remove(destination_path)
-        elif destination_config['type'] == 'local':
-            apply_permissions(destination_path, destination_config)
-    time.sleep(general_config['sleep']['between_videos'])
 
 def apply_permissions(file_path, destination_config):
     if 'permissions' not in destination_config:
@@ -307,11 +556,11 @@ def apply_permissions(file_path, destination_config):
     except Exception as e:
         logger.error(f"Failed to apply permissions to {file_path}: {e}")
 
-def upload_to_smb(local_path, smb_path, destination_config, no_overwrite=False):
+def upload_to_smb(local_path, smb_path, destination_config, overwrite=False):
     conn = SMBConnection(destination_config['username'], destination_config['password'], "videoscraper", destination_config['server'])
     try:
         if conn.connect(destination_config['server'], 445):
-            if no_overwrite and file_exists_on_smb(destination_config, smb_path):
+            if not overwrite and file_exists_on_smb(destination_config, smb_path):
                 logger.info(f"File '{smb_path}' exists on SMB share. Skipping.")
                 return
             with open(local_path, 'rb') as file:
@@ -326,52 +575,109 @@ def upload_to_smb(local_path, smb_path, destination_config, no_overwrite=False):
     finally:
         conn.close()
 
-def download_file(url, destination_path, method, general_config):
+def download_file(url, destination_path, method, general_config, site_config, headers=None):
     if not url:
         logger.error("Invalid or empty URL")
         return False
     os.makedirs(os.path.dirname(destination_path), exist_ok=True)
     if url.startswith('//'):
         url = 'http:' + url
-    user_agent = random.choice(general_config['user_agents']) if general_config.get('user_agents') else "Mozilla/5.0"
+    
+    # Only use headers if explicitly required (e.g., m3u8_mode with cookies)
+    use_headers = headers and any(k in headers for k in ["Cookie"])  # Only if cookies are present
     
     if method == 'curl':
-        command = f"curl -# -o \"{destination_path}\" -A \"{user_agent}\" \"{url}\""
-        return download_with_curl_wget(command)
+        if use_headers:
+            curl_headers = (
+                f"-A \"{headers.get('User-Agent', random.choice(general_config['user_agents']))}\" "
+                f"-H \"Referer: {headers.get('Referer', site_config.get('base_url', ''))}\" "
+            )
+            if "Cookie" in headers:
+                curl_headers += f"-H \"Cookie: {headers['Cookie']}\" "
+            command = f"curl -L -o \"{destination_path}\" {curl_headers} --retry 3 --max-time 600 \"{url}\""
+        else:
+            command = f"curl -L -o \"{destination_path}\" \"{url}\""
+        logger.debug(f"Executing curl command: {command}")
+        return download_with_curl(command)
     elif method == 'wget':
-        command = f"wget -O \"{destination_path}\" --user-agent=\"{user_agent}\" --progress=bar:force \"{url}\""
-        return download_with_curl_wget(command)
+        if use_headers:
+            wget_headers = (
+                f"--user-agent=\"{headers.get('User-Agent', random.choice(general_config['user_agents']))}\" "
+                f"--referer=\"{headers.get('Referer', site_config.get('base_url', ''))}\" "
+            )
+            if "Cookie" in headers:
+                wget_headers += f"--header=\"Cookie: {headers['Cookie']}\" "
+            command = f"wget {wget_headers} --tries=3 --timeout=600 -O \"{destination_path}\" \"{url}\""
+        else:
+            command = f"wget -O \"{destination_path}\" \"{url}\""
+        logger.debug(f"Executing wget command: {command}")
+        return download_with_wget(command)
     elif method == 'yt-dlp':
+        user_agent = headers.get('User-Agent', random.choice(general_config['user_agents']) if general_config.get('user_agents') else "Mozilla/5.0")
         command = f"yt-dlp -o \"{destination_path}\" --user-agent \"{user_agent}\" \"{url}\""
         return download_with_ytdlp(command)
+    elif method == 'ffmpeg':
+        return download_with_ffmpeg(url, destination_path, general_config, headers)
     else:
         logger.error(f"Unsupported download method: {method}")
         return False
 
-def download_with_curl_wget(command):
+def download_with_curl(command):
     process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
-    pbar = tqdm(total=100, unit='%', desc="Downloading")
+    pbar = tqdm(total=100, unit='%', desc="Downloading (curl)")
     last_percent = 0
     try:
         for line in process.stdout:
-            if 'curl' in command and '#' in line:
+            logger.debug(f"curl output: {line.strip()}")
+            if '#' in line:  # curl’s progress bar
                 percent = min(line.count('#'), 100)
                 pbar.update(percent - last_percent)
                 last_percent = percent
-            elif 'wget' in command and '%' in line:
-                try:
-                    percent = min(int(line.split('%')[0].split()[-1]), 100)
-                    pbar.update(percent - last_percent)
-                    last_percent = percent
-                except ValueError:
-                    pass
-            logger.debug(line.strip())
+            elif "< Location:" in line:
+                logger.info(f"curl redirect: {line.strip()}")
+        pbar.n = 100
     except KeyboardInterrupt:
         process.terminate()
-        pbar.close()
-        return False
     pbar.close()
-    return process.wait() == 0
+    return_code = process.wait()
+    if return_code != 0:
+        logger.error(f"curl failed with return code {return_code}")
+    else:
+        logger.info("curl download completed successfully")
+    return return_code == 0
+    
+def download_with_wget(command):
+    process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    progress_regex = re.compile(r'(\d+)%\s+(\d+[KMG]?)')  # Matches "45% 123M"
+    pbar = None
+    try:
+        for line in process.stdout:
+            logger.debug(f"wget output: {line.strip()}")
+            match = progress_regex.search(line)
+            if match:
+                percent, size = match.groups()
+                percent = int(percent)
+                if pbar is None:
+                    pbar = tqdm(total=100, unit='%', desc="Downloading (wget)")
+                pbar.update(percent - pbar.n)
+            elif "Location:" in line:
+                logger.info(f"wget redirect: {line.strip()}")
+        if pbar:
+            pbar.n = 100  # Ensure completion
+    except KeyboardInterrupt:
+        process.terminate()
+        if pbar:
+            pbar.close()
+        return False
+    if pbar:
+        pbar.close()
+    return_code = process.wait()
+    if return_code != 0:
+        logger.error(f"wget failed with return code {return_code}")
+    else:
+        logger.info("wget download completed successfully")
+    return return_code == 0
+        
 
 def download_with_ytdlp(command):
     process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
@@ -496,17 +802,23 @@ def download_with_ytdlp_fallback(url, temp_dir, general_config):
 
 def match_url_to_mode(url, site_config):
     base_url = site_config['base_url'].rstrip('/')
+    parsed_url = urlparse(url)
+    path = parsed_url.path 
+    
     for mode, config in site_config['modes'].items():
-        pattern = config['url_pattern'].lstrip('/')
-        # Escape the pattern, then replace escaped or unescaped placeholders
-        regex_pattern = re.escape(pattern)
-        # Replace {something} or \{something\} with [^/]+
-        regex_pattern = re.sub(r'\\?\{[^}]*\\?\}', r'[^/]+', regex_pattern)
-        full_pattern = f"^{base_url}/{regex_pattern}$"
-        logger.debug(f"Testing mode '{mode}' with pattern: {full_pattern}")
-        if re.match(full_pattern, url):
-            logger.debug(f"Matched URL '{url}' to mode '{mode}'")
+        pattern = config['url_pattern'].lstrip('/') 
+        pattern_parts = pattern.split('/{')[0].split('/') 
+        placeholder = f"{{{mode}}}"
+        
+        path_parts = path.lstrip('/').split('/') 
+        
+        # Check if the fixed parts of the pattern match
+        if len(path_parts) >= len(pattern_parts) and all(
+            path_parts[i] == pattern_parts[i] for i in range(len(pattern_parts))
+        ):
+            logger.debug(f"Matched URL '{url}' to mode '{mode}' with pattern '{pattern}'")
             return mode, config['scraper']
+    
     logger.debug(f"No mode matched for URL: {url}")
     return None, None
 
@@ -540,7 +852,7 @@ def main():
                     if mode == 'video':
                         process_video_page(url, matched_site_config, general_config, args.overwrite_files, headers)
                     else:
-                        identifier = url.split('/')[-1]
+                        identifier = url.split('/')[-1].split('.')[0]  # Adjust based on URL structure
                         current_page = 1
                         while url:
                             next_page, new_page_number = process_list_page(
@@ -557,7 +869,7 @@ def main():
                     process_video_page(url, matched_site_config, general_config, args.overwrite_files, headers)
             else:
                 process_fallback_download(url, general_config, args.overwrite_files)
-
+    
         elif len(args.args) >= 3:
             site, mode, identifier = args.args[0], args.args[1], ' '.join(args.args[2:])
             site_config = load_site_config(site)

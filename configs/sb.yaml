@@ -13,12 +13,18 @@ modes:
     scraper: video_scraper
   model:
     url_pattern: "/pornstar/{model}/"
+    url_pattern_pages: "/pornstar/{model}/{page}/"
+    max_pages: 999
     scraper: list_scraper
   search:
     url_pattern: "/s/{search}/?o=all/"
+    url_pattern_pages: "/s/{search}/{page}/?o=all/"
+    max_pages: 999
     scraper: list_scraper
   tag:
     url_pattern: "/s/{tag}/?o=all/"
+    url_pattern_pages: "/s/{tag}/{page}/?o=all/"
+    max_pages: 999
     scraper: list_scraper
 
 download:
@@ -48,9 +54,6 @@ scrapers:
         url:
           selector: "a.thumb"
           attribute: "href"
-    pagination:
-      subsequent_pages: "https://spankbang.com/s/{search}/{page}/2/?o=all/"
 
 video_key_pattern: "/"
-
 name_suffix: " - SpankBang"

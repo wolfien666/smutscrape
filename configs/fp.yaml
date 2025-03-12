@@ -24,7 +24,7 @@ modes:
     url_pattern: "/models/{model}/"
 
 download:
-  method: "requests"  # Custom method to match the second script’s direct download
+  method: "wget"
 
 scrapers:
   video_scraper:

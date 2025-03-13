@@ -26,10 +26,10 @@ import uuid
 import tempfile
 from datetime import datetime
 from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 CONFIG_DIR = os.path.join(SCRIPT_DIR, 'configs')
@@ -46,6 +46,7 @@ def load_site_config(site):
 	return load_config(config_path)
 
 def process_title(title, invalid_chars):
+	logger.debug(f"Processing {title} for invalid chars...")
 	for char in invalid_chars:
 		title = title.replace(char, "")
 	return title
@@ -89,6 +90,7 @@ def construct_filename(title, site_config, general_config):
 def construct_url(base_url, pattern, site_config, **kwargs):
 	encoding_rules = site_config.get('url_encoding_rules', {})
 	encoded_kwargs = {}
+	logger.debug(f"Constructing URL...")
 	for k, v in kwargs.items():
 		if isinstance(v, str):
 			encoded_v = v
@@ -100,10 +102,6 @@ def construct_url(base_url, pattern, site_config, **kwargs):
 	path = pattern.format(**encoded_kwargs)
 	return urllib.parse.urljoin(base_url, path)
 
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
 
 def get_selenium_driver(general_config, force_new=False):
 	selenium_config = general_config.get('selenium', {})
@@ -176,7 +174,7 @@ def get_selenium_driver(general_config, force_new=False):
 	return general_config['selenium_driver']
 
 
-def process_video_page(url, site_config, general_config, overwrite_files=False, headers=None, list_title=None):
+def process_video_page(url, site_config, general_config, overwrite_files=False, headers=None, list_title=None, force_replace_nfo=False):
 	global last_vpn_action_time
 	vpn_config = general_config.get('vpn', {})
 	if vpn_config.get('enabled', False):
@@ -188,6 +186,7 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 	use_selenium = site_config.get('use_selenium', False)
 	driver = get_selenium_driver(general_config) if use_selenium else None
 	
+	# Handle M3U8 mode with iframe piercing
 	if site_config.get('m3u8_mode', False) and driver:
 		video_scraper = site_config['scrapers']['video_scraper']
 		iframe_config = None
@@ -219,10 +218,7 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 			headers["Referer"] = url
 			headers["User-Agent"] = general_config.get('selenium_user_agent', random.choice(general_config['user_agents']))
 			soup = fetch_page(url, general_config['user_agents'], headers, use_selenium, driver)
-			if soup:
-				data = extract_data(soup, video_scraper, driver, site_config)
-			else:
-				data = {'title': url.split('/')[-1]}
+			data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config) if soup else {'title': url.split('/')[-1]}
 		else:
 			logger.error("Failed to extract M3U8 URL; aborting.")
 			return
@@ -235,13 +231,12 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 			logger.error(f"Failed to fetch video page: {url}")
 			return
 		data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config)
-		logger.debug(f"Extracted video data: {data}")
-		video_url = data.get('download_url', url)
-		logger.debug(f"Video URL to download: {video_url}")
 	
-	# Title fallback: use extracted title, then list_title, then 'Untitled'
+	logger.debug(f"Extracted video data: {data}")
+	video_url = data.get('download_url', url)
 	video_title = data.get('title', '').strip() or list_title or 'Untitled'
-	data['title'] = video_title  # Ensure data reflects the final title
+	data['Title'] = video_title  # Normalize to match NFO fields
+	data['URL'] = url  # Add URL to metadata
 	
 	if should_ignore_video(data, general_config['ignored']):
 		logger.info(f"Ignoring video: {video_title}")
@@ -253,27 +248,63 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 	
 	if destination_config['type'] == 'smb':
 		smb_destination_path = os.path.join(destination_config['path'], file_name)
-		if not overwrite and file_exists_on_smb(destination_config, smb_destination_path):
-			logger.info(f"File '{file_name}' exists on SMB share. Skipping.")
-			return
-		# Use temporary_storage from config, default to ./.tmp_downloads
+		smb_nfo_path = os.path.join(destination_config['path'], f"{file_name.rsplit('.', 1)[0]}.nfo")
 		temp_dir = destination_config.get('temporary_storage', os.path.join(os.getcwd(), '.tmp_downloads'))
 		os.makedirs(temp_dir, exist_ok=True)
 		destination_path = os.path.join(temp_dir, file_name)
+		temp_nfo_path = os.path.join(temp_dir, f"{file_name.rsplit('.', 1)[0]}.nfo")
+		video_exists = file_exists_on_smb(destination_config, smb_destination_path)
+		nfo_exists = file_exists_on_smb(destination_config, smb_nfo_path)
 	else:
 		destination_path = os.path.join(destination_config['path'], file_name)
-		if not overwrite and os.path.exists(destination_path):
-			logger.info(f"File '{file_name}' exists locally. Skipping.")
-			return
+		nfo_path = f"{destination_path.rsplit('.', 1)[0]}.nfo"
+		video_exists = os.path.exists(destination_path)
+		nfo_exists = os.path.exists(nfo_path)
 	
-	download_method = site_config['download'].get('method', 'yt-dlp')
-	logger.info(f"Downloading: {file_name}")
-	if download_file(video_url, destination_path, download_method, general_config, site_config, headers=headers):
+	# NFO generation logic
+	make_nfo = general_config.get('make_nfo', False)
+	has_selectors = has_metadata_selectors(site_config)
+	nfo_overwrite = overwrite_files or force_replace_nfo  # Overwrite NFO if either flag is set
+	
+	if make_nfo and has_selectors:
 		if destination_config['type'] == 'smb':
-			upload_to_smb(destination_path, smb_destination_path, destination_config, overwrite)
-			os.remove(destination_path)
-		elif destination_config['type'] == 'local':
-			apply_permissions(destination_path, destination_config)
+			smb_nfo_path = os.path.join(destination_config['path'], f"{file_name.rsplit('.', 1)[0]}.nfo")
+			temp_nfo_path = os.path.join(temp_dir, f"{file_name.rsplit('.', 1)[0]}.nfo")
+			nfo_exists = file_exists_on_smb(destination_config, smb_nfo_path)
+			nfo_path = temp_nfo_path
+			if nfo_exists and not nfo_overwrite:
+				logger.debug(f"NFO file already exists at SMB destination: {smb_nfo_path}, skipping generation")
+			else:
+				generate_nfo_file(destination_path, data)  # Generate in temp_dir
+				if nfo_exists:
+					logger.info(f"Overwriting existing NFO at {smb_nfo_path}")
+		else:
+			nfo_path = f"{destination_path.rsplit('.', 1)[0]}.nfo"
+			nfo_exists = os.path.exists(nfo_path)
+			if nfo_exists and not nfo_overwrite:
+				logger.debug(f"NFO file already exists at local destination: {nfo_path}, skipping generation")
+			else:
+				generate_nfo_file(destination_path, data)  # Generate in final dir
+				if nfo_exists:
+					logger.info(f"Overwriting existing NFO at {nfo_path}")
+	
+	# Download logic
+	if video_exists and not overwrite_files:
+		logger.info(f"File '{file_name}' exists. Skipping download.")
+	else:
+		download_method = site_config['download'].get('method', 'yt-dlp')
+		logger.info(f"Downloading: {file_name}")
+		if download_file(video_url, destination_path, download_method, general_config, site_config, headers=headers, metadata=data):
+			if destination_config['type'] == 'smb':
+				upload_to_smb(destination_path, smb_destination_path, destination_config, overwrite_files)
+				if make_nfo and has_selectors and os.path.exists(temp_nfo_path):
+					upload_to_smb(temp_nfo_path, smb_nfo_path, destination_config, nfo_overwrite)
+				os.remove(destination_path)
+				if os.path.exists(temp_nfo_path):
+					os.remove(temp_nfo_path)
+			elif destination_config['type'] == 'local':
+				apply_permissions(destination_path, destination_config)
+	
 	time.sleep(general_config['sleep']['between_videos'])
 
 
@@ -438,12 +469,16 @@ def fetch_page(url, user_agents, headers, use_selenium=False, driver=None, retry
 
 def extract_data(soup, selectors, driver=None, site_config=None):
 	data = {}
+	if soup is None:
+		logger.error("Soup is None; cannot extract data")
+		return data
+	
 	for field, config in selectors.items():
+		logger.debug(f"Extracting field: '{field}'")
 		if isinstance(config, str):
 			elements = soup.select(config)
 		elif isinstance(config, dict):
 			if 'iframe' in config and driver and site_config:
-				# Pierce into the specified iframe for this field
 				iframe_selector = config['iframe']
 				logger.debug(f"Piercing iframe '{iframe_selector}' for field '{field}'")
 				try:
@@ -451,7 +486,7 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 					driver.switch_to.frame(iframe)
 					iframe_soup = BeautifulSoup(driver.page_source, 'html.parser')
 					elements = iframe_soup.select(config.get('selector', ''))
-					driver.switch_to.default_content()  # Return to main context
+					driver.switch_to.default_content()
 				except Exception as e:
 					logger.error(f"Failed to pierce iframe '{iframe_selector}' for '{field}': {e}")
 					elements = []
@@ -461,24 +496,64 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 				elements = [soup]
 			else:
 				elements = []
+		else:
+			elements = []
 		
-		if elements:
-			if isinstance(config, dict) and 'attribute' in config:
-				value = elements[0].get(config['attribute'])
-			else:
-				value = elements[0].text.strip()
-			if isinstance(config, dict) and 'json_key' in config:
-				try:
-					json_data = json.loads(value)
-					value = json_data.get(config['json_key'])
-				except json.JSONDecodeError:
-					logger.error(f"Failed to parse JSON for field {field}")
-			if field in ['tags', 'genres', 'actors', 'producers']:
-				value = [element.text.strip() for element in elements]
-			data[field] = value
+		if not elements:
+			data[field] = ''
+			logger.debug(f"No elements found for '{field}'")
+			continue
+		
+		if isinstance(config, dict) and 'attribute' in config:
+			value = elements[0].get(config['attribute'])
+			if value is None:
+				logger.debug(f"Attribute '{config['attribute']}' for '{field}' is None; defaulting to empty string")
+				value = ''
+		else:
+			value = elements[0].text.strip() if hasattr(elements[0], 'text') and elements[0].text else ''
+			if value is None:
+				logger.debug(f"Text for '{field}' is None; defaulting to empty string")
+				value = ''
+		
+		logger.debug(f"Initial value for '{field}': {value}")
+		
+		if field in ['tags', 'actors', 'producers', 'studios']:
+			value = [element.text.strip() for element in elements if hasattr(element, 'text') and element.text and element.text.strip()]
+		
+		if isinstance(config, dict) and 'postProcess' in config:
+			for step in config['postProcess']:
+				if 'replace' in step:
+					for pair in step['replace']:
+						regex, replacement = pair['regex'], pair['with']
+						try:
+							if isinstance(value, list):
+								value = [re.sub(regex, replacement, v) if v else '' for v in value]
+							else:
+								value = re.sub(regex, replacement, value) if value else ''
+						except AttributeError as e:
+							logger.error(f"Replace failed for '{field}': value={value}, regex={regex}, error={e}")
+							value = '' if not isinstance(value, list) else []
+				if 'parseDate' in step and value and value.strip():
+					try:
+						value = datetime.strptime(value, step['parseDate']).strftime('%Y-%m-%d')
+					except (ValueError, TypeError) as e:
+						logger.debug(f"Failed to parse date for '{field}': '{value}', error: {e}")
+						value = ''
+		
+		if isinstance(config, dict) and 'json_key' in config:
+			try:
+				json_data = json.loads(value)
+				value = json_data.get(config['json_key'], '')
+			except json.JSONDecodeError:
+				logger.error(f"Failed to parse JSON for field '{field}': '{value}'")
+				value = ''
+		
+		data[field] = value if value or isinstance(value, list) else ''
+		logger.debug(f"Final value for '{field}': {data[field]}")
+	
 	return data
 
-def process_list_page(url, site_config, general_config, current_page=1, mode=None, identifier=None, overwrite_files=False, headers=None):
+def process_list_page(url, site_config, general_config, current_page=1, mode=None, identifier=None, overwrite_files=False, headers=None, force_replace_nfo=False):
 	use_selenium = site_config.get('use_selenium', False)
 	driver = get_selenium_driver(general_config) if use_selenium else None
 	soup = fetch_page(url, general_config['user_agents'], headers if headers else {}, use_selenium, driver)
@@ -514,7 +589,7 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 			continue
 		video_title = video_data.get('title', '') or video_element.text.strip()
 		logger.info(f"Found video: {video_title} - {video_url}")
-		process_video_page(video_url, site_config, general_config, overwrite_files, headers)
+		process_video_page(video_url, site_config, general_config, overwrite_files, headers, video_title, force_replace_nfo=force_replace_nfo)
 	
 	# Determine pagination method
 	if mode not in site_config['modes']:
@@ -533,6 +608,7 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 	next_url = None
 	if url_pattern_pages:
 		# URL pattern-based pagination
+		logger.debug(f"Called subroutine for URL pattern-based pagination...")
 		if scraper_pagination:
 			logger.warning(f"Both 'url_pattern_pages' and 'list_scraper.pagination' are defined; prioritizing 'url_pattern_pages'")
 		encoded_identifier = identifier
@@ -549,6 +625,7 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 		# Scraper-based pagination
 		if 'subsequent_pages' in scraper_pagination:
 			encoded_identifier = identifier
+			logger.debug(f"Preparing to replace encoded_identifier in scraper pagination subroutine...")
 			for original, replacement in site_config.get('url_encoding_rules', {}).items():
 				encoded_identifier = encoded_identifier.replace(original, replacement)
 			url_pattern = mode_config['url_pattern']
@@ -574,23 +651,28 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 	return None, None
 
 def should_ignore_video(data, ignored_terms):
-	for term in ignored_terms:
-		term_lower = term.lower()
-		url_encoded_term = term.lower().replace(' ', '-')
-		for field, value in data.items():
-			if isinstance(value, str):
-				words = value.lower().split()
-				if term_lower in words or url_encoded_term in words:
-					logger.info(f"Ignoring video due to term '{term}' in {field}")
+	if not ignored_terms:
+		logger.debug(f"No ignored terms...")
+		return False
+	logger.debug(f"Applying ignored terms subroutine...")
+	ignored_terms_lower = [term.lower() for term in ignored_terms]
+	ignored_terms_encoded = [term.lower().replace(' ', '-') for term in ignored_terms]
+	
+	for field, value in data.items():
+		if isinstance(value, str):
+			value_lower = value.lower()
+			for term, encoded in zip(ignored_terms_lower, ignored_terms_encoded):
+				if term in value_lower or encoded in value_lower:
+					logger.info(f"Ignoring video due to term '{term}' in {field}: '{value}'")
 					return True
-			elif isinstance(value, list):
-				for item in value:
-					words = item.lower().split()
-					if term_lower in words or url_encoded_term in words:
-						logger.info(f"Ignoring video due to term '{term}' in {field}")
+		elif isinstance(value, list):
+			for item in value:
+				item_lower = item.lower()
+				for term, encoded in zip(ignored_terms_lower, ignored_terms_encoded):
+					if term in item_lower or encoded in item_lower:
+						logger.info(f"Ignoring video due to term '{term}' in {field}: '{item}'")
 						return True
 	return False
-
 
 def apply_permissions(file_path, destination_config):
 	if 'permissions' not in destination_config:
@@ -627,7 +709,7 @@ def upload_to_smb(local_path, smb_path, destination_config, overwrite=False):
 	finally:
 		conn.close()
 
-def download_file(url, destination_path, method, general_config, site_config, headers=None):
+def download_file(url, destination_path, method, general_config, site_config, headers=None, metadata=None):
 	if not url:
 		logger.error("Invalid or empty URL")
 		return False
@@ -635,8 +717,8 @@ def download_file(url, destination_path, method, general_config, site_config, he
 	if url.startswith('//'):
 		url = 'http:' + url
 	
-	# Only use headers if explicitly required (e.g., m3u8_mode with cookies)
-	use_headers = headers and any(k in headers for k in ["Cookie"])  # Only if cookies are present
+	use_headers = headers and any(k in headers for k in ["Cookie"])
+	success = False
 	
 	if method == 'curl':
 		if use_headers:
@@ -650,7 +732,7 @@ def download_file(url, destination_path, method, general_config, site_config, he
 		else:
 			command = f"curl -L -o \"{destination_path}\" \"{url}\""
 		logger.debug(f"Executing curl command: {command}")
-		return download_with_curl(command)
+		success = download_with_curl(command)
 	elif method == 'wget':
 		if use_headers:
 			wget_headers = (
@@ -663,16 +745,20 @@ def download_file(url, destination_path, method, general_config, site_config, he
 		else:
 			command = f"wget -O \"{destination_path}\" \"{url}\""
 		logger.debug(f"Executing wget command: {command}")
-		return download_with_wget(command)
+		success = download_with_wget(command)
 	elif method == 'yt-dlp':
 		user_agent = headers.get('User-Agent', random.choice(general_config['user_agents']) if general_config.get('user_agents') else "Mozilla/5.0")
-		command = f"yt-dlp -o \"{destination_path}\" --user-agent \"{user_agent}\" \"{url}\""
-		return download_with_ytdlp(command)
+		command = f"yt-dlp -o \"{destination_path}\" --user-agent \"{user_agent}\""
+		if 'Image' in metadata:
+			command += f" --embed-thumbnail --convert-thumbnails jpg"
+			logger.debug(f"Embedding image as thumbnail: {metadata['Image']}")
+		command += f" \"{url}\""
+		logger.debug(f"Executing yt-dlp command: {command}")
+		success = download_with_ytdlp(command)
 	elif method == 'ffmpeg':
-		return download_with_ffmpeg(url, destination_path, general_config, headers)
-	else:
-		logger.error(f"Unsupported download method: {method}")
-		return False
+		success = download_with_ffmpeg(url, destination_path, general_config, headers)
+	
+	return success
 
 def download_with_curl(command):
 	process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
@@ -874,13 +960,58 @@ def match_url_to_mode(url, site_config):
 	logger.debug(f"No mode matched for URL: {url}")
 	return None, None
 
+def has_metadata_selectors(site_config):
+	"""
+	Check if the site config has selectors for metadata fields beyond title and download_url.
+	"""
+	video_scraper = site_config.get('scrapers', {}).get('video_scraper', {})
+	metadata_fields = {'tags', 'genres', 'actors', 'studios', 'date', 'code', 'image'}
+	return any(field in video_scraper for field in metadata_fields)
+	
+def generate_nfo_file(video_path, metadata):
+	nfo_path = f"{video_path.rsplit('.', 1)[0]}.nfo"
+	try:
+		with open(nfo_path, 'w', encoding='utf-8') as f:
+			f.write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n')
+			f.write('<movie>\n')
+			
+			if 'title' in metadata:
+				f.write(f"  <title>{metadata['title']}</title>\n")
+			if 'URL' in metadata:
+				f.write(f"  <url>{metadata['URL']}</url>\n")
+			if 'date' in metadata:
+				f.write(f"  <premiered>{metadata['date']}</premiered>\n")
+			if 'Code' in metadata:
+				f.write(f"  <uniqueid>{metadata['Code']}</uniqueid>\n")
+			if 'tags' in metadata and metadata['tags']:
+				for tag in set(metadata['tags']):  # Deduplicate tags
+					f.write(f"  <tag>{tag}</tag>\n")
+			if 'actors' in metadata and metadata['actors']:
+				for i, performer in enumerate(metadata['actors'], 1):
+					f.write(f"  <actor>\n    <name>{performer}</name>\n    <order>{i}</order>\n  </actor>\n")
+			if 'Image' in metadata:
+				f.write(f"  <thumb aspect=\"poster\">{metadata['Image']}</thumb>\n")
+			if 'studios' in metadata and metadata['studios']:
+				f.write(f"  <studio>{metadata['studios'][0]}</studio>\n")
+			if 'description' in metadata:
+				f.write(f"  <plot>{metadata['description']}</plot>\n")
+			
+			f.write('</movie>\n')
+		logger.info(f"Generated NFO file: {nfo_path}")
+		return True
+	except Exception as e:
+		logger.error(f"Failed to generate NFO file {nfo_path}: {e}")
+		return False
+
 def main():
 	parser = argparse.ArgumentParser(description='Video Scraper')
 	parser.add_argument('args', nargs='+', help='Site identifier and mode, or direct URL')
 	parser.add_argument('--debug', action='store_true', help='Enable debug logging')
 	parser.add_argument('--overwrite_files', action='store_true', help='Overwrite existing files')
+	parser.add_argument('--force_replace_nfo', action='store_true', help='Force replacement of existing NFO files')
 	parser.add_argument('--start_on_page', type=int, default=1, help='Starting page number for URL-based pagination')
 	args = parser.parse_args()
+	
 	log_level = "DEBUG" if args.debug else "INFO"
 	logger.remove()
 	logger.add(sys.stderr, level=log_level)
@@ -903,14 +1034,14 @@ def main():
 				if mode:
 					logger.info(f"Matched URL to mode '{mode}' with scraper '{scraper}'")
 					if mode == 'video':
-						process_video_page(url, matched_site_config, general_config, args.overwrite_files, headers)
+						process_video_page(url, matched_site_config, general_config, args.overwrite_files, headers, force_replace_nfo=args.force_replace_nfo)
 					else:
-						identifier = url.split('/')[-1].split('.')[0]  # Adjust based on URL structure
+						identifier = url.split('/')[-1].split('.')[0]
 						current_page = args.start_on_page
 						mode_config = matched_site_config['modes'][mode]
-						# Construct initial URL based on start_on_page
 						if current_page > 1 and mode_config.get('url_pattern_pages'):
 							encoded_identifier = identifier
+							logger.debug(f"Performing replacements on encoded_identifier...")
 							for original, replacement in matched_site_config.get('url_encoding_rules', {}).items():
 								encoded_identifier = encoded_identifier.replace(original, replacement)
 							url = construct_url(
@@ -920,11 +1051,10 @@ def main():
 								**{mode: encoded_identifier, 'page': current_page}
 							)
 							logger.info(f"Starting at custom page {current_page}: {url}")
-						# If starting at page 1, use url_pattern as is (no change needed)
 						while url:
 							next_page, new_page_number = process_list_page(
 								url, matched_site_config, general_config, current_page,
-								mode, identifier, args.overwrite_files, headers
+								mode, identifier, args.overwrite_files, headers, args.force_replace_nfo
 							)
 							if next_page is None:
 								break
@@ -933,7 +1063,7 @@ def main():
 							time.sleep(general_config['sleep']['between_pages'])
 				else:
 					logger.warning("URL didn't match any mode; assuming video page.")
-					process_video_page(url, matched_site_config, general_config, args.overwrite_files, headers)
+					process_video_page(url, matched_site_config, general_config, args.overwrite_files, headers, force_replace_nfo=args.force_replace_nfo)
 			else:
 				process_fallback_download(url, general_config, args.overwrite_files)
 	
@@ -947,7 +1077,6 @@ def main():
 				sys.exit(1)
 			mode_config = site_config['modes'][mode]
 			current_page = args.start_on_page
-			# Construct initial URL: use url_pattern for page 1, url_pattern_pages for > 1
 			if current_page > 1 and mode_config.get('url_pattern_pages'):
 				url = construct_url(
 					site_config['base_url'],
@@ -966,12 +1095,12 @@ def main():
 				if current_page > 1:
 					logger.warning(f"Starting page {current_page} requested, but no 'url_pattern_pages' defined; starting at page 1")
 			if mode == 'video':
-				process_video_page(url, site_config, general_config, args.overwrite_files, headers)
+				process_video_page(url, site_config, general_config, args.overwrite_files, headers, force_replace_nfo=args.force_replace_nfo)
 			else:
 				while url:
 					next_page, new_page_number = process_list_page(
 						url, site_config, general_config, current_page, mode,
-						identifier, args.overwrite_files, headers
+						identifier, args.overwrite_files, headers, args.force_replace_nfo  # Fixed typo
 					)
 					if next_page is None:
 						break

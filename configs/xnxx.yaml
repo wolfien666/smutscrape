@@ -40,12 +40,22 @@ download:
 scrapers:
   video_scraper:
     title:
-      selector: "div.video-title strong"  # Updated to match HTML
+      selector: "div.video-title strong"
+    tags:
+      selector: "div.metadata-row.video-tags a.is-keyword"
+
+    actors:
+      selector: "div.metadata-row.video-tags a.is-pornstar"
+    studios:
+      selector: "span.metadata a.gold-plate, span.metadata a.free-plate"
+    description:
+      selector: "p.metadata-row.video-description"
 
   list_scraper:
     video_container:
       selector:
         - "div#psvideos div.mozaique.cust-nb-cols"
+        - "div#content-thumbs div.mozaique.cust-nb-cols"
     video_item:
       selector: "div.thumb-under a"
       fields:

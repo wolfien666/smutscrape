@@ -527,26 +527,27 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 						regex, replacement = pair['regex'], pair['with']
 						try:
 							if isinstance(value, list):
-								value = [re.sub(regex, replacement, v) if v else '' for v in value]
+								value = [re.sub(regex, replacement, v, flags=re.DOTALL) if v else '' for v in value]
 							else:
-								value = re.sub(regex, replacement, value) if value else ''
+								old_value = value
+								value = re.sub(regex, replacement, value, flags=re.DOTALL) if value else ''
+								if value != old_value:
+									logger.debug(f"Applied regex '{regex}' -> '{replacement}' for '{field}': {value}")
+								else:
+									logger.debug(f"Regex '{regex}' did not match for '{field}'")
+						except re.error as e:
+							logger.error(f"Regex error for '{field}': regex={regex}, error={e}")
+							value = ''
 						except AttributeError as e:
 							logger.error(f"Replace failed for '{field}': value={value}, regex={regex}, error={e}")
 							value = '' if not isinstance(value, list) else []
 				if 'parseDate' in step and value and value.strip():
 					try:
-						value = datetime.strptime(value, step['parseDate']).strftime('%Y-%m-%d')
+						value = datetime.strptime(value.strip(), step['parseDate']).strftime('%Y-%m-%d')
+						logger.debug(f"Parsed date for '{field}' with format '{step['parseDate']}': {value}")
 					except (ValueError, TypeError) as e:
-						logger.debug(f"Failed to parse date for '{field}': '{value}', error: {e}")
+						logger.debug(f"Failed to parse date for '{field}' with format '{step['parseDate']}': '{value}', error: {e}")
 						value = ''
-		
-		if isinstance(config, dict) and 'json_key' in config:
-			try:
-				json_data = json.loads(value)
-				value = json_data.get(config['json_key'], '')
-			except json.JSONDecodeError:
-				logger.error(f"Failed to parse JSON for field '{field}': '{value}'")
-				value = ''
 		
 		data[field] = value if value or isinstance(value, list) else ''
 		logger.debug(f"Final value for '{field}': {data[field]}")

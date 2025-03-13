@@ -43,14 +43,34 @@ scrapers:
       selector: "div.video-title strong"
     tags:
       selector: "div.metadata-row.video-tags a.is-keyword"
-
+      postProcess:
+        - replace:
+            - regex: "Edit tags and models"
+              with: ""
     actors:
       selector: "div.metadata-row.video-tags a.is-pornstar"
     studios:
       selector: "span.metadata a.gold-plate, span.metadata a.free-plate"
     description:
       selector: "p.metadata-row.video-description"
+      postProcess:
+        - replace:
+            - regex: "^\\+More videos like this one at .*?\n"
+              with: ""
+    date:
+        selector: "script[type='application/ld+json']"
+        postProcess:
+          - replace:
+              - regex: '.*"uploadDate":\s*"([^"]+)".*'
+                with: "\\1"
+          - parseDate: "2006-01-02T15:04:05-07:00"
 
+    image:
+      selector: "script:contains('setThumbUrl169')"
+      postProcess:
+        - replace:
+            - regex: ".*setThumbUrl169\\(['\"]([^'\"]+)['\"]\\).*"
+              with: "\\1"
   list_scraper:
     video_container:
       selector:

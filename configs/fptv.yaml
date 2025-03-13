@@ -1,0 +1,63 @@
+name: FamilyPornTV
+domain: familyporn.tv
+base_url: "https://familyporn.tv"
+selector_style: css
+no_overwrite: true
+use_selenium: true  # Required for video URL extraction
+
+url_encoding_rules:
+  " ": "-"
+  "%20": "-"
+
+modes:
+  video:
+    url_pattern: "/videos/{video_id}/"  # Matches "/videos/slug/"
+    scraper: video_scraper
+  models:
+    scraper: list_scraper
+    url_pattern: "/models/{models}/"
+  category:
+    scraper: list_scraper
+    url_pattern: "/categories/{category}/"
+  search:
+    scraper: list_scraper
+    url_pattern: "/search/{search}/"
+
+download:
+  method: "yt-dlp"  # Switched to yt-dlp as requested
+
+scrapers:
+  video_scraper:
+    title:
+      selector: "head title"  # More reliable than video element
+    download_url:
+      selector: "#kt_player > div.fp-player > video"
+      attribute: "src"
+    models:
+      selector: "div.video-info div.holder div.item div.star a.link"
+      multiple: true
+      attribute: "text"
+    categories:
+      selector: "div.categories-wrap ul.top-tags li.item a.link span.text"
+      multiple: true
+    tags:
+      selector: "div.details-tags-wrap ul.details-tags li.item a.link span.text"
+      multiple: true
+    description:
+      selector: "div.description div.player-text"
+
+  list_scraper:
+    video_container:
+      selector:
+        - "#list_videos_videos_list_search_result_items"
+    video_item:
+      selector: "li.item > div.thumb-horizontal > a.link"
+      fields:
+        url:
+          attribute: "href"
+        title:
+          attribute: "title"
+    pagination:
+      next_page:
+        selector: null  # Pagination via params; see notes
+        attribute: "href"

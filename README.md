@@ -126,8 +126,9 @@ scrape https://someUnsupportedSite.com/video/12345
 | Site Code | Site                     | Modes Available                              |
 |-----------|--------------------------|----------------------------------------------|
 | `9v`      | 9vids.com                | `video`, `search`, `tag`                     |
-| `fs`      | family-sex.me            | `video`, `search`, `tag`                     |
 | `fphd`    | familypornhd.com         | `video`, `category`, `tag`, `studio`         |
+| `fptv`    | familyporn.tv            | `video`, `search`, `category`, `models`      |
+| `fs`      | family-sex.me            | `video`, `search`, `tag`                     |
 | `fsv`     | familysexvideos.org      | `video`, `search`                            |
 | `if`      | incestflix.com           | `video`, `search`, `tag`                     |
 | `lf`      | lonefun.com              | `video`, `search`, `tag`                     |

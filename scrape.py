@@ -543,7 +543,9 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 							value = '' if not isinstance(value, list) else []
 				if 'parseDate' in step and value and value.strip():
 					try:
-						value = datetime.strptime(value.strip(), step['parseDate']).strftime('%Y-%m-%d')
+						# Ensure the format matches the input exactly
+						parsed = datetime.strptime(value.strip(), step['parseDate'])
+						value = parsed.strftime('%Y-%m-%d')
 						logger.debug(f"Parsed date for '{field}' with format '{step['parseDate']}': {value}")
 					except (ValueError, TypeError) as e:
 						logger.debug(f"Failed to parse date for '{field}' with format '{step['parseDate']}': '{value}', error: {e}")

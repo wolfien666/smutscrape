@@ -292,6 +292,7 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 			temp_nfo_path = os.path.join(temp_dir, f"{file_name.rsplit('.', 1)[0]}.nfo")
 			nfo_exists = file_exists_on_smb(destination_config, smb_nfo_path)
 			if nfo_overwrite or not nfo_exists:
+				logger.debug(f"Calling generate_nfo_file for {destination_path} with metadata: {data}")
 				generate_nfo_file(destination_path, data)
 				if os.path.exists(temp_nfo_path):
 					upload_to_smb(temp_nfo_path, smb_nfo_path, destination_config, nfo_overwrite)
@@ -306,6 +307,7 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 			nfo_path = f"{destination_path.rsplit('.', 1)[0]}.nfo"
 			nfo_exists = os.path.exists(nfo_path)
 			if nfo_overwrite or not nfo_exists:
+				logger.debug(f"Calling generate_nfo_file for {destination_path} with metadata: {data}")
 				generate_nfo_file(destination_path, data)
 				if nfo_exists:
 					logger.info(f"Overwriting existing NFO at {nfo_path}")
@@ -547,13 +549,12 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 					logger.error(f"Failed to pierce iframe '{iframe_selector}' for '{field}': {e}")
 					elements = []
 			elif 'selector' in config:
-				# Handle both string and list selectors
 				selector = config['selector']
 				if isinstance(selector, list):
 					elements = []
 					for sel in selector:
 						elements.extend(soup.select(sel))
-						if elements:  # Stop at first successful match
+						if elements:
 							break
 				else:
 					elements = soup.select(selector)
@@ -582,11 +583,9 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 		
 		logger.debug(f"Initial value for '{field}': {value}")
 		
-		# Handle multi-value fields (tags, actors, producers, studios)
+		# Handle multi-value fields without stripping '#'
 		if field in ['tags', 'actors', 'producers', 'studios']:
 			value = [element.text.strip() for element in elements if hasattr(element, 'text') and element.text and element.text.strip()]
-			# Remove '#' prefix from each value
-			value = [v.lstrip('#') for v in value]
 		
 		if isinstance(config, dict) and 'postProcess' in config:
 			for step in config['postProcess']:
@@ -601,22 +600,9 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 								value = re.sub(regex, replacement, value, flags=re.DOTALL) if value else ''
 								if value != old_value:
 									logger.debug(f"Applied regex '{regex}' -> '{replacement}' for '{field}': {value}")
-								else:
-									logger.debug(f"Regex '{regex}' did not match for '{field}'")
 						except re.error as e:
 							logger.error(f"Regex error for '{field}': regex={regex}, error={e}")
 							value = ''
-						except AttributeError as e:
-							logger.error(f"Replace failed for '{field}': value={value}, regex={regex}, error={e}")
-							value = '' if not isinstance(value, list) else []
-				if 'parseDate' in step and value and value.strip():
-					try:
-						parsed = datetime.strptime(value.strip(), step['parseDate'])
-						value = parsed.strftime('%Y-%m-%d')
-						logger.debug(f"Parsed date for '{field}' with format '{step['parseDate']}': {value}")
-					except (ValueError, TypeError) as e:
-						logger.debug(f"Failed to parse date for '{field}' with format '{step['parseDate']}': '{value}', error: {e}")
-						value = ''
 		
 		data[field] = value if value or isinstance(value, list) else ''
 		logger.debug(f"Final value for '{field}': {data[field]}")
@@ -721,6 +707,7 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 	logger.debug("No next page URL generated; stopping pagination")
 	return None, None
 
+	
 def should_ignore_video(data, ignored_terms):
 	if not ignored_terms:
 		logger.debug(f"No ignored terms...")
@@ -729,18 +716,22 @@ def should_ignore_video(data, ignored_terms):
 	ignored_terms_lower = [term.lower() for term in ignored_terms]
 	ignored_terms_encoded = [term.lower().replace(' ', '-') for term in ignored_terms]
 	
+	# Compile regex patterns with word boundaries for efficiency
+	term_patterns = [re.compile(r'\b' + re.escape(term) + r'\b') for term in ignored_terms_lower]
+	encoded_patterns = [re.compile(r'\b' + re.escape(encoded) + r'\b') for encoded in ignored_terms_encoded]
+	
 	for field, value in data.items():
 		if isinstance(value, str):
 			value_lower = value.lower()
-			for term, encoded in zip(ignored_terms_lower, ignored_terms_encoded):
-				if term in value_lower or encoded in value_lower:
+			for term, term_pattern, encoded_pattern in zip(ignored_terms_lower, term_patterns, encoded_patterns):
+				if term_pattern.search(value_lower) or encoded_pattern.search(value_lower):
 					logger.info(f"Ignoring video due to term '{term}' in {field}: '{value}'")
 					return True
 		elif isinstance(value, list):
 			for item in value:
 				item_lower = item.lower()
-				for term, encoded in zip(ignored_terms_lower, ignored_terms_encoded):
-					if term in item_lower or encoded in item_lower:
+				for term, term_pattern, encoded_pattern in zip(ignored_terms_lower, term_patterns, encoded_patterns):
+					if term_pattern.search(item_lower) or encoded_pattern.search(item_lower):
 						logger.info(f"Ignoring video due to term '{term}' in {field}: '{item}'")
 						return True
 	return False
@@ -1080,43 +1071,105 @@ def has_metadata_selectors(site_config):
 	Check if the site config has selectors for metadata fields beyond title and download_url.
 	"""
 	video_scraper = site_config.get('scrapers', {}).get('video_scraper', {})
-	metadata_fields = {'tags', 'genres', 'actors', 'studios', 'date', 'code', 'image'}
+	metadata_fields = {'tags', 'actors', 'studio', 'studios', 'date', 'code', 'image'}
 	return any(field in video_scraper for field in metadata_fields)
-	
+
+
+def custom_title_case(text, uppercase_list=None, preserve_mixed_case=False):
+	if not text:
+		return text
+	uppercase_list = uppercase_list or []  # Ensure it’s never None
+	if preserve_mixed_case and re.search(r'[a-z][A-Z]|[A-Z][a-z]', text) and text not in uppercase_list:
+		return text
+	upper_set = set(term.upper() for term in uppercase_list)
+	words = text.split()
+	if not words:
+		word_upper = text.upper()
+		return word_upper if word_upper in upper_set else text.title()
+	if not preserve_mixed_case or len(words) > 1:
+		result = []
+		for word in words:
+			word_upper = word.upper()
+			if word_upper in upper_set:
+				result.append(word_upper)
+			else:
+				result.append(word.title())
+		final_text = ' '.join(result)
+	else:
+		final_text = text.title()
+		for term in uppercase_list:
+			pattern = re.compile(r'\b' + re.escape(term) + r'\b', re.IGNORECASE)
+			final_text = pattern.sub(term.upper(), final_text)
+	return final_text
+
 def generate_nfo_file(video_path, metadata):
 	nfo_path = f"{video_path.rsplit('.', 1)[0]}.nfo"
+	
+	tag_uppercase = [
+		"ABDL", "ASMR", "BBW", "BDSM", "DP", "JAV", "JOI", "POV", "BBS", "BS", "BSS",
+		"FD", "FDD", "FDDD", "FDDDD", "FMD", "FMDD", "FMDDD", "FMS", "FMSS", "FS",
+		"FSD", "MD", "MDD", "MDDD", "MDDDD", "MMD", "MMS", "MS", "MSD", "MSS",
+		"MSSD", "MSSS", "MSSSS", "MSDD", "SS", "3D", "4K"
+	]
+	studio_uppercase = ["DP", "JAV", "JOI", "POV", "3D", "4K"]
+	
 	try:
+		logger.debug(f"Using generate_nfo_file version 1.3")
+		logger.debug(f"Generating NFO with metadata: {metadata}")
 		with open(nfo_path, 'w', encoding='utf-8') as f:
 			f.write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n')
 			f.write('<movie>\n')
 			
-			if 'title' in metadata:
+			if 'title' in metadata and metadata['title']:
 				f.write(f"  <title>{metadata['title']}</title>\n")
-			if 'URL' in metadata:
+			if 'URL' in metadata and metadata['URL']:
 				f.write(f"  <url>{metadata['URL']}</url>\n")
-			if 'date' in metadata:
+			if 'date' in metadata and metadata['date']:
 				f.write(f"  <premiered>{metadata['date']}</premiered>\n")
-			if 'Code' in metadata:
+			if 'Code' in metadata and metadata['Code']:
 				f.write(f"  <uniqueid>{metadata['Code']}</uniqueid>\n")
-			if 'tags' in metadata and metadata['tags']:
-				for tag in set(metadata['tags']):  # Deduplicate tags
-					f.write(f"  <tag>{tag}</tag>\n")
-			if 'actors' in metadata and metadata['actors']:
-				for i, performer in enumerate(metadata['actors'], 1):
-					f.write(f"  <actor>\n    <name>{performer}</name>\n    <order>{i}</order>\n  </actor>\n")
-			if 'Image' in metadata:
+			if 'tags' in metadata:
+				logger.debug(f"Tags value: {metadata['tags']}")
+				if metadata['tags'] is None:
+					logger.warning(f"Tags is None for {nfo_path}")
+				elif len(metadata['tags']) > 0:
+					for tag in set(metadata['tags']):
+						cleaned_tag = tag.lstrip('#')
+						formatted_tag = custom_title_case(cleaned_tag, tag_uppercase)
+						f.write(f"  <tag>{formatted_tag}</tag>\n")
+			if 'actors' in metadata:
+				logger.debug(f"Actors value: {metadata['actors']}")
+				if metadata['actors'] is None:
+					logger.warning(f"Actors is None for {nfo_path}")
+				elif len(metadata['actors']) > 0:
+					for i, performer in enumerate(metadata['actors'], 1):
+						cleaned_performer = performer.lstrip('#')
+						formatted_performer = custom_title_case(cleaned_performer, tag_uppercase, preserve_mixed_case=True)
+						f.write(f"  <actor>\n    <name>{formatted_performer}</name>\n    <order>{i}</order>\n  </actor>\n")
+			if 'Image' in metadata and metadata['Image']:
 				f.write(f"  <thumb aspect=\"poster\">{metadata['Image']}</thumb>\n")
-			if 'studios' in metadata and metadata['studios']:
-				f.write(f"  <studio>{metadata['studios'][0]}</studio>\n")
-			if 'description' in metadata:
+			if 'studio' in metadata and metadata['studio']:
+				cleaned_studio = metadata['studio'].lstrip('#')
+				formatted_studio = custom_title_case(cleaned_studio, studio_uppercase, preserve_mixed_case=True)
+				f.write(f"  <studio>{formatted_studio}</studio>\n")
+			elif 'studios' in metadata:
+				logger.debug(f"Studios value: {metadata['studios']}")
+				if metadata['studios'] is None:
+					logger.warning(f"Studios is None for {nfo_path}")
+				elif len(metadata['studios']) > 0:
+					cleaned_studio = metadata['studios'][0].lstrip('#')  # Only take first studio
+					formatted_studio = custom_title_case(cleaned_studio, studio_uppercase, preserve_mixed_case=True)
+					f.write(f"  <studio>{formatted_studio}</studio>\n")
+			if 'description' in metadata and metadata['description']:
 				f.write(f"  <plot>{metadata['description']}</plot>\n")
 			
 			f.write('</movie>\n')
 		logger.info(f"Generated NFO file: {nfo_path}")
 		return True
 	except Exception as e:
-		logger.error(f"Failed to generate NFO file {nfo_path}: {e}")
-		return False
+		logger.error(f"Failed to generate NFO file {nfo_path}: {e}", exc_info=True)  # Include stack trace
+		raise
+	
 
 def main():
 	parser = argparse.ArgumentParser(description='Video Scraper')

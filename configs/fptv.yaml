@@ -38,13 +38,13 @@ scrapers:
       selector: "#kt_player > div.fp-player > video"
       attribute: "src"
     studios:
-      selector: "div.categories-wrap ul.top-tags li.item a.link span.text:first-child"
+      selector: "div.video-info div.holder div.item a.site div.text"
     actors:
       selector: "div.video-info div.holder div.item div.star a.link"
     description:
       selector: "div.description div.player-text"
     tags:
-      selector: "div.details-tags-wrap ul.details-tags li.item a.link span.text"
+      selector: "ul.details-tags li.item a.link span.text, ul.top-tags li.item a.link span.text"
 
   list_scraper:
     video_container:

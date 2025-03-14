@@ -3,7 +3,7 @@ domain: familyporn.tv
 base_url: "https://familyporn.tv"
 selector_style: css
 no_overwrite: true
-use_selenium: true  # Required for video URL extraction
+use_selenium: true
 
 url_encoding_rules:
   " ": "-"
@@ -11,31 +11,32 @@ url_encoding_rules:
 
 modes:
   video:
-    url_pattern: "/videos/{video_id}/"  # Matches "/videos/slug/"
+    url_pattern: "/videos/{video_id}/"
     scraper: video_scraper
-  actors:  # Changed from "models" to "actors"
+  actors:
     scraper: list_scraper
-    url_pattern: "/models/{actors}/"  # Updated key name reflected in pattern
+    url_pattern: "/models/{actors}/"
   category:
     scraper: list_scraper
     url_pattern: "/categories/{category}/"
   search:
     scraper: list_scraper
     url_pattern: "/search/{search}/"
+    max_pages: 999
 
 download:
-  method: "yt-dlp"  # Already updated as requested
+  method: "yt-dlp"
 
 scrapers:
   video_scraper:
     title:
-      selector: "head title"  # Kept as is; reliable for now
+      selector: "head title"
     download_url:
       selector: "#kt_player > div.fp-player > video"
       attribute: "src"
-    studio:  # Changed from "categories" to "studio" (assuming it’s a single entity)
-      selector: "div.categories-wrap ul.top-tags li.item a.link span.text:first-child"  # First category as studio
-    actors:  # Changed from "models" to "actors"
+    studios:
+      selector: "div.categories-wrap ul.top-tags li.item a.link span.text:first-child"
+    actors:
       selector: "div.video-info div.holder div.item div.star a.link"
     description:
       selector: "div.description div.player-text"
@@ -55,5 +56,5 @@ scrapers:
           {}
     pagination:
       next_page:
-        selector: null  # Pagination via params; no change needed
-        attribute: "href"
+        selector: "ul.pagination li.next a.primary-link"
+        attribute: "data-parameters"

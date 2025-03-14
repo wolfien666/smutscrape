@@ -35,12 +35,12 @@ scrapers:
       selector: "ol[itemtype='http://schema.org/BreadcrumbList'] li:last-child span[itemprop='name']"
     download_url:
       iframe: "iframe"
-    studio:
+    studios:
       selector: "ol[itemtype='http://schema.org/BreadcrumbList'] li:nth-child(2) span[itemprop='name']"
     actors:
       selector: "div.g1-content-narrow p.has-text-align-center a[href*='/tag/']:not(:has(strong))"
     description:
-      selector: "div.g1-content-narrow p.has-text-align-center:nth-of-type(2)"  # Fixed to target second <p>
+      selector: "div.g1-content-narrow p.has-text-align-center:nth-of-type(2)"
     tags:
       selector: "p.entry-tags a.entry-tag"
 

@@ -36,9 +36,9 @@ scrapers:
       selector: "div#incflix-stream source"
       attribute: "src"
     tags:
-      selector: "div#videotags a.studiolink3, div#videotags a.studiolink4"
+      selector: "div#videotags a.studiolink3, div#videotags a.studiolink4, div#videotags a.studiolink0"
     actors:
-      selector: "div#videotags a.studiolink0, div#videotags a.studiolink1"
+      selector: "div#videotags a.studiolink1"
     studio:
       selector: "div#videotags a.studiolink2"
     image:

@@ -7,7 +7,7 @@ download_destinations:
     path: "XXX"                 # Folder within the share to save videos
     username: "SMB_User"        # SMB username
     password: "SMB_Password"    # SMB password
-    temporary_storage: "/tmp/smutscrape"  # Local temp folder for downloads before SMB upload (default: ./.tmp_downloads)
+    temporary_storage: "/tmp/smutscrape"  # Local temp folder for downloads before SMB upload (default: /tmp/smutscrape)
     permissions:                # Optional: Set file ownership and permissions
       uid: 1000                 # User ID (numeric)
       gid: 3003                 # Group ID (numeric, e.g., media group)
@@ -27,19 +27,22 @@ download_destinations:
 # Whether to overwrite existing files (default: false preserves files)
 overwrite_files: false
 
-# Tags to skip during scraping (case-insensitive)
+# Allows the creation of .nfo files holding scraped metadata
+make_nfo: true
+
+# Terms to skip during scraping (case-insensitive, applied to all metadata fields
 ignored:
   - "JOI"
   - "Virtual Sex"
   - "Scat"
 
-# Selenium configuration for sites requiring JavaScript or M3U8 streams
+# Selenium configuration for sites requiring JavaScript or M3U8 streams. Leave it set to "local" and the rest commented out to let webdriver-manager handle everything, override with the paths to your Chrome and chromedriver binaries, or use a remote Selenium host.
 selenium:
   mode: "local"                       # "local" or "remote" (e.g., Docker)
   # chromedriver_path: "/usr/bin/chromedriver"  # Optional: Path to ChromeDriver; omit to use webdriver-manager
   # chrome_binary: "/usr/lib/chromium/chromium"  # Optional: Path to Chrome binary (e.g., for Debian)
-  host: "127.0.0.1"                  # Remote Selenium host (if mode is "remote")
-  port: "4444"                       # Remote Selenium port (if mode is "remote")
+  # host: "127.0.0.1"                  # Remote Selenium host (if mode is "remote")
+  # port: "4444"                       # Remote Selenium port (if mode is "remote")
 
 # VPN settings for anonymous scraping (omit or set enabled: false if not used)
 vpn:

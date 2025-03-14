@@ -174,7 +174,7 @@ def get_selenium_driver(general_config, force_new=False):
 	return general_config['selenium_driver']
 
 
-def process_video_page(url, site_config, general_config, overwrite_files=False, headers=None, force_replace_nfo=False):
+def process_video_page(url, site_config, general_config, overwrite_files=False, headers=None, force_new_nfo=False):
 	global last_vpn_action_time
 	vpn_config = general_config.get('vpn', {})
 	if vpn_config.get('enabled', False):
@@ -260,7 +260,7 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 	file_name = construct_filename(video_title, site_config, general_config)
 	destination_config = general_config['download_destinations'][0]
 	overwrite = overwrite_files or site_config.get('overwrite_files', general_config.get('overwrite_files', False))
-	nfo_overwrite = overwrite_files or force_replace_nfo
+	nfo_overwrite = overwrite_files or force_new_nfo
 	
 	if destination_config['type'] == 'smb':
 		smb_destination_path = os.path.join(destination_config['path'], file_name)
@@ -618,7 +618,7 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 	
 	return data
 
-def process_list_page(url, site_config, general_config, current_page=1, mode=None, identifier=None, overwrite_files=False, headers=None, force_replace_nfo=False):
+def process_list_page(url, site_config, general_config, current_page=1, mode=None, identifier=None, overwrite_files=False, headers=None, force_new_nfo=False):
 	use_selenium = site_config.get('use_selenium', False)
 	driver = get_selenium_driver(general_config) if use_selenium else None
 	soup = fetch_page(url, general_config['user_agents'], headers if headers else {}, use_selenium, driver)
@@ -654,8 +654,8 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 			continue
 		video_title = video_data.get('title', '') or video_element.text.strip()
 		logger.info(f"Found video: {video_title} - {video_url}")
-		# def process_video_page(url, site_config, general_config, overwrite_files=False, headers=None, force_replace_nfo=False):
-		process_video_page(video_url, site_config, general_config, overwrite_files, headers, force_replace_nfo)
+		# def process_video_page(url, site_config, general_config, overwrite_files=False, headers=None, force_new_nfo=False):
+		process_video_page(video_url, site_config, general_config, overwrite_files, headers, force_new_nfo)
 	
 	# Determine pagination method
 	if mode not in site_config['modes']:
@@ -1092,7 +1092,7 @@ def main():
 	parser.add_argument('args', nargs='+', help='Site identifier and mode, or direct URL')
 	parser.add_argument('--debug', action='store_true', help='Enable debug logging')
 	parser.add_argument('--overwrite_files', action='store_true', help='Overwrite existing files')
-	parser.add_argument('--force_replace_nfo', action='store_true', help='Force replacement of existing NFO files')
+	parser.add_argument('--force_new_nfo', action='store_true', help='Force replacement of existing NFO files')
 	parser.add_argument('--start_on_page', type=int, default=1, help='Starting page number for URL-based pagination')
 	args = parser.parse_args()
 	
@@ -1122,7 +1122,7 @@ def main():
 				if mode:
 					logger.info(f"Matched URL to mode '{mode}' with scraper '{scraper}'")
 					if mode == 'video':
-						process_video_page(url, matched_site_config, general_config, args.overwrite_files, headers, args.force_replace_nfo)
+						process_video_page(url, matched_site_config, general_config, args.overwrite_files, headers, args.force_new_nfo)
 					else:
 						identifier = url.split('/')[-1].split('.')[0]
 						current_page = args.start_on_page
@@ -1140,10 +1140,10 @@ def main():
 							)
 							logger.info(f"Starting at custom page {current_page}: {url}")
 						while url:
-							# def process_list_page(url, site_config, general_config, current_page=1, mode=None, identifier=None, overwrite_files=False, headers=None, force_replace_nfo=False):
+							# def process_list_page(url, site_config, general_config, current_page=1, mode=None, identifier=None, overwrite_files=False, headers=None, force_new_nfo=False):
 							next_page, new_page_number = process_list_page(
 								url, matched_site_config, general_config, current_page,
-								mode, identifier, args.overwrite_files, headers, args.force_replace_nfo
+								mode, identifier, args.overwrite_files, headers, args.force_new_nfo
 							)
 							if next_page is None:
 								break
@@ -1153,7 +1153,7 @@ def main():
 				else:
 					logger.warning("URL didn't match any mode; assuming video page.")
 
-					process_video_page(url, matched_site_config, general_config, args.overwrite_files, headers, args.force_replace_nfo)
+					process_video_page(url, matched_site_config, general_config, args.overwrite_files, headers, args.force_new_nfo)
 			else:
 				process_fallback_download(url, general_config, args.overwrite_files)
 	
@@ -1185,12 +1185,12 @@ def main():
 				if current_page > 1:
 					logger.warning(f"Starting page {current_page} requested, but no 'url_pattern_pages' defined; starting at page 1")
 			if mode == 'video':
-				process_video_page(url, site_config, general_config, args.overwrite_files, headers, args.force_replace_nfo)
+				process_video_page(url, site_config, general_config, args.overwrite_files, headers, args.force_new_nfo)
 			else:
 				while url:
 					next_page, new_page_number = process_list_page(
 						url, site_config, general_config, current_page, mode,
-						identifier, args.overwrite_files, headers, args.force_replace_nfo 
+						identifier, args.overwrite_files, headers, args.force_new_nfo 
 					)
 					if next_page is None:
 						break

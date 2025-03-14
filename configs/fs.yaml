@@ -4,6 +4,7 @@ base_url: "https://family-sex.me"
 selector_style: css
 no_overwrite: true
 use_selenium: true
+m3u8_mode: true
 
 url_encoding_rules:
   " ": "-"
@@ -31,15 +32,16 @@ scrapers:
       selector: "aside.cvmoplc h1"
     download_url:
       iframe: "iframe"
-    studio:
+      selector: "iframe"  # Added to extract src
+      attribute: "src"   # Extracts "https://ojiz.net/embed/46419"
+    studios:  # Plural for consistency
       selector: "aside.cvmcaun.cvmtiv a[rel='nofollow']"
     actors:
-      selector: "aside.cvmoplc h2"
-      postProcess: "extract_actors"
+      selector: "aside.cvmcaun:contains('Starring:') p a"  # No postProcess
     description:
-      selector: "aside.cvmoplc h2"
+      selector: "aside.cvmcaun.cvmoplc.de h2"
     tags:
-      selector: "aside.cvmcaun p a"
+      selector: "aside.cvmcaun:contains('Related Tags:') p a"
 
   list_scraper:
     video_container:
@@ -51,4 +53,5 @@ scrapers:
         url:
           attribute: "href"
         title:
-          {}
+          selector: "img"  # Assuming thumbnail alt or title
+          attribute: "alt" # Adjust based on list page HTML

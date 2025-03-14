@@ -2,13 +2,16 @@
 requests>=2.31.0  # For HTTP requests when Selenium isn’t used
 beautifulsoup4>=4.12.3  # For HTML parsing
 pyyaml>=6.0.1  # For parsing YAML configs
+tqdm
 
 # Selenium and ChromeDriver management
 selenium>=4.18.1  # For JS-heavy sites, iframe piercing, and M3U8 extraction
 webdriver-manager>=4.0.1  # For automatic ChromeDriver downloads
+cloudscraper
 
 # SMB support (if using SMB destinations)
 smbprotocol>=1.13.0  # For SMB file transfers
+pysmb
 
 # WebDAV support (if using WebDAV destinations)
 webdavclient3>=3.14.6  # For WebDAV file transfers

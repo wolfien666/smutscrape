@@ -317,17 +317,49 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 
 def download_with_ffmpeg(url, destination_path, general_config, headers=None):
 	headers = headers or {}
-	ffmpeg_headers = (
-		f"User-Agent: {headers.get('User-Agent', random.choice(general_config['user_agents']))}"
-		f"\nReferer: {headers.get('Referer', 'https://bestwish.lol/Bhow0r6jyqdeR')}"
-	)
-	if "Cookie" in headers and headers["Cookie"]:
-		ffmpeg_headers += f"\nCookie: {headers['Cookie']}"
+	ua = headers.get('User-Agent', random.choice(general_config['user_agents']))
+	if "Headless" in ua:
+		ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 	
+	# Step 1: Fetch the .m3u8 file with requests to mimic browser context
+	fetch_headers = {
+		"User-Agent": ua,
+		"Referer": headers.get("Referer", ""),
+		"Accept": "application/vnd.apple.mpegurl",
+		"Origin": "https://bestwish.lol",
+	}
+	if "Cookie" in headers and headers["Cookie"]:
+		fetch_headers["Cookie"] = headers["Cookie"]
+	
+	logger.debug(f"Fetching M3U8 with headers: {fetch_headers}")
+	try:
+		scraper = cloudscraper.create_scraper()  # Handles potential Cloudflare checks
+		response = scraper.get(url, headers=fetch_headers, timeout=30)
+		response.raise_for_status()
+		m3u8_content = response.text
+		logger.debug(f"Fetched M3U8 content: {m3u8_content[:100]}...")
+	except requests.exceptions.RequestException as e:
+		logger.error(f"Failed to fetch M3U8: {e}")
+		return False
+	
+	# Step 2: Write M3U8 to a temp file and resolve absolute segment URLs
+	temp_m3u8_path = destination_path + ".m3u8"
+	with open(temp_m3u8_path, "w", encoding="utf-8") as f:
+		# Rewrite relative segment URLs to absolute
+		base_url = url.rsplit('/', 1)[0] + "/"
+		for line in m3u8_content.splitlines():
+			if line and not line.startswith("#"):
+				if not line.startswith("http"):
+					line = urllib.parse.urljoin(base_url, line)
+				f.write(line + "\n")
+			else:
+				f.write(line + "\n")
+	
+	# Step 3: Use ffmpeg with the local M3U8 file and protocol whitelist, no headers
 	command = [
 		"ffmpeg",
-		"-headers", ffmpeg_headers,
-		"-i", url,
+		"-protocol_whitelist", "file,http,https,tcp,tls,crypto",
+		"-i", temp_m3u8_path,
 		"-c", "copy",
 		"-bsf:a", "aac_adtstoasc",
 		destination_path
@@ -348,9 +380,13 @@ def download_with_ffmpeg(url, destination_path, general_config, headers=None):
 	except KeyboardInterrupt:
 		process.terminate()
 		pbar.close()
+		os.remove(temp_m3u8_path)  # Cleanup on interrupt
 		return False
 	pbar.close()
 	return_code = process.wait()
+	if os.path.exists(temp_m3u8_path):
+		os.remove(temp_m3u8_path)  # Cleanup after completion
+	
 	if return_code != 0:
 		logger.error(f"FFmpeg failed with return code {return_code}")
 	else:
@@ -417,12 +453,12 @@ def extract_m3u8_urls(driver, url, site_config):
 			message = json.loads(log["message"])["message"]
 			if "Network.responseReceived" in message["method"]:
 				request_url = message["params"]["response"]["url"]
-				logger.debug(f"Network response: {request_url}")
+				# logger.debug(f"Network response: {request_url}")
 				if ".m3u8" in request_url:
 					m3u8_urls.append(request_url)
 					logger.info(f"Found M3U8 URL: {request_url}")
 		except KeyError:
-			logger.debug("Skipping log entry due to missing keys")
+			# logger.debug("Skipping log entry due to missing keys")
 			continue
 	
 	if not m3u8_urls:

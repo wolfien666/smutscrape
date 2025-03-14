@@ -29,6 +29,8 @@ scrapers:
     download_url:
       selector: "meta[itemprop='contentURL']"
       attribute: "content"
+    tags:
+      selector: "div.tags-list a.label"  # Targets all tag links
 
   list_scraper:
     video_container:
@@ -48,6 +50,6 @@ scrapers:
         selector: "a.next.page-numbers"
         attribute: "href"
 
-
 url_encoding_rules:
   " ": "-"
+

@@ -174,7 +174,7 @@ def get_selenium_driver(general_config, force_new=False):
 	return general_config['selenium_driver']
 
 
-def process_video_page(url, site_config, general_config, overwrite_files=False, headers=None, list_title=None, force_replace_nfo=False):
+def process_video_page(url, site_config, general_config, overwrite_files=False, headers=None, force_replace_nfo=False):
 	global last_vpn_action_time
 	vpn_config = general_config.get('vpn', {})
 	if vpn_config.get('enabled', False):
@@ -233,14 +233,13 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 		data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config)
 	
 	logger.debug(f"Extracted video data: {data}")
-	# Fix: Explicitly check for empty or missing download_url and fallback to page URL
 	video_url = data.get('download_url')
 	if not video_url or video_url.strip() == '':
 		video_url = url
 		logger.debug(f"download_url empty or missing; falling back to page URL: {video_url}")
 	else:
 		logger.debug(f"video_url: {video_url}")
-	video_title = data.get('title', '').strip() or list_title or 'Untitled'
+	video_title = data.get('title', '').strip() or 'Untitled'
 	data['Title'] = video_title
 	data['URL'] = url
 	
@@ -251,6 +250,7 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 	file_name = construct_filename(video_title, site_config, general_config)
 	destination_config = general_config['download_destinations'][0]
 	overwrite = overwrite_files or site_config.get('overwrite_files', general_config.get('overwrite_files', False))
+	nfo_overwrite = overwrite_files or force_replace_nfo
 	
 	if destination_config['type'] == 'smb':
 		smb_destination_path = os.path.join(destination_config['path'], file_name)
@@ -267,47 +267,46 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 		video_exists = os.path.exists(destination_path)
 		nfo_exists = os.path.exists(nfo_path)
 	
-	# NFO generation logic
+	# NFO generation and upload logic
 	make_nfo = general_config.get('make_nfo', False)
 	has_selectors = has_metadata_selectors(site_config)
-	nfo_overwrite = overwrite_files or force_replace_nfo
 	
 	if make_nfo and has_selectors:
 		if destination_config['type'] == 'smb':
 			smb_nfo_path = os.path.join(destination_config['path'], f"{file_name.rsplit('.', 1)[0]}.nfo")
 			temp_nfo_path = os.path.join(temp_dir, f"{file_name.rsplit('.', 1)[0]}.nfo")
 			nfo_exists = file_exists_on_smb(destination_config, smb_nfo_path)
-			nfo_path = temp_nfo_path
-			if nfo_exists and not nfo_overwrite:
-				logger.debug(f"NFO file already exists at SMB destination: {smb_nfo_path}, skipping generation")
-			else:
+			if nfo_overwrite or not nfo_exists:  # Generate and upload if overwriting or NFO missing
 				generate_nfo_file(destination_path, data)
-				if nfo_exists:
-					logger.info(f"Overwriting existing NFO at {smb_nfo_path}")
+				if os.path.exists(temp_nfo_path):
+					upload_to_smb(temp_nfo_path, smb_nfo_path, destination_config, nfo_overwrite)
+					os.remove(temp_nfo_path)
+					if nfo_exists:
+						logger.info(f"Overwriting existing NFO at {smb_nfo_path}")
+					else:
+						logger.info(f"Uploaded new NFO to {smb_nfo_path}")
+			else:
+				logger.debug(f"NFO file already exists at SMB destination: {smb_nfo_path}, skipping generation")
 		else:
 			nfo_path = f"{destination_path.rsplit('.', 1)[0]}.nfo"
 			nfo_exists = os.path.exists(nfo_path)
-			if nfo_exists and not nfo_overwrite:
-				logger.debug(f"NFO file already exists at local destination: {nfo_path}, skipping generation")
-			else:
+			if nfo_overwrite or not nfo_exists:
 				generate_nfo_file(destination_path, data)
 				if nfo_exists:
 					logger.info(f"Overwriting existing NFO at {nfo_path}")
+			else:
+				logger.debug(f"NFO file already exists at local destination: {nfo_path}, skipping generation")
 	
 	# Download logic
 	if video_exists and not overwrite_files:
 		logger.info(f"File '{file_name}' exists. Skipping download.")
 	else:
-		download_method = site_config['download'].get('method', 'yt-dlp')
+		download_method = site_config['download'].get('method', 'curl')
 		logger.info(f"Downloading: {file_name}")
 		if download_file(video_url, destination_path, download_method, general_config, site_config, headers=headers, metadata=data):
 			if destination_config['type'] == 'smb':
 				upload_to_smb(destination_path, smb_destination_path, destination_config, overwrite_files)
-				if make_nfo and has_selectors and os.path.exists(temp_nfo_path):
-					upload_to_smb(temp_nfo_path, smb_nfo_path, destination_config, nfo_overwrite)
 				os.remove(destination_path)
-				if os.path.exists(temp_nfo_path):
-					os.remove(temp_nfo_path)
 			elif destination_config['type'] == 'local':
 				apply_permissions(destination_path, destination_config)
 	
@@ -598,7 +597,8 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 			continue
 		video_title = video_data.get('title', '') or video_element.text.strip()
 		logger.info(f"Found video: {video_title} - {video_url}")
-		process_video_page(video_url, site_config, general_config, overwrite_files, headers, video_title, force_replace_nfo=force_replace_nfo)
+		# def process_video_page(url, site_config, general_config, overwrite_files=False, headers=None, force_replace_nfo=False):
+		process_video_page(video_url, site_config, general_config, overwrite_files, headers, force_replace_nfo)
 	
 	# Determine pagination method
 	if mode not in site_config['modes']:
@@ -1043,7 +1043,7 @@ def main():
 				if mode:
 					logger.info(f"Matched URL to mode '{mode}' with scraper '{scraper}'")
 					if mode == 'video':
-						process_video_page(url, matched_site_config, general_config, args.overwrite_files, headers, force_replace_nfo=args.force_replace_nfo)
+						process_video_page(url, matched_site_config, general_config, args.overwrite_files, headers, args.force_replace_nfo)
 					else:
 						identifier = url.split('/')[-1].split('.')[0]
 						current_page = args.start_on_page
@@ -1061,6 +1061,7 @@ def main():
 							)
 							logger.info(f"Starting at custom page {current_page}: {url}")
 						while url:
+							# def process_list_page(url, site_config, general_config, current_page=1, mode=None, identifier=None, overwrite_files=False, headers=None, force_replace_nfo=False):
 							next_page, new_page_number = process_list_page(
 								url, matched_site_config, general_config, current_page,
 								mode, identifier, args.overwrite_files, headers, args.force_replace_nfo
@@ -1072,7 +1073,8 @@ def main():
 							time.sleep(general_config['sleep']['between_pages'])
 				else:
 					logger.warning("URL didn't match any mode; assuming video page.")
-					process_video_page(url, matched_site_config, general_config, args.overwrite_files, headers, force_replace_nfo=args.force_replace_nfo)
+
+					process_video_page(url, matched_site_config, general_config, args.overwrite_files, headers, args.force_replace_nfo)
 			else:
 				process_fallback_download(url, general_config, args.overwrite_files)
 	
@@ -1104,12 +1106,12 @@ def main():
 				if current_page > 1:
 					logger.warning(f"Starting page {current_page} requested, but no 'url_pattern_pages' defined; starting at page 1")
 			if mode == 'video':
-				process_video_page(url, site_config, general_config, args.overwrite_files, headers, force_replace_nfo=args.force_replace_nfo)
+				process_video_page(url, site_config, general_config, args.overwrite_files, headers, args.force_replace_nfo)
 			else:
 				while url:
 					next_page, new_page_number = process_list_page(
 						url, site_config, general_config, current_page, mode,
-						identifier, args.overwrite_files, headers, args.force_replace_nfo  # Fixed typo
+						identifier, args.overwrite_files, headers, args.force_replace_nfo 
 					)
 					if next_page is None:
 						break

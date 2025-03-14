@@ -40,7 +40,7 @@ scrapers:
     actors:
       selector: "div.g1-content-narrow p.has-text-align-center a[href*='/tag/']:not(:has(strong))"
     description:
-      selector: "div.g1-content-narrow p.has-text-align-center:nth-child(2)"
+      selector: "div.g1-content-narrow p.has-text-align-center:nth-of-type(2)"  # Fixed to target second <p>
     tags:
       selector: "p.entry-tags a.entry-tag"
 
@@ -53,4 +53,4 @@ scrapers:
       fields:
         url:
           attribute: "href"
-        title: {}  # Changed from attribute: "text" to default text extraction
+        title: {}

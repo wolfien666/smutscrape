@@ -39,7 +39,7 @@ scrapers:
       selector: "div#videotags a.studiolink3, div#videotags a.studiolink4, div#videotags a.studiolink0"
     actors:
       selector: "div#videotags a.studiolink1"
-    studio:
+    studios:
       selector: "div#videotags a.studiolink2"
     image:
       selector: "video#incflix-player"

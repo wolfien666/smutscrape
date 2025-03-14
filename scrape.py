@@ -371,7 +371,7 @@ def download_with_ffmpeg(url, destination_path, general_config, headers=None):
 	last_percent = 0
 	try:
 		for line in process.stderr:
-			logger.debug(f"FFmpeg output: {line.strip()}")
+			# logger.debug(f"FFmpeg output: {line.strip()}")
 			if 'frame=' in line or 'size=' in line:
 				if last_percent < 90:
 					last_percent += random.uniform(1, 5)
@@ -813,7 +813,7 @@ def download_with_curl(command):
 	last_percent = 0
 	try:
 		for line in process.stdout:
-			logger.debug(f"curl output: {line.strip()}")
+			# logger.debug(f"curl output: {line.strip()}")
 			if '#' in line:  # curl’s progress bar
 				percent = min(line.count('#'), 100)
 				pbar.update(percent - last_percent)
@@ -837,7 +837,7 @@ def download_with_wget(command):
 	pbar = None
 	try:
 		for line in process.stdout:
-			logger.debug(f"wget output: {line.strip()}")
+			# logger.debug(f"wget output: {line.strip()}")
 			match = progress_regex.search(line)
 			if match:
 				percent, size = match.groups()

@@ -233,10 +233,16 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 		data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config)
 	
 	logger.debug(f"Extracted video data: {data}")
-	video_url = data.get('download_url', url)
+	# Fix: Explicitly check for empty or missing download_url and fallback to page URL
+	video_url = data.get('download_url')
+	if not video_url or video_url.strip() == '':
+		video_url = url
+		logger.debug(f"download_url empty or missing; falling back to page URL: {video_url}")
+	else:
+		logger.debug(f"video_url: {video_url}")
 	video_title = data.get('title', '').strip() or list_title or 'Untitled'
-	data['Title'] = video_title  # Normalize to match NFO fields
-	data['URL'] = url  # Add URL to metadata
+	data['Title'] = video_title
+	data['URL'] = url
 	
 	if should_ignore_video(data, general_config['ignored']):
 		logger.info(f"Ignoring video: {video_title}")
@@ -264,7 +270,7 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 	# NFO generation logic
 	make_nfo = general_config.get('make_nfo', False)
 	has_selectors = has_metadata_selectors(site_config)
-	nfo_overwrite = overwrite_files or force_replace_nfo  # Overwrite NFO if either flag is set
+	nfo_overwrite = overwrite_files or force_replace_nfo
 	
 	if make_nfo and has_selectors:
 		if destination_config['type'] == 'smb':
@@ -275,7 +281,7 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 			if nfo_exists and not nfo_overwrite:
 				logger.debug(f"NFO file already exists at SMB destination: {smb_nfo_path}, skipping generation")
 			else:
-				generate_nfo_file(destination_path, data)  # Generate in temp_dir
+				generate_nfo_file(destination_path, data)
 				if nfo_exists:
 					logger.info(f"Overwriting existing NFO at {smb_nfo_path}")
 		else:
@@ -284,7 +290,7 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 			if nfo_exists and not nfo_overwrite:
 				logger.debug(f"NFO file already exists at local destination: {nfo_path}, skipping generation")
 			else:
-				generate_nfo_file(destination_path, data)  # Generate in final dir
+				generate_nfo_file(destination_path, data)
 				if nfo_exists:
 					logger.info(f"Overwriting existing NFO at {nfo_path}")
 	

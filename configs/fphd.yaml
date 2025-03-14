@@ -1,6 +1,6 @@
 name: FamilyPornHD
 domain: familypornhd.com
-base_url: "https://www.familypornhd.com"
+base_url: "https://familypornhd.com"
 selector_style: css
 no_overwrite: true
 use_selenium: true
@@ -17,14 +17,14 @@ modes:
     scraper: list_scraper
   search:
     url_pattern: "/?s={search}"
-    url_pattern_pages: "/page/2/?s={search}"
+    url_pattern_pages: "/page/{page}/?s={search}"  # Fixed page number placement
     max_pages: 999
     scraper: list_scraper
   studio:
     url_pattern: "/category/{studio}"
-    url_pattern_pages: "/category/{studio}/{page}/"
-    max_pages: 99 
-    scrape: list_scraper 
+    url_pattern_pages: "/category/{studio}/{page}/"  # Fixed typo 'scrape' to 'scraper'
+    max_pages: 99
+    scraper: list_scraper
 
 download:
   method: "ffmpeg"
@@ -33,8 +33,18 @@ scrapers:
   video_scraper:
     title:
       selector: "head title"
+#    title:
+#      selector: "ol[itemtype='http://schema.org/BreadcrumbList'] li:last-child span[itemprop='name']"
     download_url:
       iframe: "iframe"
+    studio:
+      selector: "ol[itemtype='http://schema.org/BreadcrumbList'] li:nth-child(2) span[itemprop='name']"
+    actors:
+      selector: "div.g1-content-narrow p.has-text-align-center a[href*='/tag/']:not(:has(strong))"
+    description:
+      selector: "div.g1-content-narrow p.has-text-align-center:nth-child(2)"
+    tags:
+      selector: "p.entry-tags a.entry-tag"
 
   list_scraper:
     video_container:
@@ -47,4 +57,3 @@ scrapers:
           attribute: "href"
         title:
           attribute: "text"
-

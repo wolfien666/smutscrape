@@ -212,13 +212,14 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 				logger.debug(f"No iframe found or error piercing: {e}")
 		m3u8_url, cookies = extract_m3u8_urls(driver, url, site_config)
 		if m3u8_url:
-			video_url = m3u8_url
+			video_url = m3u8_url  # Set video_url to M3U8 URL
 			headers = headers or general_config.get('headers', {}).copy()
 			headers["Cookie"] = cookies
 			headers["Referer"] = url
 			headers["User-Agent"] = general_config.get('selenium_user_agent', random.choice(general_config['user_agents']))
 			soup = fetch_page(url, general_config['user_agents'], headers, use_selenium, driver)
 			data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config) if soup else {'title': url.split('/')[-1]}
+			# Don’t overwrite video_url with data['download_url'] if M3U8 is found
 		else:
 			logger.error("Failed to extract M3U8 URL; aborting.")
 			return
@@ -231,18 +232,19 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 			logger.error(f"Failed to fetch video page: {url}")
 			return
 		data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config)
+		video_url = data.get('download_url')  # Use download_url only in non-M3U8 mode
 	
 	logger.debug(f"Extracted video data: {data}")
-	video_url = data.get('download_url')
 	if not video_url or video_url.strip() == '':
-		video_url = url
-		logger.debug(f"download_url empty or missing; falling back to page URL: {video_url}")
+		video_url = url  # Fallback only if no M3U8 or download_url
+		logger.debug(f"video_url empty or missing; falling back to page URL: {video_url}")
 	else:
 		logger.debug(f"video_url: {video_url}")
 	video_title = data.get('title', '').strip() or 'Untitled'
 	data['Title'] = video_title
 	data['URL'] = url
 	
+	# Rest of the function remains unchanged...
 	if should_ignore_video(data, general_config['ignored']):
 		logger.info(f"Ignoring video: {video_title}")
 		return
@@ -267,7 +269,7 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 		video_exists = os.path.exists(destination_path)
 		nfo_exists = os.path.exists(nfo_path)
 	
-	# NFO generation and upload logic
+	# NFO generation and upload logic...
 	make_nfo = general_config.get('make_nfo', False)
 	has_selectors = has_metadata_selectors(site_config)
 	
@@ -276,7 +278,7 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 			smb_nfo_path = os.path.join(destination_config['path'], f"{file_name.rsplit('.', 1)[0]}.nfo")
 			temp_nfo_path = os.path.join(temp_dir, f"{file_name.rsplit('.', 1)[0]}.nfo")
 			nfo_exists = file_exists_on_smb(destination_config, smb_nfo_path)
-			if nfo_overwrite or not nfo_exists:  # Generate and upload if overwriting or NFO missing
+			if nfo_overwrite or not nfo_exists:
 				generate_nfo_file(destination_path, data)
 				if os.path.exists(temp_nfo_path):
 					upload_to_smb(temp_nfo_path, smb_nfo_path, destination_config, nfo_overwrite)
@@ -297,7 +299,7 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 			else:
 				logger.debug(f"NFO file already exists at local destination: {nfo_path}, skipping generation")
 	
-	# Download logic
+	# Download logic...
 	if video_exists and not overwrite_files:
 		logger.info(f"File '{file_name}' exists. Skipping download.")
 	else:
@@ -950,19 +952,37 @@ def download_with_ytdlp_fallback(url, temp_dir, general_config):
 def match_url_to_mode(url, site_config):
 	base_url = site_config['base_url'].rstrip('/')
 	parsed_url = urlparse(url)
-	path = parsed_url.path 
+	path = parsed_url.path.rstrip('/')
 	
 	for mode, config in site_config['modes'].items():
-		pattern = config['url_pattern'].lstrip('/') 
-		pattern_parts = pattern.split('/{')[0].split('/') 
-		placeholder = f"{{{mode}}}"
+		pattern = config['url_pattern'].rstrip('/')
+		pattern_segments = pattern.lstrip('/').split('/')
+		path_segments = path.lstrip('/').split('/')
 		
-		path_parts = path.lstrip('/').split('/') 
+		if len(path_segments) < len(pattern_segments) - pattern.count('{'):
+			continue
 		
-		# Check if the fixed parts of the pattern match
-		if len(path_parts) >= len(pattern_parts) and all(
-			path_parts[i] == pattern_parts[i] for i in range(len(pattern_parts))
-		):
+		regex_parts = []
+		placeholder_found = False
+		for i, segment in enumerate(pattern_segments):
+			if '{' in segment and '}' in segment:
+				placeholder_found = True
+				regex_parts.append(r'([^/]+)')
+			else:
+				regex_parts.append(re.escape(segment))
+		
+		if not placeholder_found:
+			if path == pattern.lstrip('/'):
+				logger.debug(f"Matched URL '{url}' to mode '{mode}' with exact pattern '{pattern}'")
+				return mode, config['scraper']
+			continue
+		
+		regex_pattern = '^/' + '/'.join(regex_parts)
+		if placeholder_found and len(path_segments) > len(pattern_segments):
+			regex_pattern += r'(?:/.*)?'
+		regex_pattern += '$'
+		
+		if re.match(regex_pattern, path):
 			logger.debug(f"Matched URL '{url}' to mode '{mode}' with pattern '{pattern}'")
 			return mode, config['scraper']
 	
@@ -1029,13 +1049,17 @@ def main():
 	try:
 		if len(args.args) == 1 and args.args[0].startswith(('http://', 'https://')):
 			url = args.args[0]
+			logger.debug(f"Looking for config matches for {url}...")
 			matched_site_config = None
 			for site_config_file in os.listdir(CONFIG_DIR):
 				if site_config_file.endswith('.yaml'):
 					site_config = load_site_config(site_config_file[:-5])
 					if site_config['base_url'] in url:
+						logger.debug(f"Found a match! {site_config['base_url']} is in {url}")
 						matched_site_config = site_config
 						break
+					else:
+						logger.debug(f"{url} does not contain {site_config['base_url']}...")
 			if matched_site_config:
 				headers = general_config.get('headers', {}).copy()
 				headers['User-Agent'] = random.choice(general_config['user_agents'])

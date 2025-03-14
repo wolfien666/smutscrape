@@ -1005,15 +1005,41 @@ def download_with_ytdlp_fallback(url, temp_dir, general_config):
 	return success and downloaded_files, downloaded_files
 
 def match_url_to_mode(url, site_config):
-	base_url = site_config['base_url'].rstrip('/')
+	# Normalize the input URL
 	parsed_url = urlparse(url)
-	path = parsed_url.path.rstrip('/')
+	scheme = parsed_url.scheme.lower()  # e.g., 'http' or 'https'
+	netloc = parsed_url.netloc.lower()  # e.g., 'www.incestflix.com' or 'incestflix.com'
+	path = parsed_url.path.rstrip('/').lower()  # e.g., '/watch/video123' or '/tag/sometag'
 	
+	# Remove 'www.' prefix if present
+	if netloc.startswith('www.'):
+		netloc = netloc[4:]
+	
+	# Normalize the base_url from site_config
+	base_url = site_config['base_url'].rstrip('/')
+	parsed_base = urlparse(base_url)
+	base_netloc = parsed_base.netloc.lower()  # e.g., 'incestflix.com'
+	base_path = parsed_base.path.rstrip('/').lower()  # Usually empty for base_url
+	
+	# Remove 'www.' prefix from base_netloc if present
+	if base_netloc.startswith('www.'):
+		base_netloc = base_netloc[4:]
+	
+	# Check if the normalized netloc matches the base_netloc
+	if netloc != base_netloc:
+		logger.debug(f"No match: netloc '{netloc}' does not match base_netloc '{base_netloc}'")
+		return None, None
+	
+	# Combine base_path and path for matching (if base_url has a path component)
+	effective_path = path
+	
+	# Iterate over modes to find a match
 	for mode, config in site_config['modes'].items():
 		pattern = config['url_pattern'].rstrip('/')
 		pattern_segments = pattern.lstrip('/').split('/')
-		path_segments = path.lstrip('/').split('/')
+		path_segments = effective_path.lstrip('/').split('/')
 		
+		# Skip if path is too short to match pattern (accounting for placeholders)
 		if len(path_segments) < len(pattern_segments) - pattern.count('{'):
 			continue
 		
@@ -1024,10 +1050,10 @@ def match_url_to_mode(url, site_config):
 				placeholder_found = True
 				regex_parts.append(r'([^/]+)')
 			else:
-				regex_parts.append(re.escape(segment))
+				regex_parts.append(re.escape(segment.lower()))  # Normalize case
 		
 		if not placeholder_found:
-			if path == pattern.lstrip('/'):
+			if effective_path == pattern.lstrip('/').lower():
 				logger.debug(f"Matched URL '{url}' to mode '{mode}' with exact pattern '{pattern}'")
 				return mode, config['scraper']
 			continue
@@ -1037,7 +1063,7 @@ def match_url_to_mode(url, site_config):
 			regex_pattern += r'(?:/.*)?'
 		regex_pattern += '$'
 		
-		if re.match(regex_pattern, path):
+		if re.match(regex_pattern, effective_path):
 			logger.debug(f"Matched URL '{url}' to mode '{mode}' with pattern '{pattern}'")
 			return mode, config['scraper']
 	
@@ -1109,12 +1135,24 @@ def main():
 			for site_config_file in os.listdir(CONFIG_DIR):
 				if site_config_file.endswith('.yaml'):
 					site_config = load_site_config(site_config_file[:-5])
-					if site_config['base_url'] in url:
-						logger.debug(f"Found a match! {site_config['base_url']} is in {url}")
+					# Normalize both URLs for comparison
+					parsed_url = urlparse(url)
+					url_netloc = parsed_url.netloc.lower()
+					if url_netloc.startswith('www.'):
+						url_netloc = url_netloc[4:]
+					
+					parsed_base = urlparse(site_config['base_url'])
+					base_netloc = parsed_base.netloc.lower()
+					if base_netloc.startswith('www.'):
+						base_netloc = base_netloc[4:]
+					
+					if url_netloc == base_netloc:
+						logger.debug(f"Found a match! {site_config['base_url']} matches {url}")
 						matched_site_config = site_config
 						break
 					else:
-						logger.debug(f"{url} does not contain {site_config['base_url']}...")
+						logger.debug(f"{url} does not match {site_config['base_url']} (netloc: {url_netloc} vs {base_netloc})")
+			
 			if matched_site_config:
 				headers = general_config.get('headers', {}).copy()
 				headers['User-Agent'] = random.choice(general_config['user_agents'])
@@ -1140,7 +1178,6 @@ def main():
 							)
 							logger.info(f"Starting at custom page {current_page}: {url}")
 						while url:
-							# def process_list_page(url, site_config, general_config, current_page=1, mode=None, identifier=None, overwrite_files=False, headers=None, force_new_nfo=False):
 							next_page, new_page_number = process_list_page(
 								url, matched_site_config, general_config, current_page,
 								mode, identifier, args.overwrite_files, headers, args.force_new_nfo
@@ -1152,7 +1189,6 @@ def main():
 							time.sleep(general_config['sleep']['between_pages'])
 				else:
 					logger.warning("URL didn't match any mode; assuming video page.")
-
 					process_video_page(url, matched_site_config, general_config, args.overwrite_files, headers, args.force_new_nfo)
 			else:
 				process_fallback_download(url, general_config, args.overwrite_files)

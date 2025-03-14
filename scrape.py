@@ -542,7 +542,16 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 					logger.error(f"Failed to pierce iframe '{iframe_selector}' for '{field}': {e}")
 					elements = []
 			elif 'selector' in config:
-				elements = soup.select(config['selector'])
+				# Handle both string and list selectors
+				selector = config['selector']
+				if isinstance(selector, list):
+					elements = []
+					for sel in selector:
+						elements.extend(soup.select(sel))
+						if elements:  # Stop at first successful match
+							break
+				else:
+					elements = soup.select(selector)
 			elif 'attribute' in config:
 				elements = [soup]
 			else:
@@ -568,8 +577,11 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 		
 		logger.debug(f"Initial value for '{field}': {value}")
 		
+		# Handle multi-value fields (tags, actors, producers, studios)
 		if field in ['tags', 'actors', 'producers', 'studios']:
 			value = [element.text.strip() for element in elements if hasattr(element, 'text') and element.text and element.text.strip()]
+			# Remove '#' prefix from each value
+			value = [v.lstrip('#') for v in value]
 		
 		if isinstance(config, dict) and 'postProcess' in config:
 			for step in config['postProcess']:
@@ -594,7 +606,6 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 							value = '' if not isinstance(value, list) else []
 				if 'parseDate' in step and value and value.strip():
 					try:
-						# Ensure the format matches the input exactly
 						parsed = datetime.strptime(value.strip(), step['parseDate'])
 						value = parsed.strftime('%Y-%m-%d')
 						logger.debug(f"Parsed date for '{field}' with format '{step['parseDate']}': {value}")

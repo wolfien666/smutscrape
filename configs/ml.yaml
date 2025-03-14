@@ -45,7 +45,9 @@ scrapers:
       selector: "video#ml-main-video_html5_api, #player video"
       attribute: "src"
     tags:
-      selector: "div#ml-main-info .more-from-tags a"
+      selector:
+        - "div#ml-main-info .more-from-tags a"
+        - "div.media-meta-tags h4 a.pop"
 
   list_scraper:
     video_container:

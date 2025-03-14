@@ -6,6 +6,7 @@ import requests
 import cloudscraper
 from bs4 import BeautifulSoup
 import os
+import tempfile
 import subprocess
 import time
 import re
@@ -265,10 +266,14 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 	if destination_config['type'] == 'smb':
 		smb_destination_path = os.path.join(destination_config['path'], file_name)
 		smb_nfo_path = os.path.join(destination_config['path'], f"{file_name.rsplit('.', 1)[0]}.nfo")
-		temp_dir = destination_config.get('temporary_storage', os.path.join(os.getcwd(), '.tmp_downloads'))
+		# Create a dedicated temporary directory for downloads using tempfile
+		temp_base = os.path.join(tempfile.gettempdir(), 'smutscrape')
+		temp_dir = destination_config.get('temporary_storage', temp_base)
 		os.makedirs(temp_dir, exist_ok=True)
+
 		destination_path = os.path.join(temp_dir, file_name)
 		temp_nfo_path = os.path.join(temp_dir, f"{file_name.rsplit('.', 1)[0]}.nfo")
+
 		video_exists = file_exists_on_smb(destination_config, smb_destination_path)
 		nfo_exists = file_exists_on_smb(destination_config, smb_nfo_path)
 	else:

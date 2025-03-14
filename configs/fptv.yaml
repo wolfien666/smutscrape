@@ -13,7 +13,7 @@ modes:
   video:
     url_pattern: "/videos/{video_id}/"
     scraper: video_scraper
-  actors:
+  model:
     scraper: list_scraper
     url_pattern: "/models/{actors}/"
   category:
@@ -23,6 +23,9 @@ modes:
     scraper: list_scraper
     url_pattern: "/search/{search}/"
     max_pages: 999
+  site:
+    scraper: list_scraper
+    url_pattern: "/sites/{site}"
 
 download:
   method: "yt-dlp"
@@ -47,6 +50,7 @@ scrapers:
     video_container:
       selector:
         - "#list_videos_videos_list_search_result_items"
+        - "#list_videos_common_videos_list_items"
     video_item:
       selector: "li.item > div.thumb-horizontal > a.link"
       fields:

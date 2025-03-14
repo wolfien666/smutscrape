@@ -6,8 +6,8 @@ no_overwrite: true
 use_selenium: true
 
 url_encoding_rules:
-  " ": "-"
-  "%20": "-"
+  " ": "+"
+  "%20": "+"
 
 modes:
   video:

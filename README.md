@@ -1,6 +1,6 @@
 # Smutscrape: Just a Scraper for Smut, Folks! 🍆💦
 
-A Python-based tool to scrape and download adult content from various websites straight to your preferred data store. Whether it’s videos, tags, or search results, `smutscrape` has you covered—discreetly and efficiently. Supports multiple download methods and advanced scraping with Selenium for tricky sites. 😈
+A Python-based tool to scrape and download adult content from various websites straight to your preferred data store. Whether it’s videos, tags, or search results, `smutscrape` has you covered—discreetly and efficiently. Supports multiple download methods, advanced scraping with Selenium for tricky sites, and metadata extraction stored in `.nfo` files for media management. 😈
 
 ---
 
@@ -71,7 +71,7 @@ All Python dependencies are in `requirements.txt`.
 ## Usage 🚀
 
 ### Basic Commands
-Run with `./scrape.py` or `scrape` if symlinked.
+Run with `./scrape.py` or `scrape` if symlinked. Metadata is scraped and saved in `.nfo` files alongside downloaded videos.
 
 - **Pornhub: Massy Sweet’s Pornstar Page 🦉🙋🏼‍♀️**
   ```bash
@@ -113,8 +113,14 @@ Run with `./scrape.py` or `scrape` if symlinked.
   scrape https://toprealincestvideos.com/en/search/?search=sister
   ```
 
+### Forcing New NFO Files
+Use `--force_new_nfo` to regenerate `.nfo` files even if they already exist:
+```bash
+scrape if video "some-video-id" --force_new_nfo
+```
+
 ### Fallback Mode 😅
-For unsupported sites, `yt-dlp` kicks in:
+For unsupported sites, `yt-dlp` kicks in (no metadata scraping):
 ```bash
 scrape https://someUnsupportedSite.com/video/12345
 ```
@@ -123,21 +129,27 @@ scrape https://someUnsupportedSite.com/video/12345
 
 ## Supported Sites & Modes 🌐
 
-| Site Code | Site                     | Modes Available                              |
-|-----------|--------------------------|----------------------------------------------|
-| `9v`      | 9vids.com                | `video`, `search`, `tag`                     |
-| `fphd`    | familypornhd.com         | `video`, `category`, `tag`, `studio`         |
-| `fptv`    | familyporn.tv            | `video`, `search`, `category`, `models`      |
-| `fs`      | family-sex.me            | `video`, `search`, `tag`                     |
-| `fsv`     | familysexvideos.org      | `video`, `search`                            |
-| `if`      | incestflix.com           | `video`, `search`, `tag`                     |
-| `lf`      | lonefun.com              | `video`, `search`, `tag`                     |
-| `ml`      | motherless.com           | `video`, `search`, `category`, `user`, `group` |
-| `ph`      | pornhub.com              | `video`, `model`, `category`, `category_alt`, `channel`, `search`, `pornstar` |
-| `sb`      | spankbang.com            | `video`, `model`, `search`, `tag`            |
-| `triv`    | toprealincestvideos.com  | `video`, `search`                            |
-| `xnxx`    | xnxx.com                 | `video`, `search`, `channel`, `pornstar`, `tag` |
-| `xv`      | xvideos.com              | `video`, `search`, `channel`, `model`, `tag` |
+`Smutscrape` scrapes metadata for video pages and saves it in `.nfo` files compatible with media libraries (e.g., Kodi, Plex). Below are the supported sites, modes, and metadata fields extracted for each site’s `video` mode:
+
+| Site Code | Site                     | Modes Available                              | Metadata Scraped (Video Mode)                     |
+|-----------|--------------------------|----------------------------------------------|---------------------------------------------------|
+| `9v`      | 9vids.com                | `video`, `search`, `tag`                     | Title, Tags                                       |
+| `fphd`    | familypornhd.com         | `video`, `category`, `tag`, `studio`         | Title, Studios, Actors, Description, Tags         |
+| `fptv`    | familyporn.tv            | `video`, `search`, `category`, `actors`      | Title, Studios, Actors, Description, Tags         |
+| `fsv`     | familysexvideos.org      | `video`, `search`                            | Title                                             |
+| `fs`      | family-sex.me            | `video`, `search`, `tag`                     | Title, Studios, Actors, Description, Tags         |
+| `if`      | incestflix.com           | `video`, `search`, `tag`                     | Title, Tags, Actors, Studios, Image               |
+| `lf`      | lonefun.com              | `video`, `search`, `tag`                     | Title, Description, Tags                          |
+| `ml`      | motherless.com           | `video`, `search`, `category`, `user`, `group` | Title, Tags                                     |
+| `ph`      | pornhub.com              | `video`, `model`, `category`, `category_alt`, `channel`, `search`, `pornstar` | Title, Date, Code, Tags, Actors, Image, Studios |
+| `sb`      | spankbang.com            | `video`, `model`, `search`, `tag`            | Title, Actors, Tags, Description                  |
+| `triv`    | toprealincestvideos.com  | `video`, `search`, `category`                | Title                                             |
+| `xnxx`    | xnxx.com                 | `video`, `search`, `channel`, `pornstar`, `tag`, `pornmaker` | Title, Tags, Actors, Studios, Description, Date, Image |
+| `xv`      | xvideos.com              | `video`, `search`, `channel`, `model`, `tag` | Title                                             |
+
+**Notes:**
+- Metadata is only scraped in `video` mode and stored in `.nfo` files in the download directory.
+- Use `--force_new_nfo` to overwrite existing `.nfo` files with fresh metadata.
 
 ---
 
@@ -185,7 +197,8 @@ download_destinations:
 ```
 
 ### Overwriting Files
-Use `--overwrite_files` or set `no_overwrite: false` in site config.
+- Use `--overwrite_files` or set `no_overwrite: false` in site config to overwrite videos.
+- Use `--force_new_nfo` to regenerate `.nfo` files regardless of existing ones.
 
 ---
 

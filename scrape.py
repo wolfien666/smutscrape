@@ -185,6 +185,7 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 	logger.info(f"Processing video page: {url}")
 	use_selenium = site_config.get('use_selenium', False)
 	driver = get_selenium_driver(general_config) if use_selenium else None
+	original_url = url  # Preserve the original URL for metadata and NFO
 	
 	# Handle M3U8 mode with iframe piercing
 	if site_config.get('m3u8_mode', False) and driver:
@@ -196,7 +197,7 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 				break
 		if iframe_config:
 			logger.debug(f"Piercing iframe '{iframe_config['selector']}' for M3U8 extraction")
-			driver.get(url)
+			driver.get(original_url)  # Load original page first
 			time.sleep(random.uniform(1, 2))
 			try:
 				iframe = driver.find_element(By.CSS_SELECTOR, iframe_config['selector'])
@@ -205,46 +206,53 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 					logger.info(f"Found iframe with src: {iframe_url}")
 					driver.get(iframe_url)
 					time.sleep(random.uniform(1, 2))
-					url = iframe_url
+					m3u8_url, cookies = extract_m3u8_urls(driver, iframe_url, site_config)
+					if m3u8_url:
+						video_url = m3u8_url
+						headers = headers or general_config.get('headers', {}).copy()
+						headers["Cookie"] = cookies
+						headers["Referer"] = iframe_url
+						headers["User-Agent"] = general_config.get('selenium_user_agent', random.choice(general_config['user_agents']))
+						# Fetch original page for metadata
+						soup = fetch_page(original_url, general_config['user_agents'], headers, use_selenium, driver)
+						data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config) if soup else {'title': original_url.split('/')[-2]}  # Use slug before trailing slash
+					else:
+						logger.error("Failed to extract M3U8 URL; falling back to page scrape.")
+						video_url = None
 				else:
 					logger.debug("Iframe found but no src attribute.")
+					video_url = None
 			except Exception as e:
 				logger.debug(f"No iframe found or error piercing: {e}")
-		m3u8_url, cookies = extract_m3u8_urls(driver, url, site_config)
-		if m3u8_url:
-			video_url = m3u8_url  # Set video_url to M3U8 URL
-			headers = headers or general_config.get('headers', {}).copy()
-			headers["Cookie"] = cookies
-			headers["Referer"] = url
-			headers["User-Agent"] = general_config.get('selenium_user_agent', random.choice(general_config['user_agents']))
-			soup = fetch_page(url, general_config['user_agents'], headers, use_selenium, driver)
-			data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config) if soup else {'title': url.split('/')[-1]}
-			# Don’t overwrite video_url with data['download_url'] if M3U8 is found
+				video_url = None
+			# Always fetch original page for metadata, even if iframe fails
+			soup = fetch_page(original_url, general_config['user_agents'], headers or {}, use_selenium, driver)
+			data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config) if soup else {'title': original_url.split('/')[-2]}
 		else:
-			logger.error("Failed to extract M3U8 URL; aborting.")
-			return
+			soup = fetch_page(original_url, general_config['user_agents'], headers or {}, use_selenium, driver)
+			data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config) if soup else {'title': original_url.split('/')[-2]}
+			video_url = data.get('download_url')
 	else:
-		soup = fetch_page(url, general_config['user_agents'], headers or {}, use_selenium, driver)
+		soup = fetch_page(original_url, general_config['user_agents'], headers or {}, use_selenium, driver)
 		if soup is None and use_selenium:
 			logger.warning("Selenium failed; retrying with requests")
-			soup = fetch_page(url, general_config['user_agents'], headers or {}, False, None)
+			soup = fetch_page(original_url, general_config['user_agents'], headers or {}, False, None)
 		if soup is None:
-			logger.error(f"Failed to fetch video page: {url}")
+			logger.error(f"Failed to fetch video page: {original_url}")
 			return
 		data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config)
-		video_url = data.get('download_url')  # Use download_url only in non-M3U8 mode
+		video_url = data.get('download_url')
 	
 	logger.debug(f"Extracted video data: {data}")
 	if not video_url or video_url.strip() == '':
-		video_url = url  # Fallback only if no M3U8 or download_url
-		logger.debug(f"video_url empty or missing; falling back to page URL: {video_url}")
+		video_url = original_url
+		logger.debug(f"download_url empty or missing; falling back to page URL: {video_url}")
 	else:
 		logger.debug(f"video_url: {video_url}")
 	video_title = data.get('title', '').strip() or 'Untitled'
 	data['Title'] = video_title
-	data['URL'] = url
+	data['URL'] = original_url  # Use original URL for NFO, not iframe or M3U8
 	
-	# Rest of the function remains unchanged...
 	if should_ignore_video(data, general_config['ignored']):
 		logger.info(f"Ignoring video: {video_title}")
 		return
@@ -269,7 +277,7 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 		video_exists = os.path.exists(destination_path)
 		nfo_exists = os.path.exists(nfo_path)
 	
-	# NFO generation and upload logic...
+	# NFO generation and upload logic
 	make_nfo = general_config.get('make_nfo', False)
 	has_selectors = has_metadata_selectors(site_config)
 	
@@ -299,7 +307,7 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 			else:
 				logger.debug(f"NFO file already exists at local destination: {nfo_path}, skipping generation")
 	
-	# Download logic...
+	# Download logic
 	if video_exists and not overwrite_files:
 		logger.info(f"File '{file_name}' exists. Skipping download.")
 	else:

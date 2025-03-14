@@ -5,6 +5,9 @@ selector_style: css
 no_overwrite: true
 use_selenium: true
 m3u8_mode: true
+url_encoding_rules:
+  " ": "-"
+  "%20": "-"
 
 modes:
   video:
@@ -13,6 +16,11 @@ modes:
   tag:
     url_pattern: "/tag/{tag}/"
     url_pattern_pages: "/tag/{tag}/page/{page}"
+    max_pages: 999
+    scraper: list_scraper
+  pornstar:
+    url_pattern: "/tag/{pornstar}/"
+    url_pattern_pages: "/tag/{pornstar}/page/{page}"
     max_pages: 999
     scraper: list_scraper
   search:

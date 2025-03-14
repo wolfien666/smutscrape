@@ -6,6 +6,8 @@ base_url: "https://9vids.com"
 selector_style: css
 name_suffix: " - 9vids"
 no_overwrite: true
+  " ": "-"
+  "%20": "-"
 
 modes:
   video:
@@ -49,7 +51,4 @@ scrapers:
       next_page:
         selector: "a.next.page-numbers"
         attribute: "href"
-
-url_encoding_rules:
-  " ": "-"
 

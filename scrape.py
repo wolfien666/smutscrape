@@ -899,7 +899,7 @@ def download_with_ytdlp(command):
 				progress = float(percent) * total_size / 100
 				if pbar:
 					pbar.update(progress - pbar.n)
-			logger.debug(line.strip())
+			# logger.debug(line.strip())
 	except KeyboardInterrupt:
 		process.terminate()
 		return False

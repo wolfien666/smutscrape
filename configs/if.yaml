@@ -36,27 +36,11 @@ scrapers:
       selector: "div#incflix-stream source"
       attribute: "src"
     tags:
-      selector: "div#videotags a[class^='studiolink']"  # Works in both
-    genres:
-      selector: "div#videotags a.studiolink0, div#videotags a.studiolink3, div#videotags a.studiolink4"
+      selector: "div#videotags a.studiolink3, div#videotags a.studiolink4"
     actors:
-      selector: "div#incflix-videowrap h2"  # From updated, better than original
-      postProcess:
-        - replace:
-            - regex: " - .*"
-              with: ""  # Strips everything after " - "
-        - replace:
-            - regex: "\\s*,\\s*"
-              with: ","  # Normalizes comma spacing
-        - split: ","  # Splits into list
-    producers:
+      selector: "div#videotags a.studiolink0, div#videotags a.studiolink1"
+    studio:
       selector: "div#videotags a.studiolink2"
-    studios:
-      selector: "div#incflix-videowrap h2"  # Dummy selector
-      postProcess:
-        - replace:
-            - regex: ".*"
-              with: "IncestFlix"  # Forces fixed value
     image:
       selector: "video#incflix-player"
       attribute: "poster"

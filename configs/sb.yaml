@@ -3,6 +3,7 @@ domain: spankbang.com
 base_url: "https://spankbang.com"
 selector_style: css
 no_overwrite: true
+use_selenium: false  # Kept as per your change; test with requests
 url_encoding_rules:
   " ": "+"
   "%20": "+"
@@ -33,26 +34,33 @@ download:
 scrapers:
   video_scraper:
     title:
-      selector: "head title"
+      selector: "head title"  # Kept as is; refine if suffix unwanted
     download_url:
       selector: "meta[property='og:video']"
       attribute: "content"
+    actors:
+      selector: "div.video-info p.name a[href*='/pornstar/']"  # Hypothetical; adjust with full video page HTML
+    tags:
+      selector: "div.tags a[href*='/tag/']"  # Hypothetical; adjust with full video page HTML
+    description:
+      selector: "div.description"  # Hypothetical; adjust with full video page HTML
 
   list_scraper:
     video_container:
       selector:
-        - "div.video-list.video-rotate.video-list-with-ads"
+        - "div.video-list.video-rotate.with-ads.four-col"  # Restored list format
+        - "div.video-list.video-rotate.video-list-with-ads"  # Fallback
     video_item:
       selector: "div.video-item"
       fields:
-        video_key:
-          selector: "a.thumb"
-          attribute: "href"
-        title:
-          selector: "a.thumb"
-          attribute: "title"
         url:
           selector: "a.thumb"
           attribute: "href"
+        title:
+          selector: "p.name a"  # More specific than a.thumb title attribute
+        video_key:
+          selector: "a.thumb"
+          attribute: "href"
+          pattern: "/([^/]+)/video/"  # Extracts "6nkg9" from "/6nkg9/video/..."
 
 name_suffix: " - SpankBang"

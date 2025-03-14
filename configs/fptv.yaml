@@ -13,9 +13,9 @@ modes:
   video:
     url_pattern: "/videos/{video_id}/"  # Matches "/videos/slug/"
     scraper: video_scraper
-  models:
+  actors:  # Changed from "models" to "actors"
     scraper: list_scraper
-    url_pattern: "/models/{models}/"
+    url_pattern: "/models/{actors}/"  # Updated key name reflected in pattern
   category:
     scraper: list_scraper
     url_pattern: "/categories/{category}/"
@@ -24,27 +24,23 @@ modes:
     url_pattern: "/search/{search}/"
 
 download:
-  method: "yt-dlp"  # Switched to yt-dlp as requested
+  method: "yt-dlp"  # Already updated as requested
 
 scrapers:
   video_scraper:
     title:
-      selector: "head title"  # More reliable than video element
+      selector: "head title"  # Kept as is; reliable for now
     download_url:
       selector: "#kt_player > div.fp-player > video"
       attribute: "src"
-    models:
+    studio:  # Changed from "categories" to "studio" (assuming it’s a single entity)
+      selector: "div.categories-wrap ul.top-tags li.item a.link span.text:first-child"  # First category as studio
+    actors:  # Changed from "models" to "actors"
       selector: "div.video-info div.holder div.item div.star a.link"
-      multiple: true
-      attribute: "text"
-    categories:
-      selector: "div.categories-wrap ul.top-tags li.item a.link span.text"
-      multiple: true
-    tags:
-      selector: "div.details-tags-wrap ul.details-tags li.item a.link span.text"
-      multiple: true
     description:
       selector: "div.description div.player-text"
+    tags:
+      selector: "div.details-tags-wrap ul.details-tags li.item a.link span.text"
 
   list_scraper:
     video_container:
@@ -56,8 +52,8 @@ scrapers:
         url:
           attribute: "href"
         title:
-          attribute: "title"
+          {}
     pagination:
       next_page:
-        selector: null  # Pagination via params; see notes
+        selector: null  # Pagination via params; no change needed
         attribute: "href"

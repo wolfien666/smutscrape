@@ -28,11 +28,18 @@ download:
 scrapers:
   video_scraper:
     title:
-      selector: "head title"
+      selector: "aside.cvmoplc h1"
     download_url:
       iframe: "iframe"
-      selector: "div.fp-player video"
-      attribute: "src"
+    studio:
+      selector: "aside.cvmcaun.cvmtiv a[rel='nofollow']"
+    actors:
+      selector: "aside.cvmoplc h2"
+      postProcess: "extract_actors"
+    description:
+      selector: "aside.cvmoplc h2"
+    tags:
+      selector: "aside.cvmcaun p a"
 
   list_scraper:
     video_container:
@@ -44,4 +51,4 @@ scrapers:
         url:
           attribute: "href"
         title:
-          selector: "div span:first-child"
+          {}

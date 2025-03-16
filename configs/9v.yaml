@@ -6,6 +6,7 @@ base_url: "https://9vids.com"
 selector_style: css
 name_suffix: " - 9vids"
 no_overwrite: true
+url_encoding_rules:
   " ": "-"
   "%20": "-"
 

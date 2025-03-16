@@ -1,10 +1,11 @@
+#configs/fptv.yaml
+
 name: FamilyPornTV
 domain: familyporn.tv
 base_url: "https://familyporn.tv"
 selector_style: css
 no_overwrite: true
 use_selenium: true
-
 url_encoding_rules:
   " ": "-"
   "%20": "-"

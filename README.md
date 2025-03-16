@@ -147,7 +147,9 @@ scrape https://someUnsupportedSite.com/video/12345
 | `xv`      | *xvideos.com*             | `video`, `search`, `channel`, `model`, `tag` | Title                                             |
 
 ---
+
 † Selenium required.
+
 ‡ To combine two search or tag queries, separate them by '&', for example, `scrape if tag "BS & Lily LaBeau"` to scrape Brother-Sister videos starring Lily LaBeau.
 
 `Smutscrape` scrapes metadata for video pages and saves it in `.nfo` files in the download directory, ready for use in [Plex](https://plex.tv), [Jellyfin](https://github.com/jellyfin/jellyfin) or [Stash](https://github.com/stashapp) with the [nfoSceneParser](https://github.com/stashapp/CommunityScripts/tree/main/plugins/nfoSceneParser) plugin. Please note only metadata is only saved for videos from sites that non-Title metadata is scraped from. *FamilySexVideos*, *TopRealIncestVideos*, and *XVideos* are unsupported.

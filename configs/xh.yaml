@@ -14,8 +14,8 @@ modes:
     url_pattern: "/videos/{video_id}"
     scraper: video_scraper
   pornstar:
-    url_pattern: "/pornstar/{pornstar}"
-    url_pattern_pages: "/pornstar/{pornstar}/{page}"
+    url_pattern: "/pornstars/{pornstar}"
+    url_pattern_pages: "/pornstars/{pornstar}/{page}"
     scraper: list_scraper
     max_pages: 999
   search:
@@ -23,7 +23,11 @@ modes:
     url_pattern_pages: "/search/{search}?page={page}"
     scraper: list_scraper
     max_pages: 999
-
+  category:
+    url_pattern: "/categories/{category}"
+    url_pattern_pages: "/categories/{category}/{page}"
+    scraper: list_scraper
+    max_pages: 999
 
 download:
   method: "yt-dlp"
@@ -32,6 +36,10 @@ scrapers:
   video_scraper:
     title:
       selector: "head title"
+      postProcess:
+        - replace:
+            - regex: "\\s*\\|\\s*xHamster\\s*"
+              with: ""
 
   list_scraper:
     video_container:
@@ -45,4 +53,4 @@ scrapers:
           attribute: "href"
         title:
           selector: "a.video-thumb-info__name"
-          attribute: "title" 
+          attribute: "title"

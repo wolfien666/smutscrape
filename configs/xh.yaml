@@ -33,6 +33,22 @@ download:
   method: "yt-dlp"
 
 scrapers:
+  list_scraper:
+    video_container:
+      selector:
+        - "div.pornstar-content"
+        - "div.pornstar-content__main"
+        - "body"
+    video_item:
+      selector: "div.thumb-list__item.video-thumb"  # Broader, targets the video item directly
+      fields:
+        url:
+          selector: "a.video-thumb__image-container"
+          attribute: "href"
+        title:
+          selector: "a.video-thumb-info__name"
+          attribute: "title"
+
   video_scraper:
     title:
       selector: "head title"
@@ -49,16 +65,3 @@ scrapers:
       selector: "div[data-role='video-tags-list'] a.tag-96c3e[href*='/channels/'] img.image-9a750"
       attribute: "alt"
 
-  list_scraper:
-    video_container:
-      selector:
-        - "div.thumb-list.thumb-list--sidebar.thumb-list--middle-line"
-        - "div.thumb-list.thumb-list--sidebar.thumb-list--middle-line.thumb-list--bigger-with-cube"
-    video_item:
-      selector: "div.thumb-list__item.video-thumb a.video-thumb__image-container"
-      fields:
-        url:
-          attribute: "href"
-        title:
-          selector: "a.video-thumb-info__name"
-          attribute: "title"

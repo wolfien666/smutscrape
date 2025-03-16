@@ -873,22 +873,35 @@ def apply_permissions(file_path, destination_config):
 def upload_to_smb(local_path, smb_path, destination_config, overwrite=False):
 	conn = SMBConnection(destination_config['username'], destination_config['password'], "videoscraper", destination_config['server'])
 	try:
-		if conn.connect(destination_config['server'], 445):
-			if not overwrite and file_exists_on_smb(destination_config, smb_path):
-				logger.info(f"File '{smb_path}' exists on SMB share. Skipping.")
-				return
-			with open(local_path, 'rb') as file:
-				with tqdm(total=os.path.getsize(local_path), unit='B', unit_scale=True, desc="Uploading to SMB") as pbar:
-					conn.storeFile(destination_config['share'], smb_path, file)
-					pbar.update(os.path.getsize(local_path))
-			logger.info(f"Uploaded to SMB: {smb_path}")
-		else:
+		if not conn.connect(destination_config['server'], 445):
 			logger.error("Failed to connect to SMB share.")
+			return
+		
+		if not overwrite and file_exists_on_smb(destination_config, smb_path):
+			logger.info(f"File '{smb_path}' exists on SMB share. Skipping.")
+			return
+		
+		total_size = os.path.getsize(local_path)
+		with open(local_path, 'rb') as file:
+			with tqdm(total=total_size, unit='B', unit_scale=True, unit_divisor=1024, desc=f"Uploading {os.path.basename(local_path)} to SMB") as pbar:
+				def file_wrapper(file_obj):
+					bytes_written = 0
+					while True:
+						chunk = file_obj.read(8192)  # 8KB chunks
+						if not chunk:
+							break
+						bytes_written += len(chunk)
+						pbar.update(len(chunk))
+						yield chunk
+				
+				conn.storeFile(destination_config['share'], smb_path, file_wrapper(file))
+		logger.info(f"Uploaded to SMB: {smb_path}")
 	except Exception as e:
 		logger.error(f"Error uploading to SMB: {e}")
 	finally:
 		conn.close()
 
+		
 def download_file(url, destination_path, method, general_config, site_config, headers=None, metadata=None):
 	if not url:
 		logger.error("Invalid or empty URL")
@@ -901,87 +914,82 @@ def download_file(url, destination_path, method, general_config, site_config, he
 	success = False
 	
 	if method == 'curl':
-		if use_headers:
-			curl_headers = (
-				f"-A \"{headers.get('User-Agent', random.choice(general_config['user_agents']))}\" "
-				f"-H \"Referer: {headers.get('Referer', site_config.get('base_url', ''))}\" "
-			)
-			if "Cookie" in headers:
-				curl_headers += f"-H \"Cookie: {headers['Cookie']}\" "
-			command = f"curl -L -o \"{destination_path}\" {curl_headers} --retry 3 --max-time 600 \"{url}\""
-		else:
-			command = f"curl -L -o \"{destination_path}\" \"{url}\""
-		logger.debug(f"Executing curl command: {command}")
-		success = download_with_curl(command)
+		success = download_with_curl(url, destination_path, general_config, headers, use_headers, site_config.get('base_url', ''))
 	elif method == 'wget':
-		if use_headers:
-			wget_headers = (
-				f"--user-agent=\"{headers.get('User-Agent', random.choice(general_config['user_agents']))}\" "
-				f"--referer=\"{headers.get('Referer', site_config.get('base_url', ''))}\" "
-			)
-			if "Cookie" in headers:
-				wget_headers += f"--header=\"Cookie: {headers['Cookie']}\" "
-			command = f"wget {wget_headers} --tries=3 --timeout=600 -O \"{destination_path}\" \"{url}\""
-		else:
-			command = f"wget -O \"{destination_path}\" \"{url}\""
-		logger.debug(f"Executing wget command: {command}")
-		success = download_with_wget(command)
+		success = download_with_wget(url, destination_path, general_config, headers, use_headers, site_config.get('base_url', ''))
 	elif method == 'yt-dlp':
-		user_agent = headers.get('User-Agent', random.choice(general_config['user_agents']) if general_config.get('user_agents') else "Mozilla/5.0")
-		command = f"yt-dlp -o \"{destination_path}\" --user-agent \"{user_agent}\""
-		if 'Image' in metadata:
-			command += f" --embed-thumbnail --convert-thumbnails jpg"
-			logger.debug(f"Embedding image as thumbnail: {metadata['Image']}")
-		command += f" \"{url}\""
-		logger.debug(f"Executing yt-dlp command: {command}")
-		success = download_with_ytdlp(command)
+		success = download_with_ytdlp(url, destination_path, general_config, headers, metadata)
 	elif method == 'ffmpeg':
 		success = download_with_ffmpeg(url, destination_path, general_config, headers)
 	
 	return success
 
-def download_with_curl(command):
-	process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
-	pbar = tqdm(total=100, unit='%', desc="Downloading (curl)")
-	last_percent = 0
+def download_with_curl(url, destination_path, general_config, headers, use_headers, base_url):
+	command = ["curl", "-L", "-o", destination_path, "--retry", "3", "--max-time", "600"]
+	if use_headers:
+		command.extend(["-A", headers.get('User-Agent', random.choice(general_config['user_agents']))])
+		command.extend(["-H", f"Referer: {headers.get('Referer', base_url)}"])
+		if "Cookie" in headers:
+			command.extend(["-H", f"Cookie: {headers['Cookie']}"])
+	command.append(url)
+	command_str = " ".join(f'"{arg}"' if ' ' in arg else arg for arg in command)
+	logger.debug(f"Executing curl command: {command_str}")
+	
+	process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+	progress_regex = re.compile(r'(\d+)\s+(\d+)\s+(\d+)')  # % total received
+	pbar = None
 	try:
 		for line in process.stdout:
-			# logger.debug(f"curl output: {line.strip()}")
-			if '#' in line:  # curl’s progress bar
-				percent = min(line.count('#'), 100)
-				pbar.update(percent - last_percent)
-				last_percent = percent
-			elif "< Location:" in line:
-				logger.info(f"curl redirect: {line.strip()}")
-		pbar.n = 100
+			match = progress_regex.search(line)
+			if match:
+				percent, total, received = map(int, match.groups())
+				if not pbar and total > 0:
+					pbar = tqdm(total=total, unit='B', unit_scale=True, unit_divisor=1024, desc=f"Downloading {os.path.basename(destination_path)}")
+				if pbar:
+					pbar.update(received - pbar.n)
+		if pbar and total > 0:
+			pbar.update(total - pbar.n)
 	except KeyboardInterrupt:
 		process.terminate()
-	pbar.close()
+		if pbar:
+			pbar.close()
+		return False
+	if pbar:
+		pbar.close()
 	return_code = process.wait()
 	if return_code != 0:
 		logger.error(f"curl failed with return code {return_code}")
 	else:
 		logger.info("curl download completed successfully")
 	return return_code == 0
+
+def download_with_wget(url, destination_path, general_config, headers, use_headers, base_url):
+	command = ["wget", "--tries=3", "--timeout=600", "-O", destination_path]
+	if use_headers:
+		command.extend(["--user-agent", headers.get('User-Agent', random.choice(general_config['user_agents']))])
+		command.extend(["--referer", headers.get('Referer', base_url)])
+		if "Cookie" in headers:
+			command.extend(["--header", f"Cookie: {headers['Cookie']}"])
+	command.append(url)
+	command_str = " ".join(f'"{arg}"' if ' ' in arg else arg for arg in command)
+	logger.debug(f"Executing wget command: {command_str}")
 	
-def download_with_wget(command):
-	process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
-	progress_regex = re.compile(r'(\d+)%\s+(\d+[KMG]?)')  # Matches "45% 123M"
+	process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+	progress_regex = re.compile(r'(\d+)%\s+(\d+[KMG]?)B\s+(\d+\.\d+[KMG]?)B/s\s+(\d+:\d+:\d+)')
 	pbar = None
 	try:
 		for line in process.stdout:
-			# logger.debug(f"wget output: {line.strip()}")
 			match = progress_regex.search(line)
 			if match:
-				percent, size = match.groups()
-				percent = int(percent)
-				if pbar is None:
-					pbar = tqdm(total=100, unit='%', desc="Downloading (wget)")
-				pbar.update(percent - pbar.n)
-			elif "Location:" in line:
-				logger.info(f"wget redirect: {line.strip()}")
-		if pbar:
-			pbar.n = 100  # Ensure completion
+				percent, size, speed, eta = match.groups()
+				total = int(float(size[:-1]) * {'K': 1024, 'M': 1024**2, 'G': 1024**3}[size[-1]]) if size[-1] in 'KMG' else int(size)
+				received = total * int(percent) // 100
+				if not pbar:
+					pbar = tqdm(total=total, unit='B', unit_scale=True, unit_divisor=1024, desc=f"Downloading {os.path.basename(destination_path)}")
+				pbar.update(received - pbar.n)
+				pbar.set_postfix(speed=speed + 'B/s', eta=eta)
+		if pbar and total > 0:
+			pbar.update(total - pbar.n)
 	except KeyboardInterrupt:
 		process.terminate()
 		if pbar:
@@ -995,32 +1003,53 @@ def download_with_wget(command):
 	else:
 		logger.info("wget download completed successfully")
 	return return_code == 0
-		
 
-def download_with_ytdlp(command):
-	process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
-	progress_regex = re.compile(r'\[download\]\s+(\d+\.\d+)% of ~?\s*(\d+\.\d+)(K|M|G)iB')
-	total_size = None
+def download_with_ytdlp(url, destination_path, general_config, headers, metadata):
+	command = ["yt-dlp", "-o", destination_path, "--format", "best"]
+	user_agent = headers.get('User-Agent', random.choice(general_config['user_agents']) if general_config.get('user_agents') else "Mozilla/5.0")
+	command.extend(["--user-agent", user_agent])
+	if 'Image' in metadata:
+		command.extend(["--embed-thumbnail", "--convert-thumbnails", "jpg"])
+		logger.debug(f"Embedding image as thumbnail: {metadata['Image']}")
+	command.append(url)
+	command_str = " ".join(f'"{arg}"' if ' ' in arg else arg for arg in command)
+	logger.debug(f"Executing yt-dlp command: {command_str}")
+	
+	process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+	progress_regex = re.compile(r'\[download\]\s+(\d+\.\d+)% of ~?\s*(\d+\.\d+)([KMG])iB(?:\s+at\s+(\d+\.\d+[KMG]iB/s))?(?:\s+ETA\s+(\d+:\d+))?')
 	pbar = None
 	try:
 		for line in process.stdout:
-			progress_match = progress_regex.search(line)
-			if progress_match:
-				percent, size, size_unit = progress_match.groups()
-				if total_size is None:
-					total_size = float(size) * {'K': 1024, 'M': 1024**2, 'G': 1024**3}[size_unit]
-					pbar = tqdm(total=total_size, unit='B', unit_scale=True, desc="Downloading")
-				progress = float(percent) * total_size / 100
-				if pbar:
-					pbar.update(progress - pbar.n)
-			# logger.debug(line.strip())
+			match = progress_regex.search(line)
+			if match:
+				percent, size, unit, speed, eta = match.groups()
+				total = float(size) * {'K': 1024, 'M': 1024**2, 'G': 1024**3}[unit]
+				received = total * float(percent) / 100
+				if not pbar:
+					pbar = tqdm(total=total, unit='B', unit_scale=True, unit_divisor=1024, desc=f"Downloading {os.path.basename(destination_path)}")
+				pbar.update(received - pbar.n)
+				postfix = {}
+				if speed:
+					postfix['speed'] = speed
+				if eta:
+					postfix['eta'] = eta
+				if postfix:
+					pbar.set_postfix(**postfix)
+		if pbar and total > 0:
+			pbar.update(total - pbar.n)
 	except KeyboardInterrupt:
 		process.terminate()
-		return False
-	finally:
 		if pbar:
 			pbar.close()
-	return process.wait() == 0
+		return False
+	if pbar:
+		pbar.close()
+	return_code = process.wait()
+	if return_code != 0:
+		logger.error(f"yt-dlp failed with return code {return_code}")
+	else:
+		logger.info("yt-dlp download completed successfully")
+	return return_code == 0
 
 def file_exists_on_smb(destination_config, path):
 	conn = SMBConnection(destination_config['username'], destination_config['password'], "videoscraper", destination_config['server'])

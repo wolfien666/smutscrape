@@ -88,6 +88,48 @@ def construct_filename(title, site_config, general_config):
 	
 	return filename
 
+def get_video_metadata(file_path):
+	"""Extract video duration, resolution, and bitrate using ffprobe."""
+	command = [
+		"ffprobe",
+		"-v", "error",
+		"-show_entries", "format=duration,bit_rate,size:stream=width,height",
+		"-of", "json",
+		file_path
+	]
+	try:
+		result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, check=True)
+		metadata = json.loads(result.stdout)
+		
+		# File size in bytes (from ffprobe or os)
+		file_size = int(metadata.get('format', {}).get('size', os.path.getsize(file_path)))
+		
+		# Duration in seconds
+		duration = float(metadata.get('format', {}).get('duration', 0))
+		duration_str = f"{int(duration // 3600):02d}:{int((duration % 3600) // 60):02d}:{int(duration % 60):02d}"
+		
+		# Resolution
+		streams = metadata.get('streams', [])
+		video_stream = next((s for s in streams if s.get('width') and s.get('height')), None)
+		resolution = f"{video_stream['width']}x{video_stream['height']}" if video_stream else "Unknown"
+		
+		# Bitrate in kbps
+		bitrate = int(metadata.get('format', {}).get('bit_rate', 0)) // 1000 if metadata.get('format', {}).get('bit_rate') else 0
+		
+		return {
+			'size': file_size,
+			'size_str': f"{file_size / 1024 / 1024:.2f} MB",
+			'duration': duration_str,
+			'resolution': resolution,
+			'bitrate': f"{bitrate} kbps" if bitrate else "Unknown"
+		}
+	except subprocess.CalledProcessError as e:
+		logger.error(f"ffprobe failed for {file_path}: {e.stderr}")
+		return None
+	except Exception as e:
+		logger.error(f"Error extracting metadata for {file_path}: {e}")
+		return None
+		
 def construct_url(base_url, pattern, site_config, **kwargs):
 	encoding_rules = site_config.get('url_encoding_rules', {})
 	encoded_kwargs = {}
@@ -937,6 +979,20 @@ def download_file(url, destination_path, method, general_config, site_config, he
 		success = download_with_ytdlp(command)
 	elif method == 'ffmpeg':
 		success = download_with_ffmpeg(url, destination_path, general_config, headers)
+	
+	if success and os.path.exists(destination_path):
+		# Extract and log video metadata
+		video_info = get_video_metadata(destination_path)
+		if video_info:
+			logger.info(
+				f"Download completed: {os.path.basename(destination_path)}\n"
+				f"  Size: {video_info['size_str']}\n"
+				f"  Duration: {video_info['duration']}\n"
+				f"  Resolution: {video_info['resolution']}\n"
+				f"  Bitrate: {video_info['bitrate']}"
+			)
+		else:
+			logger.info(f"Download completed: {os.path.basename(destination_path)} (Metadata extraction failed)")
 	
 	return success
 

@@ -1,6 +1,6 @@
-# Smutscrape: Just a Scraper for Smut, Folks! 🍆💦
+# Smutscrape · *just a scraper for smut, folks!* 🍆💦
 
-A Python-based tool to scrape and download adult content from various websites straight to your preferred data store. Whether it’s videos, tags, or search results, `smutscrape` has you covered—discreetly and efficiently. Supports multiple download methods, advanced scraping with Selenium for tricky sites, and metadata extraction stored in `.nfo` files for media management. 😈
+A Python-based tool to scrape and download adult content from various websites straight to your preferred data store. Whether it’s videos, tags, or search results, ***smutscrape***` has you covered—discreetly and efficiently. Supports multiple download methods, advanced scraping with Selenium for tricky sites, and metadata extraction stored in `.nfo` files for media management. 😈
 
 ---
 
@@ -129,28 +129,32 @@ scrape https://someUnsupportedSite.com/video/12345
 
 ## Supported Sites & Modes 🌐
 
-`Smutscrape` scrapes metadata for video pages and saves it in `.nfo` files compatible with media libraries (e.g., Kodi, Plex). Below are the supported sites, modes, and metadata fields extracted for each site’s `video` mode:
+| Site Code | Site                          | Modes Available                              | Metadata Scraped (Video Mode)                     |
+|-----------|-------------------------------|----------------------------------------------|---------------------------------------------------|
+| `9v`      | ***9vids.com***               | `video` · `search` · `tag`                     | Title · Tags                                       |
+| `fphd`    | ***familypornhd.com*** †      | `video` · `category` · `tag` · `studio`         | Title · Studios · Actors · Tags · Description         |
+| `fptv`    | ***familyporn.tv*** †         | `video` · `search` · `category` · `actors`      | Title · Studios · Actors · Tags · Description         |
+| `fs`      | ***family-sex.me*** †         | `video` · `search` · `tag`                     | Title · Studios · Actors · Tags · Description         |
+| `fsv`     | ***familysexvideos.org*** †   | `video` · `search`                            | Title                                             |
+| `if`      | ***incestflix.com***          | `video` · `search`‡ · `tag`‡                   | Title · Studios · Actors · Tags · Image               |
+| `lf`      | ***lonefun.com***             | `video` · `search` · `tag`                     | Title · Tags · Description                          |
+| `ml`      | ***motherless.com*** †        | `video` · `search` · `category` · `user` · `group` | Title · Tags                                     |
+| `ph`      | ***pornhub.com*** †           | `video` · `model` · `category` · `category_alt` · `channel` · `search` · `pornstar` | Title · Studios · Actors · Tags · Date · Code · Images |
+| `sb`      | ***spankbang.com***           | `video` · `model` · `search` · `tag`            | Title · Actors · Tags · Description                  |
+| `triv`    | ***toprealincestvideos.com*** | `video` · `search` · `category`                | Title                                             |
+| `xh`      | ***xhamster.com***            | `video` · `search` · `category` · `pornstar`    | Title · Studios · Actors · Tags 
+| `xnxx`    | ***xnxx.com*** †              | `video` · `search` · `channel` · `pornstar` · `tag` · `pornmaker` | Title · Studios · Actors · Tags · Description · Date · Image |
+| `xv`      | ***xvideos.com***             | `video` · `search` · `channel` · `model` · `tag` | Title                                             |
 
-| Site Code | Site                     | Modes Available                              | Metadata Scraped (Video Mode)                     |
-|-----------|--------------------------|----------------------------------------------|---------------------------------------------------|
-| `9v`      | 9vids.com                | `video`, `search`, `tag`                     | Title, Tags                                       |
-| `fphd`    | familypornhd.com         | `video`, `category`, `tag`, `studio`         | Title, Studios, Actors, Tags, Description         |
-| `fptv`    | familyporn.tv            | `video`, `search`, `category`, `actors`      | Title, Studios, Actors, Tags, Description         |
-| `fsv`     | familysexvideos.org      | `video`, `search`                            | Title                                             |
-| `fs`      | family-sex.me            | `video`, `search`, `tag`                     | Title, Studios, Actors, Tags, Description         |
-| `if`      | incestflix.com           | `video`, `search`, `tag`                     | Title, Studios, Actors, Tags, Image               |
-| `lf`      | lonefun.com              | `video`, `search`, `tag`                     | Title, Tags, Description                          |
-| `ml`      | motherless.com           | `video`, `search`, `category`, `user`, `group` | Title, Tags                                     |
-| `ph`      | pornhub.com              | `video`, `model`, `category`, `category_alt`, `channel`, `search`, `pornstar` | Title, Studios, Actors, Tags, Date, Code, Images |
-| `sb`      | spankbang.com            | `video`, `model`, `search`, `tag`            | Title, Actors, Tags, Description                  |
-| `triv`    | toprealincestvideos.com  | `video`, `search`, `category`                | Title                                             |
-| `xh`      | xhamster.com             | `video`, `search`, `category`, `pornstar`    | Title, Studios, Actors, Tags 
-| `xnxx`    | xnxx.com                 | `video`, `search`, `channel`, `pornstar`, `tag`, `pornmaker` | Title, Studios, Actors, Tags, Description, Date, Image |
-| `xv`      | xvideos.com              | `video`, `search`, `channel`, `model`, `tag` | Title                                             |
+---
 
-**Notes:**
-- Metadata is only scraped in `video` mode, and only for sites with more metadata than just the title. Scraped metadata is stored in `.nfo` files in the download directory, ready for use in [Jellyfin](https://github.com/jellyfin/jellyfin) or [Stash](https://github.com/stashapp) with the [nfoSceneParser](https://github.com/stashapp/CommunityScripts/tree/main/plugins/nfoSceneParser) plugin.
-- Use `--force_new_nfo` to overwrite existing `.nfo` files with fresh metadata.
+† *Selenium required.*
+
+‡ *To combine two search or tag queries, separate them by '&', for example, `scrape if tag "BS & Lily LaBeau"` to scrape Brother-Sister videos starring Lily LaBeau.*
+
+*Smutscrape* scrapes metadata for video pages and saves it in `.nfo` files in the download directory, ready for use in [Plex](https://plex.tv), [Jellyfin](https://github.com/jellyfin/jellyfin) or [Stash](https://github.com/stashapp) with the [nfoSceneParser](https://github.com/stashapp/CommunityScripts/tree/main/plugins/nfoSceneParser) plugin. Please note only metadata is only saved for videos from sites that non-Title metadata is scraped from. *FamilySexVideos*, *TopRealIncestVideos*, and *XVideos* are unsupported.
+
+***Tip: Use `--force_new_nfo` to overwrite existing `.nfo` files with fresh metadata.***
 
 ---
 

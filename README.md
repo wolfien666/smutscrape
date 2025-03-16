@@ -129,22 +129,23 @@ scrape https://someUnsupportedSite.com/video/12345
 
 ## Supported Sites & Modes 🌐
 
-| Site Code | Site                          | Modes Available                              | Metadata Scraped (Video Mode)                     |
-|-----------|-------------------------------|----------------------------------------------|---------------------------------------------------|
-| `9v`      | ***9vids.com***               | `video` · `search` · `tag`                     | Title · Tags                                       |
-| `fphd`    | ***familypornhd.com*** †      | `video` · `category` · `tag` · `studio`         | Title · Studios · Actors · Tags · Description         |
-| `fptv`    | ***familyporn.tv*** †         | `video` · `search` · `category` · `actors`      | Title · Studios · Actors · Tags · Description         |
-| `fs`      | ***family-sex.me*** †         | `video` · `search` · `tag`                     | Title · Studios · Actors · Tags · Description         |
-| `fsv`     | ***familysexvideos.org*** †   | `video` · `search`                            | Title                                             |
-| `if`      | ***incestflix.com***          | `video` · `search`‡ · `tag`‡                   | Title · Studios · Actors · Tags · Image               |
-| `lf`      | ***lonefun.com***             | `video` · `search` · `tag`                     | Title · Tags · Description                          |
-| `ml`      | ***motherless.com*** †        | `video` · `search` · `category` · `user` · `group` | Title · Tags                                     |
-| `ph`      | ***pornhub.com*** †           | `video` · `model` · `category` · `category_alt` · `channel` · `search` · `pornstar` | Title · Studios · Actors · Tags · Date · Code · Images |
-| `sb`      | ***spankbang.com***           | `video` · `model` · `search` · `tag`            | Title · Actors · Tags · Description                  |
-| `triv`    | ***toprealincestvideos.com*** | `video` · `search` · `category`                | Title                                             |
-| `xh`      | ***xhamster.com***            | `video` · `search` · `category` · `pornstar`    | Title · Studios · Actors · Tags 
+| Code      | Site                          | Modes                                            | Metadata                                             |
+|-----------|-------------------------------|--------------------------------------------------|------------------------------------------------------|
+| `9v`      | ***9vids.com***               | `video` · `search` · `tag`                       | Title · Tags                                         |
+| `fphd`    | ***familypornhd.com*** †      | `video` · `category` · `tag` · `studio`          | Title · Studios · Actors · Tags · Description        |
+| `fptv`    | ***familyporn.tv*** †         | `video` · `search` · `category` · `actors`       | Title · Studios · Actors · Tags · Description        |
+| `fs`      | ***family-sex.me*** †         | `video` · `search` · `tag`                       | Title · Studios · Actors · Tags · Description        |
+| `fsv`     | ***familysexvideos.org*** †   | `video` · `search`                               | Title                                                |
+| `if`      | ***incestflix.com***          | `video` · `search`‡ · `tag`‡                     | Title · Studios · Actors · Tags · Image              |
+| `lf`      | ***lonefun.com***             | `video` · `search` · `tag`                       | Title · Tags · Description                           |
+| `ml`      | ***motherless.com*** †        | `video` · `search` · `category` · `user` · `group` | Title · Tags                                       |
+| `ph`      | ***pornhub.com*** †           | `video` · `model` · `category` · `channel` · `search` · `pornstar` | Title · Studios · Actors · Tags · Date · Code · Image |
+| `sb`      | ***spankbang.com***           | `video` · `model` · `search` · `tag`             | Title · Actors · Tags · Description                  |
+| `tna`     | ***tnaflix.com***             | `video` · `search`                               | Title · Studios · Actors · Tags · Description · Date |
+| `triv`    | ***toprealincestvideos.com*** | `video` · `search` · `category`                  | Title                                                |
+| `xh`      | ***xhamster.com***            | `video` · `search` · `category` · `pornstar`     | Title · Studios · Actors · Tags                      |
 | `xnxx`    | ***xnxx.com*** †              | `video` · `search` · `channel` · `pornstar` · `tag` · `pornmaker` | Title · Studios · Actors · Tags · Description · Date · Image |
-| `xv`      | ***xvideos.com***             | `video` · `search` · `channel` · `model` · `tag` | Title                                             |
+| `xv`      | ***xvideos.com***             | `video` · `search` · `channel` · `model` · `tag` | Title                                                |
 
 ---
 

@@ -14,7 +14,7 @@ modes:
     url_pattern: "/videos/{video_id}"
     scraper: video_scraper
   pornstar:
-    url_pattern: "/pornstars/{pornstar}"
+    url_pattern: "/pornstars/{pornstar}/recommended"
     url_pattern_pages: "/pornstars/{pornstar}/{page}"
     scraper: list_scraper
     max_pages: 999

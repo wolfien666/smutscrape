@@ -144,11 +144,12 @@ scrape https://someUnsupportedSite.com/video/12345
 | `ph`      | pornhub.com              | `video`, `model`, `category`, `category_alt`, `channel`, `search`, `pornstar` | Title, Date, Code, Tags, Actors, Image, Studios |
 | `sb`      | spankbang.com            | `video`, `model`, `search`, `tag`            | Title, Actors, Tags, Description                  |
 | `triv`    | toprealincestvideos.com  | `video`, `search`, `category`                | Title                                             |
+| `xh`      | xhamster.com             | `video`, `search`, `category`, `pornstar`    | Title
 | `xnxx`    | xnxx.com                 | `video`, `search`, `channel`, `pornstar`, `tag`, `pornmaker` | Title, Tags, Actors, Studios, Description, Date, Image |
 | `xv`      | xvideos.com              | `video`, `search`, `channel`, `model`, `tag` | Title                                             |
 
 **Notes:**
-- Metadata is only scraped in `video` mode and stored in `.nfo` files in the download directory.
+- Metadata is only scraped in `video` mode, and only for sites with more metadata than just the title. Scraped metadata is stored in `.nfo` files in the download directory, ready for use in [Jellyfin](https://github.com/jellyfin/jellyfin) or [Stash](https://github.com/stashapp) with the [nfoSceneParser](https://github.com/stashapp/CommunityScripts/tree/main/plugins/nfoSceneParser) plugin.
 - Use `--force_new_nfo` to overwrite existing `.nfo` files with fresh metadata.
 
 ---

@@ -638,11 +638,14 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 			continue
 		
 		if isinstance(config, dict) and 'attribute' in config:
-			value = elements[0].get(config['attribute'])
+			# Handle attribute-based extraction (e.g., alt)
+			values = [element.get(config['attribute']) for element in elements if element.get(config['attribute'])]
+			value = values if len(values) > 1 or field in ['tags', 'actors', 'studios'] else values[0] if values else ''
 			if value is None:
 				logger.debug(f"Attribute '{config['attribute']}' for '{field}' is None; defaulting to empty string")
 				value = ''
 		else:
+			# Handle text-based extraction
 			value = elements[0].text.strip() if hasattr(elements[0], 'text') and elements[0].text else ''
 			if value is None:
 				logger.debug(f"Text for '{field}' is None; defaulting to empty string")
@@ -650,14 +653,14 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 		
 		logger.debug(f"Initial value for '{field}': {value}")
 		
-		# Handle multi-value fields with deduplication
-		if field in ['tags', 'actors', 'producers', 'studios']:
+		# Handle multi-value fields with deduplication only for text-based fields
+		if field in ['tags', 'actors', 'producers', 'studios'] and not (isinstance(config, dict) and 'attribute' in config):
 			# Extract all values, strip, and filter out empty ones
 			values = [element.text.strip() for element in elements if hasattr(element, 'text') and element.text and element.text.strip()]
 			# Normalize and deduplicate
-			normalized_values = {v.lower() for v in values if v}  # Use set for deduplication, lowercase for consistency
-			value = [v for v in values if v.lower() in normalized_values]  # Preserve original casing but remove duplicates
-			# Remove duplicates while preserving order (optional, if order matters)
+			normalized_values = {v.lower() for v in values if v}
+			value = [v for v in values if v.lower() in normalized_values]
+			# Remove duplicates while preserving order
 			seen = set()
 			value = [v for v in value if not (v.lower() in seen or seen.add(v.lower()))]
 		

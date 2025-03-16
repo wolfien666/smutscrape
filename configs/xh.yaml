@@ -40,6 +40,14 @@ scrapers:
         - replace:
             - regex: "\\s*\\|\\s*xHamster\\s*"
               with: ""
+    tags:
+      selector: "div[data-role='video-tags-list'] a.tag-96c3e:not([href*='/pornstars/']):not([href*='/channels/']):not([href*='/users/']) span.label-96c3e"
+    actors:
+      selector: "div[data-role='video-tags-list'] a.tag-96c3e[href*='/pornstars/'] img.image-9a750"
+      attribute: "alt"
+    studios:
+      selector: "div[data-role='video-tags-list'] a.tag-96c3e[href*='/channels/'] img.image-9a750"
+      attribute: "alt"
 
   list_scraper:
     video_container:

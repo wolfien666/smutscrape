@@ -132,24 +132,23 @@ scrape https://someUnsupportedSite.com/video/12345
 | Site Code | Site                      | Modes Available                              | Metadata Scraped (Video Mode)                     |
 |-----------|---------------------------|----------------------------------------------|---------------------------------------------------|
 | `9v`      | *9vids.com*               | `video`, `search`, `tag`                     | Title, Tags                                       |
-| `fphd`    | *familypornhd.com*[^1]    | `video`, `category`, `tag`, `studio`         | Title, Studios, Actors, Tags, Description         |
-| `fptv`    | *familyporn.tv*[^1]       | `video`, `search`, `category`, `actors`      | Title, Studios, Actors, Tags, Description         |
-| `fs`      | *family-sex.me*[^1]       | `video`, `search`, `tag`                     | Title, Studios, Actors, Tags, Description         |
-| `fsv`     | *familysexvideos.org*[^1] | `video`, `search`                            | Title                                             |
-| `if`      | *incestflix.com*          | `video`, `search`[^2], `tag`[^2]             | Title, Studios, Actors, Tags, Image               |
+| `fphd`    | *familypornhd.com* †      | `video`, `category`, `tag`, `studio`         | Title, Studios, Actors, Tags, Description         |
+| `fptv`    | *familyporn.tv* †         | `video`, `search`, `category`, `actors`      | Title, Studios, Actors, Tags, Description         |
+| `fs`      | *family-sex.me* †         | `video`, `search`, `tag`                     | Title, Studios, Actors, Tags, Description         |
+| `fsv`     | *familysexvideos.org* †   | `video`, `search`                            | Title                                             |
+| `if`      | *incestflix.com*          | `video`, `search`‡, `tag`‡                   | Title, Studios, Actors, Tags, Image               |
 | `lf`      | *lonefun.com*             | `video`, `search`, `tag`                     | Title, Tags, Description                          |
-| `ml`      | *motherless.com*[^1]      | `video`, `search`, `category`, `user`, `group` | Title, Tags                                     |
-| `ph`      | *pornhub.com*[^1]         | `video`, `model`, `category`, `category_alt`, `channel`, `search`, `pornstar` | Title, Studios, Actors, Tags, Date, Code, Images |
+| `ml`      | *motherless.com* †        | `video`, `search`, `category`, `user`, `group` | Title, Tags                                     |
+| `ph`      | *pornhub.com* †           | `video`, `model`, `category`, `category_alt`, `channel`, `search`, `pornstar` | Title, Studios, Actors, Tags, Date, Code, Images |
 | `sb`      | *spankbang.com*           | `video`, `model`, `search`, `tag`            | Title, Actors, Tags, Description                  |
 | `triv`    | *toprealincestvideos.com* | `video`, `search`, `category`                | Title                                             |
 | `xh`      | *xhamster.com*            | `video`, `search`, `category`, `pornstar`    | Title, Studios, Actors, Tags 
-| `xnxx`    | *xnxx.com*[^1]            | `video`, `search`, `channel`, `pornstar`, `tag`, `pornmaker` | Title, Studios, Actors, Tags, Description, Date, Image |
+| `xnxx`    | *xnxx.com* †              | `video`, `search`, `channel`, `pornstar`, `tag`, `pornmaker` | Title, Studios, Actors, Tags, Description, Date, Image |
 | `xv`      | *xvideos.com*             | `video`, `search`, `channel`, `model`, `tag` | Title                                             |
 
 ---
-
-[^1]: Selenium required.
-[^2]: To combine two search or tag queries, separate them by '&', for example, `scrape if tag "BS & Lily LaBeau"` to scrape Brother-Sister videos starring Lily LaBeau.
+† Selenium required.
+‡ To combine two search or tag queries, separate them by '&', for example, `scrape if tag "BS & Lily LaBeau"` to scrape Brother-Sister videos starring Lily LaBeau.
 
 `Smutscrape` scrapes metadata for video pages and saves it in `.nfo` files in the download directory, ready for use in [Plex](https://plex.tv), [Jellyfin](https://github.com/jellyfin/jellyfin) or [Stash](https://github.com/stashapp) with the [nfoSceneParser](https://github.com/stashapp/CommunityScripts/tree/main/plugins/nfoSceneParser) plugin. Please note only metadata is only saved for videos from sites that non-Title metadata is scraped from. *FamilySexVideos*, *TopRealIncestVideos*, and *XVideos* are unsupported.
 

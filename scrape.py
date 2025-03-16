@@ -638,9 +638,10 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 			continue
 		
 		if isinstance(config, dict) and 'attribute' in config:
-			# Handle attribute-based extraction (e.g., alt)
+			# Handle attribute-based extraction (e.g., href, src)
 			values = [element.get(config['attribute']) for element in elements if element.get(config['attribute'])]
-			value = values if len(values) > 1 or field in ['tags', 'actors', 'studios'] else values[0] if values else ''
+			# If only one value, use it directly; otherwise, keep as list for post-processing
+			value = values[0] if len(values) == 1 else values if values else ''
 			if value is None:
 				logger.debug(f"Attribute '{config['attribute']}' for '{field}' is None; defaulting to empty string")
 				value = ''
@@ -655,31 +656,66 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 		
 		# Handle multi-value fields with deduplication only for text-based fields
 		if field in ['tags', 'actors', 'producers', 'studios'] and not (isinstance(config, dict) and 'attribute' in config):
-			# Extract all values, strip, and filter out empty ones
 			values = [element.text.strip() for element in elements if hasattr(element, 'text') and element.text and element.text.strip()]
-			# Normalize and deduplicate
 			normalized_values = {v.lower() for v in values if v}
 			value = [v for v in values if v.lower() in normalized_values]
-			# Remove duplicates while preserving order
 			seen = set()
 			value = [v for v in value if not (v.lower() in seen or seen.add(v.lower()))]
 		
-		if isinstance(config, dict) and 'postProcess' in config:
-			for step in config['postProcess']:
-				if 'replace' in step:
-					for pair in step['replace']:
-						regex, replacement = pair['regex'], pair['with']
+		# Apply post-processing if present, or default to first value for lists without postProcess
+		if isinstance(config, dict):
+			if 'postProcess' in config:
+				for step in config['postProcess']:
+					if 'replace' in step:
+						for pair in step['replace']:
+							regex, replacement = pair['regex'], pair['with']
+							try:
+								if isinstance(value, list):
+									value = [re.sub(regex, replacement, v, flags=re.DOTALL) if v else '' for v in value]
+								else:
+									old_value = value
+									value = re.sub(regex, replacement, value, flags=re.DOTALL) if value else ''
+									if value != old_value:
+										logger.debug(f"Applied regex '{regex}' -> '{replacement}' for '{field}': {value}")
+							except re.error as e:
+								logger.error(f"Regex error for '{field}': regex={regex}, error={e}")
+								value = ''
+					elif 'max_attribute' in step:
+						if not isinstance(value, list):
+							logger.debug(f"Skipping max_attribute for '{field}' as value is not a list: {value}")
+							continue
+						attr_name = step.get('attribute')
+						attr_type = step.get('type', 'str')
+						if not attr_name:
+							logger.error(f"max_attribute for '{field}' missing 'attribute' key")
+							continue
 						try:
-							if isinstance(value, list):
-								value = [re.sub(regex, replacement, v, flags=re.DOTALL) if v else '' for v in value]
+							attr_values = [(val, elements[i].get(attr_name)) for i, val in enumerate(value) if elements[i].get(attr_name) is not None]
+							if not attr_values:
+								logger.debug(f"No valid '{attr_name}' attributes found for '{field}'; using first value")
+								value = value[0] if value else ''
 							else:
-								old_value = value
-								value = re.sub(regex, replacement, value, flags=re.DOTALL) if value else ''
-								if value != old_value:
-									logger.debug(f"Applied regex '{regex}' -> '{replacement}' for '{field}': {value}")
-						except re.error as e:
-							logger.error(f"Regex error for '{field}': regex={regex}, error={e}")
-							value = ''
+								if attr_type == 'int':
+									converted_attrs = [(val, int(attr)) for val, attr in attr_values]
+								elif attr_type == 'float':
+									converted_attrs = [(val, float(attr)) for val, attr in attr_values]
+								else:
+									converted_attrs = [(val, str(attr)) for val, attr in attr_values]
+								value = max(converted_attrs, key=lambda x: x[1])[0]
+								logger.debug(f"Applied max_attribute '{attr_name}' (type: {attr_type}) for '{field}': selected {value}")
+						except (ValueError, TypeError) as e:
+							logger.error(f"Failed to convert '{attr_name}' to {attr_type} for '{field}': {e}")
+							value = value[0] if value else ''
+					elif 'first' in step and step['first']:
+						if isinstance(value, list):
+							value = value[0] if value else ''
+							logger.debug(f"Applied 'first' for '{field}': selected {value}")
+						else:
+							logger.debug(f"Skipping 'first' for '{field}' as value is not a list: {value}")
+			elif isinstance(value, list) and field not in ['tags', 'actors', 'studios']:
+				# Default to first value for lists without postProcess, except multi-value fields
+				value = value[0] if value else ''
+				logger.debug(f"No postProcess for '{field}' with multiple values; defaulted to first: {value}")
 		
 		data[field] = value if value or isinstance(value, list) else ''
 		logger.debug(f"Final value for '{field}': {data[field]}")
@@ -691,25 +727,29 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 	driver = get_selenium_driver(general_config) if use_selenium else None
 	soup = fetch_page(url, general_config['user_agents'], headers if headers else {}, use_selenium, driver)
 	if soup is None:
+		logger.error(f"Failed to fetch page: {url}")
 		return None, None
 	
 	list_scraper = site_config['scrapers']['list_scraper']
 	base_url = site_config['base_url']
-	container = None
-	for selector in list_scraper['video_container']['selector']:
-		container = soup.select_one(selector)
-		if container:
-			break
+	container_selector = list_scraper['video_container']['selector']
+	logger.debug(f"Searching for container with selector: '{container_selector}'")
+	container = soup.select_one(container_selector)
 	if not container:
-		logger.error(f"Could not find video container at {url}")
+		logger.error(f"Could not find video container at {url} with selector '{container_selector}'")
 		return None, None
+	logger.debug(f"Found container: {container.name}[class={container.get('class', [])}]")
 	
-	video_elements = container.select(list_scraper['video_item']['selector'])
+	item_selector = list_scraper['video_item']['selector']
+	logger.debug(f"Searching for video items with selector: '{item_selector}'")
+	video_elements = container.select(item_selector)
+	logger.debug(f"Found {len(video_elements)} video items")
 	if not video_elements:
-		logger.info(f"No videos found on page {current_page}")
+		logger.info(f"No videos found on page {current_page} with selector '{item_selector}'")
 		return None, None
 	
 	for video_element in video_elements:
+		logger.debug(f"Processing video element: {video_element.get('data-vid', 'no data-vid')}")
 		video_data = extract_data(video_element, list_scraper['video_item']['fields'], driver, site_config)
 		if 'url' in video_data:
 			video_url = video_data['url']
@@ -720,9 +760,8 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 		else:
 			logger.warning("Unable to construct video URL")
 			continue
-		video_title = video_data.get('title', '') or video_element.text.strip()
+		video_title = video_data.get('title', '').strip() or video_element.text.strip()
 		logger.info(f"Found video: {video_title} - {video_url}")
-		# def process_video_page(url, site_config, general_config, overwrite_files=False, headers=None, force_new_nfo=False):
 		process_video_page(video_url, site_config, general_config, overwrite_files, headers, force_new_nfo)
 	
 	# Determine pagination method
@@ -741,9 +780,6 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 	
 	next_url = None
 	if url_pattern_pages:
-		# URL pattern-based pagination
-		if scraper_pagination:
-			logger.warning(f"Both 'url_pattern_pages' and 'list_scraper.pagination' are defined; prioritizing 'url_pattern_pages'")
 		encoded_identifier = identifier
 		for original, replacement in site_config.get('url_encoding_rules', {}).items():
 			encoded_identifier = encoded_identifier.replace(original, replacement)
@@ -755,7 +791,6 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 		)
 		logger.info(f"Generated next page URL (pattern-based): {next_url}")
 	elif scraper_pagination:
-		# Scraper-based pagination
 		if 'subsequent_pages' in scraper_pagination:
 			encoded_identifier = identifier
 			for original, replacement in site_config.get('url_encoding_rules', {}).items():

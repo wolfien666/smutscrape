@@ -11,7 +11,7 @@ no_overwrite: true
 
 modes:
   video:
-    url_pattern: "{video_id}"
+    url_pattern: "/{video_id}"
     scraper: video_scraper
   search:
     url_pattern: "/?s={search}"

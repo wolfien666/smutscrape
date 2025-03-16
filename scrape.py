@@ -174,6 +174,73 @@ def get_selenium_driver(general_config, force_new=False):
 	logger.debug(f"Selenium User-Agent: {user_agent}")
 	return general_config['selenium_driver']
 
+def generate_nfo_file(video_path, metadata):
+	nfo_path = f"{video_path.rsplit('.', 1)[0]}.nfo"
+	
+	tag_uppercase = [
+		"ABDL", "ASMR", "BBW", "BDSM", "DILF", "DP", "HD", "JAV", "JOI", "POV", "BBS", "BS", "BSS",
+		"FD", "FDD", "FDDD", "FDDDD", "FMD", "FMDD", "FMDDD", "FMS", "FMSS", "FS",
+		"FSD", "MD", "MDD", "MDDD", "MDDDD", "MILF", "MMD", "MMS", "MS", "MSD", "MSS",
+		"MSSD", "MSSS", "MSSSS", "MSDD", "SS", "3D", "4K"
+	]
+	studio_uppercase = ["DP", "HD", "JAV", "JOI", "MILF", "POV", "3D", "4K"]
+	
+	try:
+		logger.debug(f"Using generate_nfo_file version 1.3")
+		logger.debug(f"Generating NFO with metadata: {metadata}")
+		with open(nfo_path, 'w', encoding='utf-8') as f:
+			f.write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n')
+			f.write('<movie>\n')
+			
+			if 'title' in metadata and metadata['title']:
+				f.write(f"  <title>{metadata['title']}</title>\n")
+			if 'URL' in metadata and metadata['URL']:
+				f.write(f"  <url>{metadata['URL']}</url>\n")
+			if 'date' in metadata and metadata['date']:
+				f.write(f"  <premiered>{metadata['date']}</premiered>\n")
+			if 'Code' in metadata and metadata['Code']:
+				f.write(f"  <uniqueid>{metadata['Code']}</uniqueid>\n")
+			if 'tags' in metadata:
+				logger.debug(f"Tags value: {metadata['tags']}")
+				if metadata['tags'] is None:
+					logger.warning(f"Tags is None for {nfo_path}")
+				elif len(metadata['tags']) > 0:
+					for tag in set(metadata['tags']):
+						cleaned_tag = tag.lstrip('#')
+						formatted_tag = custom_title_case(cleaned_tag, tag_uppercase)
+						f.write(f"  <tag>{formatted_tag}</tag>\n")
+			if 'actors' in metadata:
+				logger.debug(f"Actors value: {metadata['actors']}")
+				if metadata['actors'] is None:
+					logger.warning(f"Actors is None for {nfo_path}")
+				elif len(metadata['actors']) > 0:
+					for i, performer in enumerate(metadata['actors'], 1):
+						cleaned_performer = performer.lstrip('#')
+						formatted_performer = custom_title_case(cleaned_performer, tag_uppercase, preserve_mixed_case=True)
+						f.write(f"  <actor>\n    <name>{formatted_performer}</name>\n    <order>{i}</order>\n  </actor>\n")
+			if 'Image' in metadata and metadata['Image']:
+				f.write(f"  <thumb aspect=\"poster\">{metadata['Image']}</thumb>\n")
+			if 'studio' in metadata and metadata['studio']:
+				cleaned_studio = metadata['studio'].lstrip('#')
+				formatted_studio = custom_title_case(cleaned_studio, studio_uppercase, preserve_mixed_case=True)
+				f.write(f"  <studio>{formatted_studio}</studio>\n")
+			elif 'studios' in metadata:
+				logger.debug(f"Studios value: {metadata['studios']}")
+				if metadata['studios'] is None:
+					logger.warning(f"Studios is None for {nfo_path}")
+				elif len(metadata['studios']) > 0:
+					cleaned_studio = metadata['studios'][0].lstrip('#')  # Only take first studio
+					formatted_studio = custom_title_case(cleaned_studio, studio_uppercase, preserve_mixed_case=True)
+					f.write(f"  <studio>{formatted_studio}</studio>\n")
+			if 'description' in metadata and metadata['description']:
+				f.write(f"  <plot>{metadata['description']}</plot>\n")
+			
+			f.write('</movie>\n')
+		logger.info(f"Generated NFO file: {nfo_path}")
+		return True
+	except Exception as e:
+		logger.error(f"Failed to generate NFO file {nfo_path}: {e}", exc_info=True)  # Include stack trace
+		raise
 
 def process_video_page(url, site_config, general_config, overwrite_files=False, headers=None, force_new_nfo=False):
 	global last_vpn_action_time
@@ -583,9 +650,16 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 		
 		logger.debug(f"Initial value for '{field}': {value}")
 		
-		# Handle multi-value fields without stripping '#'
+		# Handle multi-value fields with deduplication
 		if field in ['tags', 'actors', 'producers', 'studios']:
-			value = [element.text.strip() for element in elements if hasattr(element, 'text') and element.text and element.text.strip()]
+			# Extract all values, strip, and filter out empty ones
+			values = [element.text.strip() for element in elements if hasattr(element, 'text') and element.text and element.text.strip()]
+			# Normalize and deduplicate
+			normalized_values = {v.lower() for v in values if v}  # Use set for deduplication, lowercase for consistency
+			value = [v for v in values if v.lower() in normalized_values]  # Preserve original casing but remove duplicates
+			# Remove duplicates while preserving order (optional, if order matters)
+			seen = set()
+			value = [v for v in value if not (v.lower() in seen or seen.add(v.lower()))]
 		
 		if isinstance(config, dict) and 'postProcess' in config:
 			for step in config['postProcess']:
@@ -650,7 +724,7 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 	
 	# Determine pagination method
 	if mode not in site_config['modes']:
-		logger.debug(f"No pagination for mode '{mode}' as it’s not defined in site_config['modes']")
+		logger.warning(f"No pagination for mode '{mode}' as it’s not defined in site_config['modes']")
 		return None, None
 	
 	mode_config = site_config['modes'][mode]
@@ -659,13 +733,12 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 	max_pages = mode_config.get('max_pages', scraper_pagination.get('max_pages', float('inf')))
 	
 	if current_page >= max_pages:
-		logger.debug(f"Stopping pagination: current_page={current_page} >= max_pages={max_pages}")
+		logger.warning(f"Stopping pagination: current_page={current_page} >= max_pages={max_pages}")
 		return None, None
 	
 	next_url = None
 	if url_pattern_pages:
 		# URL pattern-based pagination
-		logger.debug(f"Called subroutine for URL pattern-based pagination...")
 		if scraper_pagination:
 			logger.warning(f"Both 'url_pattern_pages' and 'list_scraper.pagination' are defined; prioritizing 'url_pattern_pages'")
 		encoded_identifier = identifier
@@ -677,12 +750,11 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 			site_config,
 			**{mode: encoded_identifier, 'page': current_page + 1}
 		)
-		logger.debug(f"Generated next page URL (pattern-based): {next_url}")
+		logger.info(f"Generated next page URL (pattern-based): {next_url}")
 	elif scraper_pagination:
 		# Scraper-based pagination
 		if 'subsequent_pages' in scraper_pagination:
 			encoded_identifier = identifier
-			logger.debug(f"Preparing to replace encoded_identifier in scraper pagination subroutine...")
 			for original, replacement in site_config.get('url_encoding_rules', {}).items():
 				encoded_identifier = encoded_identifier.replace(original, replacement)
 			url_pattern = mode_config['url_pattern']
@@ -690,7 +762,7 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 				url_pattern=url_pattern, page=current_page + 1, search=encoded_identifier
 			)
 			next_url = urllib.parse.urljoin(base_url, next_url)
-			logger.debug(f"Generated next page URL (subsequent_pages): {next_url}")
+			logger.info(f"Generated next page URL (subsequent_pages): {next_url}")
 		elif 'next_page' in scraper_pagination:
 			next_page_config = scraper_pagination['next_page']
 			next_page = soup.select_one(next_page_config.get('selector', ''))
@@ -698,13 +770,13 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 				next_url = next_page.get(next_page_config.get('attribute', 'href'))
 				if next_url and not next_url.startswith(('http://', 'https://')):
 					next_url = urllib.parse.urljoin(base_url, next_url)
-				logger.debug(f"Found next page URL (selector-based): {next_url}")
+				logger.info(f"Found next page URL (selector-based): {next_url}")
 			else:
-				logger.debug(f"No 'next' element found with selector '{next_page_config.get('selector')}'")
+				logger.warning(f"No 'next' element found with selector '{next_page_config.get('selector')}'")
 	
 	if next_url:
 		return next_url, current_page + 1
-	logger.debug("No next page URL generated; stopping pagination")
+	logger.warning("No next page URL generated; stopping pagination")
 	return None, None
 
 	
@@ -1101,74 +1173,6 @@ def custom_title_case(text, uppercase_list=None, preserve_mixed_case=False):
 			pattern = re.compile(r'\b' + re.escape(term) + r'\b', re.IGNORECASE)
 			final_text = pattern.sub(term.upper(), final_text)
 	return final_text
-
-def generate_nfo_file(video_path, metadata):
-	nfo_path = f"{video_path.rsplit('.', 1)[0]}.nfo"
-	
-	tag_uppercase = [
-		"ABDL", "ASMR", "BBW", "BDSM", "DP", "JAV", "JOI", "POV", "BBS", "BS", "BSS",
-		"FD", "FDD", "FDDD", "FDDDD", "FMD", "FMDD", "FMDDD", "FMS", "FMSS", "FS",
-		"FSD", "MD", "MDD", "MDDD", "MDDDD", "MMD", "MMS", "MS", "MSD", "MSS",
-		"MSSD", "MSSS", "MSSSS", "MSDD", "SS", "3D", "4K"
-	]
-	studio_uppercase = ["DP", "JAV", "JOI", "POV", "3D", "4K"]
-	
-	try:
-		logger.debug(f"Using generate_nfo_file version 1.3")
-		logger.debug(f"Generating NFO with metadata: {metadata}")
-		with open(nfo_path, 'w', encoding='utf-8') as f:
-			f.write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n')
-			f.write('<movie>\n')
-			
-			if 'title' in metadata and metadata['title']:
-				f.write(f"  <title>{metadata['title']}</title>\n")
-			if 'URL' in metadata and metadata['URL']:
-				f.write(f"  <url>{metadata['URL']}</url>\n")
-			if 'date' in metadata and metadata['date']:
-				f.write(f"  <premiered>{metadata['date']}</premiered>\n")
-			if 'Code' in metadata and metadata['Code']:
-				f.write(f"  <uniqueid>{metadata['Code']}</uniqueid>\n")
-			if 'tags' in metadata:
-				logger.debug(f"Tags value: {metadata['tags']}")
-				if metadata['tags'] is None:
-					logger.warning(f"Tags is None for {nfo_path}")
-				elif len(metadata['tags']) > 0:
-					for tag in set(metadata['tags']):
-						cleaned_tag = tag.lstrip('#')
-						formatted_tag = custom_title_case(cleaned_tag, tag_uppercase)
-						f.write(f"  <tag>{formatted_tag}</tag>\n")
-			if 'actors' in metadata:
-				logger.debug(f"Actors value: {metadata['actors']}")
-				if metadata['actors'] is None:
-					logger.warning(f"Actors is None for {nfo_path}")
-				elif len(metadata['actors']) > 0:
-					for i, performer in enumerate(metadata['actors'], 1):
-						cleaned_performer = performer.lstrip('#')
-						formatted_performer = custom_title_case(cleaned_performer, tag_uppercase, preserve_mixed_case=True)
-						f.write(f"  <actor>\n    <name>{formatted_performer}</name>\n    <order>{i}</order>\n  </actor>\n")
-			if 'Image' in metadata and metadata['Image']:
-				f.write(f"  <thumb aspect=\"poster\">{metadata['Image']}</thumb>\n")
-			if 'studio' in metadata and metadata['studio']:
-				cleaned_studio = metadata['studio'].lstrip('#')
-				formatted_studio = custom_title_case(cleaned_studio, studio_uppercase, preserve_mixed_case=True)
-				f.write(f"  <studio>{formatted_studio}</studio>\n")
-			elif 'studios' in metadata:
-				logger.debug(f"Studios value: {metadata['studios']}")
-				if metadata['studios'] is None:
-					logger.warning(f"Studios is None for {nfo_path}")
-				elif len(metadata['studios']) > 0:
-					cleaned_studio = metadata['studios'][0].lstrip('#')  # Only take first studio
-					formatted_studio = custom_title_case(cleaned_studio, studio_uppercase, preserve_mixed_case=True)
-					f.write(f"  <studio>{formatted_studio}</studio>\n")
-			if 'description' in metadata and metadata['description']:
-				f.write(f"  <plot>{metadata['description']}</plot>\n")
-			
-			f.write('</movie>\n')
-		logger.info(f"Generated NFO file: {nfo_path}")
-		return True
-	except Exception as e:
-		logger.error(f"Failed to generate NFO file {nfo_path}: {e}", exc_info=True)  # Include stack trace
-		raise
 	
 
 def main():

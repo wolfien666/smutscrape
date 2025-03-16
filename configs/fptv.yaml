@@ -15,7 +15,7 @@ modes:
     scraper: video_scraper
   model:
     scraper: list_scraper
-    url_pattern: "/models/{actors}/"
+    url_pattern: "/models/{model}/"
   category:
     scraper: list_scraper
     url_pattern: "/categories/{category}/"

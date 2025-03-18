@@ -39,6 +39,25 @@ CONFIG_DIR = os.path.join(SCRIPT_DIR, 'configs')
 last_vpn_action_time = 0
 session = requests.Session()
 
+
+		
+class ProgressFile:
+	"""A file-like wrapper to track progress during SMB upload."""
+	def __init__(self, file_obj, progress_bar):
+		self.file_obj = file_obj
+		self.pbar = progress_bar
+		self.total_size = os.fstat(file_obj.fileno()).st_size
+	
+	def read(self, size=-1):
+		data = self.file_obj.read(size)
+		if data:
+			self.pbar.update(len(data))
+		return data
+	
+	def __getattr__(self, name):
+		return getattr(self.file_obj, name)
+		
+
 def load_config(config_file):
 	with open(config_file, 'r') as file:
 		return yaml.safe_load(file)
@@ -261,9 +280,10 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 	logger.info(f"Processing video page: {url}")
 	use_selenium = site_config.get('use_selenium', False)
 	driver = get_selenium_driver(general_config) if use_selenium else None
-	original_url = url  # Preserve the original URL for metadata and NFO
+	original_url = url
+	base_origin = urllib.parse.urlparse(original_url).scheme + "://" + urllib.parse.urlparse(original_url).netloc
 	
-	# Handle M3U8 mode with iframe piercing
+	iframe_url = None
 	if site_config.get('m3u8_mode', False) and driver:
 		video_scraper = site_config['scrapers']['video_scraper']
 		iframe_config = None
@@ -273,7 +293,7 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 				break
 		if iframe_config:
 			logger.debug(f"Piercing iframe '{iframe_config['selector']}' for M3U8 extraction")
-			driver.get(original_url)  # Load original page first
+			driver.get(original_url)
 			time.sleep(random.uniform(1, 2))
 			try:
 				iframe = driver.find_element(By.CSS_SELECTOR, iframe_config['selector'])
@@ -289,9 +309,8 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 						headers["Cookie"] = cookies
 						headers["Referer"] = iframe_url
 						headers["User-Agent"] = general_config.get('selenium_user_agent', random.choice(general_config['user_agents']))
-						# Fetch original page for metadata
 						soup = fetch_page(original_url, general_config['user_agents'], headers, use_selenium, driver)
-						data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config) if soup else {'title': original_url.split('/')[-2]}  # Use slug before trailing slash
+						data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config) if soup else {'title': original_url.split('/')[-2]}
 					else:
 						logger.error("Failed to extract M3U8 URL; falling back to page scrape.")
 						video_url = None
@@ -301,7 +320,6 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 			except Exception as e:
 				logger.debug(f"No iframe found or error piercing: {e}")
 				video_url = None
-			# Always fetch original page for metadata, even if iframe fails
 			soup = fetch_page(original_url, general_config['user_agents'], headers or {}, use_selenium, driver)
 			data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config) if soup else {'title': original_url.split('/')[-2]}
 		else:
@@ -327,7 +345,7 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 		logger.debug(f"video_url: {video_url}")
 	video_title = data.get('title', '').strip() or 'Untitled'
 	data['Title'] = video_title
-	data['URL'] = original_url  # Use original URL for NFO, not iframe or M3U8
+	data['URL'] = original_url
 	
 	if should_ignore_video(data, general_config['ignored']):
 		logger.info(f"Ignoring video: {video_title}")
@@ -341,14 +359,11 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 	if destination_config['type'] == 'smb':
 		smb_destination_path = os.path.join(destination_config['path'], file_name)
 		smb_nfo_path = os.path.join(destination_config['path'], f"{file_name.rsplit('.', 1)[0]}.nfo")
-		# Create a dedicated temporary directory for downloads using tempfile
 		temp_base = os.path.join(tempfile.gettempdir(), 'smutscrape')
 		temp_dir = destination_config.get('temporary_storage', temp_base)
 		os.makedirs(temp_dir, exist_ok=True)
-
 		destination_path = os.path.join(temp_dir, file_name)
 		temp_nfo_path = os.path.join(temp_dir, f"{file_name.rsplit('.', 1)[0]}.nfo")
-
 		video_exists = file_exists_on_smb(destination_config, smb_destination_path)
 		nfo_exists = file_exists_on_smb(destination_config, smb_nfo_path)
 	else:
@@ -357,7 +372,6 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 		video_exists = os.path.exists(destination_path)
 		nfo_exists = os.path.exists(nfo_path)
 	
-	# NFO generation and upload logic
 	make_nfo = general_config.get('make_nfo', False)
 	has_selectors = has_metadata_selectors(site_config)
 	
@@ -389,13 +403,13 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 			else:
 				logger.debug(f"NFO file already exists at local destination: {nfo_path}, skipping generation")
 	
-	# Download logic
+	origin_to_use = urllib.parse.urlparse(iframe_url if iframe_url else original_url).scheme + "://" + urllib.parse.urlparse(iframe_url if iframe_url else original_url).netloc
 	if video_exists and not overwrite_files:
 		logger.info(f"File '{file_name}' exists. Skipping download.")
 	else:
 		download_method = site_config['download'].get('method', 'curl')
 		logger.info(f"Downloading: {file_name}")
-		if download_file(video_url, destination_path, download_method, general_config, site_config, headers=headers, metadata=data):
+		if download_file(video_url, destination_path, download_method, general_config, site_config, headers=headers, metadata=data, origin=origin_to_use):
 			if destination_config['type'] == 'smb':
 				upload_to_smb(destination_path, smb_destination_path, destination_config, overwrite_files)
 				os.remove(destination_path)
@@ -799,6 +813,8 @@ def apply_permissions(file_path, destination_config):
 	except Exception as e:
 		logger.error(f"Failed to apply permissions to {file_path}: {e}")
 
+
+
 def upload_to_smb(local_path, smb_path, destination_config, overwrite=False):
 	conn = SMBConnection(destination_config['username'], destination_config['password'], "videoscraper", destination_config['server'])
 	try:
@@ -806,10 +822,12 @@ def upload_to_smb(local_path, smb_path, destination_config, overwrite=False):
 			if not overwrite and file_exists_on_smb(destination_config, smb_path):
 				logger.info(f"File '{smb_path}' exists on SMB share. Skipping.")
 				return
+			
+			file_size = os.path.getsize(local_path)
 			with open(local_path, 'rb') as file:
-				with tqdm(total=os.path.getsize(local_path), unit='B', unit_scale=True, desc="Uploading to SMB") as pbar:
-					conn.storeFile(destination_config['share'], smb_path, file)
-					pbar.update(os.path.getsize(local_path))
+				with tqdm(total=file_size, unit='B', unit_scale=True, desc="Uploading to SMB") as pbar:
+					progress_file = ProgressFile(file, pbar)
+					conn.storeFile(destination_config['share'], smb_path, progress_file)
 			logger.info(f"Uploaded to SMB: {smb_path}")
 		else:
 			logger.error("Failed to connect to SMB share.")
@@ -861,7 +879,8 @@ def get_video_metadata(file_path):
 		logger.error(f"Error extracting metadata for {file_path}: {e}")
 		return None
 
-def download_file(url, destination_path, method, general_config, site_config, headers=None, metadata=None):
+
+def download_file(url, destination_path, method, general_config, site_config, headers=None, metadata=None, origin=None):
 	if not url:
 		logger.error("Invalid or empty URL")
 		return False
@@ -875,7 +894,7 @@ def download_file(url, destination_path, method, general_config, site_config, he
 	desc = f"Downloading {os.path.basename(destination_path)}"
 	
 	if method == "requests":
-		success == download_with_requests(url, destination_path, headers, general_config, site_config, desc)
+		success = download_with_requests(url, destination_path, headers, general_config, site_config, desc)
 	elif method == 'curl':
 		success = download_with_curl(url, destination_path, headers, general_config, site_config, desc)
 	elif method == 'wget':
@@ -883,7 +902,7 @@ def download_file(url, destination_path, method, general_config, site_config, he
 	elif method == 'yt-dlp':
 		success = download_with_ytdlp(url, destination_path, headers, general_config, metadata, desc)
 	elif method == 'ffmpeg':
-		success = download_with_ffmpeg(url, destination_path, general_config, headers, desc)
+		success = download_with_ffmpeg(url, destination_path, general_config, headers, desc, origin=origin)
 	
 	if success and os.path.exists(destination_path):
 		video_info = get_video_metadata(destination_path)
@@ -1031,7 +1050,9 @@ def download_with_ytdlp(url, destination_path, headers, general_config, metadata
 	logger.info("yt-dlp download completed successfully")
 	return True
 
-def download_with_ffmpeg(url, destination_path, general_config, headers=None, desc="Downloading"):
+
+	
+def download_with_ffmpeg(url, destination_path, general_config, headers=None, desc="Downloading", origin=None):
 	headers = headers or {}
 	ua = headers.get('User-Agent', random.choice(general_config['user_agents']))
 	if "Headless" in ua:
@@ -1041,16 +1062,25 @@ def download_with_ffmpeg(url, destination_path, general_config, headers=None, de
 		"User-Agent": ua,
 		"Referer": headers.get("Referer", ""),
 		"Accept": "application/vnd.apple.mpegurl",
-		"Origin": "https://bestwish.lol",
 	}
-	if "Cookie" in headers:
+	if "Cookie" in headers and headers["Cookie"]:
+		logger.debug(f"Including provided cookie: {headers['Cookie']}")
 		fetch_headers["Cookie"] = headers["Cookie"]
+	else:
+		logger.debug("No cookie provided for fetch")
+	if origin:
+		logger.debug(f"Including header for origin: {origin}")
+		fetch_headers["Origin"] = origin
+	else:
+		logger.debug("No origin url provided; omitting origin header")
 	
+	logger.debug(f"Fetching M3U8 with headers: {fetch_headers}")
 	try:
 		scraper = cloudscraper.create_scraper()
 		response = scraper.get(url, headers=fetch_headers, timeout=30)
 		response.raise_for_status()
 		m3u8_content = response.text
+		logger.debug(f"Fetched M3U8 content: {m3u8_content[:100]}...")
 	except requests.exceptions.RequestException as e:
 		logger.error(f"Failed to fetch M3U8: {e}")
 		return False
@@ -1058,13 +1088,18 @@ def download_with_ffmpeg(url, destination_path, general_config, headers=None, de
 	temp_m3u8_path = destination_path + ".m3u8"
 	with open(temp_m3u8_path, "w", encoding="utf-8") as f:
 		base_url = url.rsplit('/', 1)[0] + "/"
+		segments = []
 		for line in m3u8_content.splitlines():
 			if line and not line.startswith("#"):
 				if not line.startswith("http"):
 					line = urllib.parse.urljoin(base_url, line)
+				segments.append(line)
 				f.write(line + "\n")
 			else:
 				f.write(line + "\n")
+	
+	total_segments = len(segments)
+	logger.debug(f"Found {total_segments} segments in M3U8")
 	
 	command = [
 		"ffmpeg",
@@ -1072,30 +1107,28 @@ def download_with_ffmpeg(url, destination_path, general_config, headers=None, de
 		"-i", temp_m3u8_path,
 		"-c", "copy",
 		"-bsf:a", "aac_adtstoasc",
+		"-y",
 		destination_path
 	]
 	
 	logger.debug(f"Executing FFmpeg command: {' '.join(shlex.quote(arg) for arg in command)}")
-	process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+	process = subprocess.Popen(
+		command,
+		stdout=subprocess.PIPE,
+		stderr=subprocess.PIPE,
+		universal_newlines=True
+	)
 	
-	duration_regex = re.compile(r'Duration: (\d{2}):(\d{2}):(\d{2})\.\d+')
-	time_regex = re.compile(r'time=(\d{2}):(\d{2}):(\d{2})\.\d+')
-	total_seconds = None
-	
-	with tqdm(unit='s', desc=desc) as pbar:
+	desc = f"Downloading {os.path.basename(destination_path)}"
+	with tqdm(total=total_segments, unit='seg', desc=desc) as pbar:
 		for line in process.stderr:
-			duration_match = duration_regex.search(line)
-			time_match = time_regex.search(line)
-			if duration_match and total_seconds is None:
-				h, m, s = map(int, duration_match.groups())
-				total_seconds = h * 3600 + m * 60 + s
-				pbar.total = total_seconds
-			if time_match:
-				h, m, s = map(int, time_match.groups())
-				current_seconds = h * 3600 + m * 60 + s
-				pbar.update(current_seconds - pbar.n)
-			elif line.strip() and not (duration_match or time_match):
-				logger.debug(f"FFmpeg output: {line.strip()}")
+			line = line.strip()
+			if "Opening 'http" in line and '.ts' in line:
+				pbar.update(1)
+			elif "error" in line.lower() or "failed" in line.lower():
+				logger.error(f"FFmpeg error: {line}")
+			elif "Duration:" in line:
+				logger.debug(f"FFmpeg output: {line}")
 	
 	return_code = process.wait()
 	if os.path.exists(temp_m3u8_path):
@@ -1106,6 +1139,7 @@ def download_with_ffmpeg(url, destination_path, general_config, headers=None, de
 		return False
 	logger.info("FFmpeg download completed successfully")
 	return True
+	
 
 def get_content_length(url, headers, general_config):
 	"""Attempt to fetch Content-Length header for progress bar accuracy."""

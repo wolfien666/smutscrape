@@ -29,7 +29,7 @@ modes:
     url_pattern: "/sites/{site}"
 
 download:
-  method: "requests" # "yt-dlp"
+  method: "requests"
 
 scrapers:
   video_scraper:

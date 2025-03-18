@@ -3,7 +3,7 @@ domain: spankbang.com
 base_url: "https://spankbang.com"
 selector_style: css
 no_overwrite: true
-use_selenium: false  # Kept as per your change; test with requests
+use_selenium: false
 url_encoding_rules:
   " ": "+"
   "%20": "+"
@@ -34,22 +34,22 @@ download:
 scrapers:
   video_scraper:
     title:
-      selector: "head title"  # Kept as is; refine if suffix unwanted
+      selector: "head title"
     download_url:
       selector: "meta[property='og:video']"
       attribute: "content"
     actors:
-      selector: "div.video-info p.name a[href*='/pornstar/']"  # Hypothetical; adjust with full video page HTML
+      selector: "div.video-info p.name a[href*='/pornstar/']"
     tags:
-      selector: "div.tags a[href*='/tag/']"  # Hypothetical; adjust with full video page HTML
+      selector: "div.tags a[href*='/tag/']"
     description:
-      selector: "div.description"  # Hypothetical; adjust with full video page HTML
+      selector: "div.description"
 
   list_scraper:
     video_container:
       selector:
-        - "div.video-list.video-rotate.with-ads.four-col"  # Restored list format
-        - "div.video-list.video-rotate.video-list-with-ads"  # Fallback
+        - "div.video-list.video-rotate.with-ads.four-col"
+        - "div.video-list.video-rotate.video-list-with-ads"
     video_item:
       selector: "div.video-item"
       fields:
@@ -57,10 +57,10 @@ scrapers:
           selector: "a.thumb"
           attribute: "href"
         title:
-          selector: "p.name a"  # More specific than a.thumb title attribute
+          selector: "p.name a"
         video_key:
           selector: "a.thumb"
           attribute: "href"
-          pattern: "/([^/]+)/video/"  # Extracts "6nkg9" from "/6nkg9/video/..."
+          pattern: "/([^/]+)/video/"
 
 name_suffix: " - SpankBang"

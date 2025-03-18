@@ -69,7 +69,7 @@ scrapers:
       postProcess:
         - replace:
             - regex: ".*setThumbUrl169\\(['\"]([^'\"]+)['\"]\\).*"
-              with: "\\1"  # Already fixed
+              with: "\\1"
 
   list_scraper:
     video_container:

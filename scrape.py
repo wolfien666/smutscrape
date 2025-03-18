@@ -23,8 +23,9 @@ import json
 import pwd
 import grp
 import shutil
+import shlex
+import json
 import uuid
-import tempfile
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -88,52 +89,15 @@ def construct_filename(title, site_config, general_config):
 	
 	return filename
 
-def get_video_metadata(file_path):
-	"""Extract video duration, resolution, and bitrate using ffprobe."""
-	command = [
-		"ffprobe",
-		"-v", "error",
-		"-show_entries", "format=duration,bit_rate,size:stream=width,height",
-		"-of", "json",
-		file_path
-	]
-	try:
-		result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, check=True)
-		metadata = json.loads(result.stdout)
 		
-		# File size in bytes (from ffprobe or os)
-		file_size = int(metadata.get('format', {}).get('size', os.path.getsize(file_path)))
-		
-		# Duration in seconds
-		duration = float(metadata.get('format', {}).get('duration', 0))
-		duration_str = f"{int(duration // 3600):02d}:{int((duration % 3600) // 60):02d}:{int(duration % 60):02d}"
-		
-		# Resolution
-		streams = metadata.get('streams', [])
-		video_stream = next((s for s in streams if s.get('width') and s.get('height')), None)
-		resolution = f"{video_stream['width']}x{video_stream['height']}" if video_stream else "Unknown"
-		
-		# Bitrate in kbps
-		bitrate = int(metadata.get('format', {}).get('bit_rate', 0)) // 1000 if metadata.get('format', {}).get('bit_rate') else 0
-		
-		return {
-			'size': file_size,
-			'size_str': f"{file_size / 1024 / 1024:.2f} MB",
-			'duration': duration_str,
-			'resolution': resolution,
-			'bitrate': f"{bitrate} kbps" if bitrate else "Unknown"
-		}
-	except subprocess.CalledProcessError as e:
-		logger.error(f"ffprobe failed for {file_path}: {e.stderr}")
-		return None
-	except Exception as e:
-		logger.error(f"Error extracting metadata for {file_path}: {e}")
-		return None
-		
-def construct_url(base_url, pattern, site_config, **kwargs):
-	encoding_rules = site_config.get('url_encoding_rules', {})
+def construct_url(base_url, pattern, site_config, mode=None, **kwargs):
+	encoding_rules = (
+		site_config['modes'][mode]['url_encoding_rules']
+		if mode and mode in site_config['modes'] and 'url_encoding_rules' in site_config['modes'][mode]
+		else site_config.get('url_encoding_rules', {})
+	)
 	encoded_kwargs = {}
-	logger.debug(f"Constructing URL...")
+	logger.debug(f"Constructing URL with pattern '{pattern}' and mode '{mode}' using encoding rules: {encoding_rules}")
 	for k, v in kwargs.items():
 		if isinstance(v, str):
 			encoded_v = v
@@ -143,7 +107,9 @@ def construct_url(base_url, pattern, site_config, **kwargs):
 		else:
 			encoded_kwargs[k] = v
 	path = pattern.format(**encoded_kwargs)
-	return urllib.parse.urljoin(base_url, path)
+	full_url = urllib.parse.urljoin(base_url, path)
+	logger.debug(f"Constructed URL: {full_url}")
+	return full_url
 
 
 def get_selenium_driver(general_config, force_new=False):
@@ -437,85 +403,6 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 				apply_permissions(destination_path, destination_config)
 	
 	time.sleep(general_config['sleep']['between_videos'])
-
-
-def download_with_ffmpeg(url, destination_path, general_config, headers=None):
-	headers = headers or {}
-	ua = headers.get('User-Agent', random.choice(general_config['user_agents']))
-	if "Headless" in ua:
-		ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-	
-	# Step 1: Fetch the .m3u8 file with requests to mimic browser context
-	fetch_headers = {
-		"User-Agent": ua,
-		"Referer": headers.get("Referer", ""),
-		"Accept": "application/vnd.apple.mpegurl",
-		"Origin": "https://bestwish.lol",
-	}
-	if "Cookie" in headers and headers["Cookie"]:
-		fetch_headers["Cookie"] = headers["Cookie"]
-	
-	logger.debug(f"Fetching M3U8 with headers: {fetch_headers}")
-	try:
-		scraper = cloudscraper.create_scraper()  # Handles potential Cloudflare checks
-		response = scraper.get(url, headers=fetch_headers, timeout=30)
-		response.raise_for_status()
-		m3u8_content = response.text
-		logger.debug(f"Fetched M3U8 content: {m3u8_content[:100]}...")
-	except requests.exceptions.RequestException as e:
-		logger.error(f"Failed to fetch M3U8: {e}")
-		return False
-	
-	# Step 2: Write M3U8 to a temp file and resolve absolute segment URLs
-	temp_m3u8_path = destination_path + ".m3u8"
-	with open(temp_m3u8_path, "w", encoding="utf-8") as f:
-		# Rewrite relative segment URLs to absolute
-		base_url = url.rsplit('/', 1)[0] + "/"
-		for line in m3u8_content.splitlines():
-			if line and not line.startswith("#"):
-				if not line.startswith("http"):
-					line = urllib.parse.urljoin(base_url, line)
-				f.write(line + "\n")
-			else:
-				f.write(line + "\n")
-	
-	# Step 3: Use ffmpeg with the local M3U8 file and protocol whitelist, no headers
-	command = [
-		"ffmpeg",
-		"-protocol_whitelist", "file,http,https,tcp,tls,crypto",
-		"-i", temp_m3u8_path,
-		"-c", "copy",
-		"-bsf:a", "aac_adtstoasc",
-		destination_path
-	]
-	
-	logger.debug(f"Executing FFmpeg command: {' '.join(shlex.quote(arg) for arg in command)}")
-	process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-	pbar = tqdm(total=100, unit='%', desc="Downloading (FFmpeg)")
-	last_percent = 0
-	try:
-		for line in process.stderr:
-			logger.debug(f"FFmpeg output: {line.strip()}")
-			if 'frame=' in line or 'size=' in line:
-				if last_percent < 90:
-					last_percent += random.uniform(1, 5)
-					pbar.update(min(last_percent, 100) - pbar.n)
-		pbar.n = 100
-	except KeyboardInterrupt:
-		process.terminate()
-		pbar.close()
-		os.remove(temp_m3u8_path)  # Cleanup on interrupt
-		return False
-	pbar.close()
-	return_code = process.wait()
-	if os.path.exists(temp_m3u8_path):
-		os.remove(temp_m3u8_path)  # Cleanup after completion
-	
-	if return_code != 0:
-		logger.error(f"FFmpeg failed with return code {return_code}")
-	else:
-		logger.info("FFmpeg download completed successfully")
-	return return_code == 0
 
 
 def pierce_iframe(driver, url, site_config):
@@ -816,7 +703,8 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 			if not video_url.startswith(('http://', 'https://')):
 				video_url = f"http:{video_url}" if video_url.startswith('//') else urllib.parse.urljoin(base_url, video_url)
 		elif 'video_key' in video_data:
-			video_url = construct_url(base_url, site_config['modes']['video']['url_pattern'], site_config, video_id=video_data['video_key'])
+			# Pass mode='video' to construct_url for video-specific encoding rules
+			video_url = construct_url(base_url, site_config['modes']['video']['url_pattern'], site_config, mode='video', video_id=video_data['video_key'])
 		else:
 			logger.warning("Unable to construct video URL")
 			continue
@@ -824,7 +712,7 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 		logger.info(f"Found video: {video_title} - {video_url}")
 		process_video_page(video_url, site_config, general_config, overwrite_files, headers, force_new_nfo)
 	
-	# Pagination logic (unchanged)
+	# Pagination logic
 	if mode not in site_config['modes']:
 		logger.warning(f"No pagination for mode '{mode}' as it’s not defined in site_config['modes']")
 		return None, None
@@ -840,14 +728,13 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 	
 	next_url = None
 	if url_pattern_pages:
-		encoded_identifier = identifier
-		for original, replacement in site_config.get('url_encoding_rules', {}).items():
-			encoded_identifier = encoded_identifier.replace(original, replacement)
+		# Pass mode to construct_url for mode-specific encoding rules
 		next_url = construct_url(
 			base_url,
 			url_pattern_pages,
 			site_config,
-			**{mode: encoded_identifier, 'page': current_page + 1}
+			mode=mode,
+			**{mode: identifier, 'page': current_page + 1}
 		)
 		logger.info(f"Generated next page URL (pattern-based): {next_url}")
 	elif scraper_pagination:
@@ -931,6 +818,49 @@ def upload_to_smb(local_path, smb_path, destination_config, overwrite=False):
 	finally:
 		conn.close()
 
+
+def get_video_metadata(file_path):
+	"""Extract video duration, resolution, and bitrate using ffprobe."""
+	command = [
+		"ffprobe",
+		"-v", "error",
+		"-show_entries", "format=duration,bit_rate,size:stream=width,height",
+		"-of", "json",
+		file_path
+	]
+	try:
+		result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, check=True)
+		metadata = json.loads(result.stdout)
+		
+		# File size in bytes (from ffprobe or os)
+		file_size = int(metadata.get('format', {}).get('size', os.path.getsize(file_path)))
+		
+		# Duration in seconds
+		duration = float(metadata.get('format', {}).get('duration', 0))
+		duration_str = f"{int(duration // 3600):02d}:{int((duration % 3600) // 60):02d}:{int(duration % 60):02d}"
+		
+		# Resolution
+		streams = metadata.get('streams', [])
+		video_stream = next((s for s in streams if s.get('width') and s.get('height')), None)
+		resolution = f"{video_stream['width']}x{video_stream['height']}" if video_stream else "Unknown"
+		
+		# Bitrate in kbps
+		bitrate = int(metadata.get('format', {}).get('bit_rate', 0)) // 1000 if metadata.get('format', {}).get('bit_rate') else 0
+		
+		return {
+			'size': file_size,
+			'size_str': f"{file_size / 1024 / 1024:.2f} MB",
+			'duration': duration_str,
+			'resolution': resolution,
+			'bitrate': f"{bitrate} kbps" if bitrate else "Unknown"
+		}
+	except subprocess.CalledProcessError as e:
+		logger.error(f"ffprobe failed for {file_path}: {e.stderr}")
+		return None
+	except Exception as e:
+		logger.error(f"Error extracting metadata for {file_path}: {e}")
+		return None
+
 def download_file(url, destination_path, method, general_config, site_config, headers=None, metadata=None):
 	if not url:
 		logger.error("Invalid or empty URL")
@@ -942,46 +872,20 @@ def download_file(url, destination_path, method, general_config, site_config, he
 	use_headers = headers and any(k in headers for k in ["Cookie"])
 	success = False
 	
-	if method == 'curl':
-		if use_headers:
-			curl_headers = (
-				f"-A \"{headers.get('User-Agent', random.choice(general_config['user_agents']))}\" "
-				f"-H \"Referer: {headers.get('Referer', site_config.get('base_url', ''))}\" "
-			)
-			if "Cookie" in headers:
-				curl_headers += f"-H \"Cookie: {headers['Cookie']}\" "
-			command = f"curl -L -o \"{destination_path}\" {curl_headers} --retry 3 --max-time 600 \"{url}\""
-		else:
-			command = f"curl -L -o \"{destination_path}\" \"{url}\""
-		logger.debug(f"Executing curl command: {command}")
-		success = download_with_curl(command)
+	desc = f"Downloading {os.path.basename(destination_path)}"
+	
+	if method == "requests":
+		success == download_with_requests(url, destination_path, headers, general_config, site_config, desc)
+	elif method == 'curl':
+		success = download_with_curl(url, destination_path, headers, general_config, site_config, desc)
 	elif method == 'wget':
-		if use_headers:
-			wget_headers = (
-				f"--user-agent=\"{headers.get('User-Agent', random.choice(general_config['user_agents']))}\" "
-				f"--referer=\"{headers.get('Referer', site_config.get('base_url', ''))}\" "
-			)
-			if "Cookie" in headers:
-				wget_headers += f"--header=\"Cookie: {headers['Cookie']}\" "
-			command = f"wget {wget_headers} --tries=3 --timeout=600 -O \"{destination_path}\" \"{url}\""
-		else:
-			command = f"wget -O \"{destination_path}\" \"{url}\""
-		logger.debug(f"Executing wget command: {command}")
-		success = download_with_wget(command)
+		success = download_with_wget(url, destination_path, headers, general_config, site_config, desc)
 	elif method == 'yt-dlp':
-		user_agent = headers.get('User-Agent', random.choice(general_config['user_agents']) if general_config.get('user_agents') else "Mozilla/5.0")
-		command = f"yt-dlp -o \"{destination_path}\" --user-agent \"{user_agent}\""
-		if 'Image' in metadata:
-			command += f" --embed-thumbnail --convert-thumbnails jpg"
-			logger.debug(f"Embedding image as thumbnail: {metadata['Image']}")
-		command += f" \"{url}\""
-		logger.debug(f"Executing yt-dlp command: {command}")
-		success = download_with_ytdlp(command)
+		success = download_with_ytdlp(url, destination_path, headers, general_config, metadata, desc)
 	elif method == 'ffmpeg':
-		success = download_with_ffmpeg(url, destination_path, general_config, headers)
+		success = download_with_ffmpeg(url, destination_path, general_config, headers, desc)
 	
 	if success and os.path.exists(destination_path):
-		# Extract and log video metadata
 		video_info = get_video_metadata(destination_path)
 		if video_info:
 			logger.info(
@@ -996,87 +900,228 @@ def download_file(url, destination_path, method, general_config, site_config, he
 	
 	return success
 
-def download_with_curl(command):
-	process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
-	pbar = tqdm(total=100, unit='%', desc="Downloading (curl)")
-	last_percent = 0
-	try:
-		for line in process.stdout:
-			# logger.debug(f"curl output: {line.strip()}")
-			if '#' in line:  # curl’s progress bar
-				percent = min(line.count('#'), 100)
-				pbar.update(percent - last_percent)
-				last_percent = percent
-			elif "< Location:" in line:
-				logger.info(f"curl redirect: {line.strip()}")
-		pbar.n = 100
-	except KeyboardInterrupt:
-		process.terminate()
-	pbar.close()
+	
+def download_with_requests(url, destination_path, headers, general_config, site_config, desc):
+	ua = headers.get('User-Agent', random.choice(general_config['user_agents']))
+	headers["User-Agent"] = ua
+	
+	logger.debug(f"Executing requests GET: {url} with headers: {headers}")
+	
+	with requests.get(url, headers=headers, stream=True) as r:
+		r.raise_for_status()
+		total_size = int(r.headers.get("Content-Length", 0)) or None
+		if not total_size:
+			logger.debug("Content-Length unavailable; total size will be determined at completion.")
+		
+		os.makedirs(os.path.dirname(destination_path), exist_ok=True)
+		with open(destination_path, "wb") as f:
+			with tqdm(total=total_size, unit="B", unit_scale=True, desc=desc, disable=False) as pbar:
+				for chunk in r.iter_content(chunk_size=1024):
+					size = f.write(chunk)
+					pbar.update(size)
+					if not total_size:
+						pbar.total = pbar.n  # Grow total with downloaded amount
+	
+	if os.path.exists(destination_path):
+		final_size = os.path.getsize(destination_path)
+		logger.info(f"Download completed: {os.path.basename(destination_path)}, Size: {final_size / 1024 / 1024:.2f} MB")
+	else:
+		logger.error("Download failed: File not found")
+		return False
+	
+	return True
+	
+def download_with_curl(url, destination_path, headers, general_config, site_config, desc):
+	ua = headers.get('User-Agent', random.choice(general_config['user_agents']))
+	# -# for progress bar, -w for sizes at each step
+	command = ["curl", "-L", "-o", destination_path, "--retry", "3", "--max-time", "600", "-#", 
+			   "-w", "Downloaded: %{size_download} bytes / Total: %{size_total} bytes (%{speed_download} bytes/s)\n"]
+	if headers:
+		command.extend(["-A", ua])
+		if "Referer" in headers:
+			command.extend(["-H", f"Referer: {headers['Referer']}"])
+		if "Cookie" in headers:
+			command.extend(["-H", f"Cookie: {headers['Cookie']}"])
+	command.append(url)
+	
+	logger.debug(f"Executing curl command: {' '.join(shlex.quote(arg) for arg in command)}")
+	
+	# Pipe curl output directly to terminal
+	process = subprocess.Popen(
+		command,
+		stdout=sys.stdout,  # Real-time output to terminal
+		stderr=subprocess.STDOUT,
+		universal_newlines=True,
+		bufsize=1  # Line buffering for live updates
+	)
+	
 	return_code = process.wait()
 	if return_code != 0:
 		logger.error(f"curl failed with return code {return_code}")
-	else:
-		logger.info("curl download completed successfully")
-	return return_code == 0
+		return False
 	
-def download_with_wget(command):
-	process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
-	progress_regex = re.compile(r'(\d+)%\s+(\d+[KMG]?)')  # Matches "45% 123M"
-	pbar = None
-	try:
+	logger.info("curl download completed successfully")
+	return True
+
+def download_with_wget(url, destination_path, headers, general_config, site_config, desc):
+	ua = headers.get('User-Agent', random.choice(general_config['user_agents']))
+	command = ["wget", "--tries=3", "--timeout=600", "-O", destination_path]
+	if headers:
+		command.extend(["--user-agent", ua])
+		if "Referer" in headers:
+			command.extend(["--referer", headers['Referer']])
+		if "Cookie" in headers:
+			command.extend(["--header", f"Cookie: {headers['Cookie']}"])
+	command.append(url)
+	
+	logger.debug(f"Executing wget command: {' '.join(shlex.quote(arg) for arg in command)}")
+	process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+	
+	total_size = get_content_length(url, headers, general_config)
+	progress_regex = re.compile(r'(\d+)%\s+(\d+[KMG]?)')
+	with tqdm(total=total_size, unit='B', unit_scale=True, desc=desc, disable=not total_size) as pbar:
 		for line in process.stdout:
-			# logger.debug(f"wget output: {line.strip()}")
 			match = progress_regex.search(line)
 			if match:
-				percent, size = match.groups()
-				percent = int(percent)
-				if pbar is None:
-					pbar = tqdm(total=100, unit='%', desc="Downloading (wget)")
-				pbar.update(percent - pbar.n)
-			elif "Location:" in line:
-				logger.info(f"wget redirect: {line.strip()}")
-		if pbar:
-			pbar.n = 100  # Ensure completion
-	except KeyboardInterrupt:
-		process.terminate()
-		if pbar:
-			pbar.close()
-		return False
-	if pbar:
-		pbar.close()
+				percent, _ = match.groups()
+				if total_size:
+					pbar.update((int(percent) * total_size // 100) - pbar.n)
+			elif "Length:" in line and total_size is None:
+				size = int(re.search(r'Length: (\d+)', line).group(1))
+				pbar.total = size
+			elif line.strip():
+				logger.debug(f"wget output: {line.strip()}")
+			if os.path.exists(destination_path):
+				pbar.update(os.path.getsize(destination_path) - pbar.n)
+	
 	return_code = process.wait()
 	if return_code != 0:
 		logger.error(f"wget failed with return code {return_code}")
-	else:
-		logger.info("wget download completed successfully")
-	return return_code == 0
-		
-
-def download_with_ytdlp(command):
-	process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
-	progress_regex = re.compile(r'\[download\]\s+(\d+\.\d+)% of ~?\s*(\d+\.\d+)(K|M|G)iB')
-	total_size = None
-	pbar = None
-	try:
-		for line in process.stdout:
-			progress_match = progress_regex.search(line)
-			if progress_match:
-				percent, size, size_unit = progress_match.groups()
-				if total_size is None:
-					total_size = float(size) * {'K': 1024, 'M': 1024**2, 'G': 1024**3}[size_unit]
-					pbar = tqdm(total=total_size, unit='B', unit_scale=True, desc="Downloading")
-				progress = float(percent) * total_size / 100
-				if pbar:
-					pbar.update(progress - pbar.n)
-			# logger.debug(line.strip())
-	except KeyboardInterrupt:
-		process.terminate()
 		return False
-	finally:
-		if pbar:
-			pbar.close()
-	return process.wait() == 0
+	logger.info("wget download completed successfully")
+	return True
+
+def download_with_ytdlp(url, destination_path, headers, general_config, metadata, desc):
+	ua = headers.get('User-Agent', random.choice(general_config['user_agents']))
+	command = ["yt-dlp", "-o", destination_path, "--user-agent", ua]
+	if metadata and 'Image' in metadata:
+		command.extend(["--embed-thumbnail", "--convert-thumbnails", "jpg"])
+	command.append(url)
+	
+	logger.debug(f"Executing yt-dlp command: {' '.join(shlex.quote(arg) for arg in command)}")
+	process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+	
+	progress_regex = re.compile(r'\[download\]\s+(\d+\.\d+)% of ~?\s*(\d+\.\d+)([KMG])iB')
+	with tqdm(unit='B', unit_scale=True, desc=desc) as pbar:
+		for line in process.stdout:
+			match = progress_regex.search(line)
+			if match:
+				percent, size, unit = match.groups()
+				size_bytes = float(size) * {'K': 1024, 'M': 1024**2, 'G': 1024**3}[unit]
+				if pbar.total is None:
+					pbar.total = size_bytes * 100 / float(percent)
+				pbar.update(size_bytes * float(percent) / 100 - pbar.n)
+			if line.strip() and not match:
+				logger.debug(f"yt-dlp output: {line.strip()}")
+	
+	return_code = process.wait()
+	if return_code != 0:
+		logger.error(f"yt-dlp failed with return code {return_code}")
+		return False
+	logger.info("yt-dlp download completed successfully")
+	return True
+
+def download_with_ffmpeg(url, destination_path, general_config, headers=None, desc="Downloading"):
+	headers = headers or {}
+	ua = headers.get('User-Agent', random.choice(general_config['user_agents']))
+	if "Headless" in ua:
+		ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+	
+	fetch_headers = {
+		"User-Agent": ua,
+		"Referer": headers.get("Referer", ""),
+		"Accept": "application/vnd.apple.mpegurl",
+		"Origin": "https://bestwish.lol",
+	}
+	if "Cookie" in headers:
+		fetch_headers["Cookie"] = headers["Cookie"]
+	
+	try:
+		scraper = cloudscraper.create_scraper()
+		response = scraper.get(url, headers=fetch_headers, timeout=30)
+		response.raise_for_status()
+		m3u8_content = response.text
+	except requests.exceptions.RequestException as e:
+		logger.error(f"Failed to fetch M3U8: {e}")
+		return False
+	
+	temp_m3u8_path = destination_path + ".m3u8"
+	with open(temp_m3u8_path, "w", encoding="utf-8") as f:
+		base_url = url.rsplit('/', 1)[0] + "/"
+		for line in m3u8_content.splitlines():
+			if line and not line.startswith("#"):
+				if not line.startswith("http"):
+					line = urllib.parse.urljoin(base_url, line)
+				f.write(line + "\n")
+			else:
+				f.write(line + "\n")
+	
+	command = [
+		"ffmpeg",
+		"-protocol_whitelist", "file,http,https,tcp,tls,crypto",
+		"-i", temp_m3u8_path,
+		"-c", "copy",
+		"-bsf:a", "aac_adtstoasc",
+		destination_path
+	]
+	
+	logger.debug(f"Executing FFmpeg command: {' '.join(shlex.quote(arg) for arg in command)}")
+	process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+	
+	duration_regex = re.compile(r'Duration: (\d{2}):(\d{2}):(\d{2})\.\d+')
+	time_regex = re.compile(r'time=(\d{2}):(\d{2}):(\d{2})\.\d+')
+	total_seconds = None
+	
+	with tqdm(unit='s', desc=desc) as pbar:
+		for line in process.stderr:
+			duration_match = duration_regex.search(line)
+			time_match = time_regex.search(line)
+			if duration_match and total_seconds is None:
+				h, m, s = map(int, duration_match.groups())
+				total_seconds = h * 3600 + m * 60 + s
+				pbar.total = total_seconds
+			if time_match:
+				h, m, s = map(int, time_match.groups())
+				current_seconds = h * 3600 + m * 60 + s
+				pbar.update(current_seconds - pbar.n)
+			elif line.strip() and not (duration_match or time_match):
+				logger.debug(f"FFmpeg output: {line.strip()}")
+	
+	return_code = process.wait()
+	if os.path.exists(temp_m3u8_path):
+		os.remove(temp_m3u8_path)
+	
+	if return_code != 0:
+		logger.error(f"FFmpeg failed with return code {return_code}")
+		return False
+	logger.info("FFmpeg download completed successfully")
+	return True
+
+def get_content_length(url, headers, general_config):
+	"""Attempt to fetch Content-Length header for progress bar accuracy."""
+	try:
+		ua = headers.get('User-Agent', random.choice(general_config['user_agents']))
+		fetch_headers = {"User-Agent": ua}
+		if "Referer" in headers:
+			fetch_headers["Referer"] = headers["Referer"]
+		if "Cookie" in headers:
+			fetch_headers["Cookie"] = headers["Cookie"]
+		response = requests.head(url, headers=fetch_headers, timeout=10, allow_redirects=True)
+		response.raise_for_status()
+		return int(response.headers.get("Content-Length", 0)) or None
+	except Exception as e:
+		logger.debug(f"Failed to get Content-Length: {e}")
+		return None
 
 def file_exists_on_smb(destination_config, path):
 	conn = SMBConnection(destination_config['username'], destination_config['password'], "videoscraper", destination_config['server'])
@@ -1281,22 +1326,13 @@ def main():
 	parser = argparse.ArgumentParser(
 		description="Smutscrape: Scrape and download adult content from various sites with metadata saved in .nfo files."
 	)
-	parser.add_argument(
-		"args",
-		nargs="*",
-		help="Site code and mode followed by a query (e.g., 'ph pornstar \"Massy Sweet\"'), or a direct URL (e.g., 'https://pornhub.com/...')."
-	)
+	parser.add_argument("args", nargs="*", help="Site code and mode followed by a query (e.g., '9v search \"big boobs\"'), or a direct URL.")
 	parser.add_argument("--debug", action="store_true", help="Enable detailed debug logging.")
-	parser.add_argument("--overwrite_files", action="store_true", help="Overwrite existing video files if they already exist.")
-	parser.add_argument("--force_new_nfo", action="store_true", help="Regenerate .nfo files even if they already exist.")
-	parser.add_argument(
-		"--start_on_page",
-		type=int,
-		default=1,
-		help="Start scraping from this page number (default: 1) for modes with pagination."
-	)
+	parser.add_argument("--overwrite_files", action="store_true", help="Overwrite existing video files.")
+	parser.add_argument("--force_new_nfo", action="store_true", help="Regenerate .nfo files even if they exist.")
+	parser.add_argument("--start_on_page", type=int, default=1, help="Start scraping from this page number.")
 	args = parser.parse_args()
-
+	
 	log_level = "DEBUG" if args.debug else "INFO"
 	logger.remove()
 	logger.add(sys.stderr, level=log_level)
@@ -1351,11 +1387,8 @@ def main():
 					parsed_base = urlparse(site_config["base_url"])
 					base_netloc = parsed_base.netloc.lower().replace("www.", "")
 					if url_netloc == base_netloc:
-						logger.debug(f"Found a match! {site_config['base_url']} matches {url}")
 						matched_site_config = site_config
 						break
-					else:
-						logger.debug(f"{url} does not match {site_config['base_url']} (netloc: {url_netloc} vs {base_netloc})")
 			
 			if matched_site_config:
 				headers = general_config.get("headers", {}).copy()
@@ -1370,15 +1403,12 @@ def main():
 						current_page = args.start_on_page
 						mode_config = matched_site_config["modes"][mode]
 						if current_page > 1 and mode_config.get("url_pattern_pages"):
-							encoded_identifier = identifier
-							logger.debug(f"Performing replacements on encoded_identifier...")
-							for original, replacement in matched_site_config.get("url_encoding_rules", {}).items():
-								encoded_identifier = encoded_identifier.replace(original, replacement)
 							url = construct_url(
 								matched_site_config["base_url"],
 								mode_config["url_pattern_pages"],
 								matched_site_config,
-								**{mode: encoded_identifier, "page": current_page}
+								mode=mode,
+								**{mode: identifier, "page": current_page}
 							)
 							logger.info(f"Starting at custom page {current_page}: {url}")
 						while url:
@@ -1396,7 +1426,7 @@ def main():
 					process_video_page(url, matched_site_config, general_config, args.overwrite_files, headers, args.force_new_nfo)
 			else:
 				process_fallback_download(url, general_config, args.overwrite_files)
-	
+		
 		elif len(args.args) >= 3:
 			site, mode, identifier = args.args[0], args.args[1], " ".join(args.args[2:])
 			site_config = load_site_config(site)
@@ -1412,6 +1442,7 @@ def main():
 					site_config["base_url"],
 					mode_config["url_pattern_pages"],
 					site_config,
+					mode=mode,
 					**{mode: identifier, "page": current_page}
 				)
 				logger.info(f"Starting at custom page {current_page}: {url}")
@@ -1420,6 +1451,7 @@ def main():
 					site_config["base_url"],
 					mode_config["url_pattern"],
 					site_config,
+					mode=mode,
 					**{mode: identifier} if mode != "video" else {"video_id": identifier}
 				)
 				if current_page > 1:

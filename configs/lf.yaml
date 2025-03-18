@@ -27,7 +27,7 @@ modes:
     scraper: list_scraper
 
 download:
-  method: "curl"
+  method: "requests"
 
 scrapers:
   video_scraper:
@@ -60,4 +60,3 @@ scrapers:
           regex: '(\d+,?\d*)\s+Views'
         duration:
           selector: "div.duration"
-

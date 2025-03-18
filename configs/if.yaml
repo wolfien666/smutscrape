@@ -26,12 +26,12 @@ modes:
     scraper: list_scraper
 
 download:
-  method: "curl"
+  method: "requests"
 
 scrapers:
   video_scraper:
     title:
-      selector: "div#incflix-videowrap h2"  # From updated, works fine
+      selector: "div#incflix-videowrap h2" # From updated, works fine
     download_url:
       selector: "div#incflix-stream source"
       attribute: "src"
@@ -47,7 +47,7 @@ scrapers:
       postProcess:
         - replace:
             - regex: "^//"
-              with: "http://"  # Fixes protocol-relative URL
+              with: "http://" # Fixes protocol-relative URL
 
   list_scraper:
     video_container:
@@ -59,4 +59,4 @@ scrapers:
         url:
           attribute: "href"
         title:
-          selector: "a#videolink"  # Fallback to text if attribute fails
+          selector: "a#videolink" # Fallback to text if attribute fails

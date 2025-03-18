@@ -11,14 +11,14 @@ url_encoding_rules:
 
 modes:
   video:
-    url_pattern: "/en/video/{video_id}/"  
+    url_pattern: "/en/video/{video_id}/"
     scraper: video_scraper
   search:
     scraper: list_scraper
     url_pattern: "/en/search/?search={search}"
 
 download:
-  method: "wget"  
+  method: "requests"
 
 scrapers:
   video_scraper:
@@ -38,7 +38,7 @@ scrapers:
         url:
           attribute: "href"
         title:
-          selector: "head title"  
+          selector: "head title"
     pagination:
       next_page:
         selector: "a.next.page-numbers"

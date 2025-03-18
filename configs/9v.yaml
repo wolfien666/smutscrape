@@ -7,8 +7,8 @@ selector_style: css
 name_suffix: " - 9vids"
 no_overwrite: true
 url_encoding_rules:
-  " ": "-"
-  "%20": "-"
+  " ": "+"
+  "%20": "+"
 
 modes:
   video:
@@ -22,7 +22,7 @@ modes:
     scraper: list_scraper
 
 download:
-  method: "curl"
+  method: "requests"
 
 scrapers:
   video_scraper:
@@ -33,7 +33,7 @@ scrapers:
       selector: "meta[itemprop='contentURL']"
       attribute: "content"
     tags:
-      selector: "div.tags-list a.label"  # Targets all tag links
+      selector: "div.tags-list a.label" # Targets all tag links
 
   list_scraper:
     video_container:
@@ -52,4 +52,3 @@ scrapers:
       next_page:
         selector: "a.next.page-numbers"
         attribute: "href"
-

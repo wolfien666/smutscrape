@@ -32,12 +32,12 @@ scrapers:
       selector: "aside.cvmoplc h1"
     download_url:
       iframe: "iframe"
-      selector: "iframe"  # Added to extract src
-      attribute: "src"   # Extracts "https://ojiz.net/embed/46419"
-    studios:  # Plural for consistency
+      selector: "iframe" # Added to extract src
+      attribute: "src" # Extracts "https://ojiz.net/embed/46419"
+    studios: # Plural for consistency
       selector: "aside.cvmcaun.cvmtiv a[rel='nofollow']"
     actors:
-      selector: "aside.cvmcaun:contains('Starring:') p a"  # No postProcess
+      selector: "aside.cvmcaun:contains('Starring:') p a" # No postProcess
     description:
       selector: "aside.cvmcaun.cvmoplc.de h2"
     tags:
@@ -53,5 +53,5 @@ scrapers:
         url:
           attribute: "href"
         title:
-          selector: "img"  # Assuming thumbnail alt or title
+          selector: "img" # Assuming thumbnail alt or title
           attribute: "alt" # Adjust based on list page HTML

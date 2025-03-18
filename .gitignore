@@ -17,6 +17,7 @@ venv/
 
 # Log files
 *.log
+logs/
 
 # IDE or OS-specific files
 .DS_Store

@@ -32,7 +32,8 @@ scrapers:
     title:
       selector: "aside.cvmoplc h1"
     download_url:
-      selector: "div#kt_player video"
+      iframe: "div.cvmkesh iframe" # Step 1: Get iframe src (https://ojiz.net/embed/46419)
+      selector: "div#kt_player video" # Step 2: Get video src from iframe content
       attribute: "src"
     studios:
       selector: "aside.cvmcaun.cvmtiv a[rel='nofollow']"
@@ -43,8 +44,8 @@ scrapers:
     tags:
       selector: "aside.cvmcaun:contains('Related Tags:') p a"
     image:
-      selector: "div#kt_player div.fp-poster img"
-      attribute: "src"
+      selector: "meta[property='og:image']"
+      attribute: "content" # Fallback since iframe poster isn’t in static HTML
 
   list_scraper:
     video_container:

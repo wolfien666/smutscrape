@@ -4,7 +4,6 @@ base_url: "https://familysexvideos.org"
 selector_style: css
 no_overwrite: true
 use_selenium: true
-
 url_encoding_rules:
   " ": "-"
   "%20": "-"
@@ -16,6 +15,9 @@ modes:
   search:
     scraper: list_scraper
     url_pattern: "/en/search/?search={search}"
+    url_encoding_rules:
+      " ": "+"
+      "%20": "+"
 
 download:
   method: "requests"

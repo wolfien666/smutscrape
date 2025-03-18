@@ -372,6 +372,11 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 		video_exists = os.path.exists(destination_path)
 		nfo_exists = os.path.exists(nfo_path)
 	
+	# Handle existing files
+	temp_exists = os.path.exists(destination_path)
+	download_method = site_config['download'].get('method', 'curl')
+	origin_to_use = urllib.parse.urlparse(iframe_url if iframe_url else original_url).scheme + "://" + urllib.parse.urlparse(iframe_url if iframe_url else original_url).netloc
+	
 	make_nfo = general_config.get('make_nfo', False)
 	has_selectors = has_metadata_selectors(site_config)
 	
@@ -403,18 +408,40 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 			else:
 				logger.debug(f"NFO file already exists at local destination: {nfo_path}, skipping generation")
 	
-	origin_to_use = urllib.parse.urlparse(iframe_url if iframe_url else original_url).scheme + "://" + urllib.parse.urlparse(iframe_url if iframe_url else original_url).netloc
 	if video_exists and not overwrite_files:
-		logger.info(f"File '{file_name}' exists. Skipping download.")
-	else:
-		download_method = site_config['download'].get('method', 'curl')
-		logger.info(f"Downloading: {file_name}")
-		if download_file(video_url, destination_path, download_method, general_config, site_config, headers=headers, metadata=data, origin=origin_to_use):
+		logger.info(f"File '{file_name}' exists at destination. Skipping download.")
+		return
+	elif not overwrite_files and temp_exists:
+		logger.debug(f"File '{file_name}' found in temp folder: {destination_path}")
+		video_info = get_video_metadata(destination_path)
+		if video_info:
+			logger.info(f"Valid video found in temp folder: {file_name}. Skipping download and proceeding to upload.")
+			try:
+				if destination_config['type'] == 'smb':
+					upload_to_smb(destination_path, smb_destination_path, destination_config, overwrite_files)
+					os.remove(destination_path)
+				elif destination_config['type'] == 'local':
+					apply_permissions(destination_path, destination_config)
+			except Exception as e:
+				logger.error(f"Post-download processing failed for existing temp file: {e}")
+			return
+		else:
+			logger.warning(f"Invalid or corrupt file in temp folder: {destination_path}. Deleting and re-downloading.")
+			os.remove(destination_path)
+	
+	# Proceed with download
+	logger.info(f"Downloading: {file_name}")
+	if download_file(video_url, destination_path, download_method, general_config, site_config, headers=headers, metadata=data, origin=origin_to_use, overwrite=overwrite_files):
+		try:
 			if destination_config['type'] == 'smb':
 				upload_to_smb(destination_path, smb_destination_path, destination_config, overwrite_files)
 				os.remove(destination_path)
 			elif destination_config['type'] == 'local':
 				apply_permissions(destination_path, destination_config)
+		except Exception as e:
+			logger.error(f"Post-download processing failed: {e}")
+	else:
+		logger.error(f"Download failed; skipping post-processing for {file_name}")
 	
 	time.sleep(general_config['sleep']['between_videos'])
 
@@ -880,7 +907,7 @@ def get_video_metadata(file_path):
 		return None
 
 
-def download_file(url, destination_path, method, general_config, site_config, headers=None, metadata=None, origin=None):
+def download_file(url, destination_path, method, general_config, site_config, headers=None, metadata=None, origin=None, overwrite=False):
 	if not url:
 		logger.error("Invalid or empty URL")
 		return False
@@ -893,16 +920,20 @@ def download_file(url, destination_path, method, general_config, site_config, he
 	
 	desc = f"Downloading {os.path.basename(destination_path)}"
 	
-	if method == "requests":
-		success = download_with_requests(url, destination_path, headers, general_config, site_config, desc)
-	elif method == 'curl':
-		success = download_with_curl(url, destination_path, headers, general_config, site_config, desc)
-	elif method == 'wget':
-		success = download_with_wget(url, destination_path, headers, general_config, site_config, desc)
-	elif method == 'yt-dlp':
-		success = download_with_ytdlp(url, destination_path, headers, general_config, metadata, desc)
-	elif method == 'ffmpeg':
-		success = download_with_ffmpeg(url, destination_path, general_config, headers, desc, origin=origin)
+	try:
+		if method == "requests":
+			success = download_with_requests(url, destination_path, headers, general_config, site_config, desc)
+		elif method == 'curl':
+			success = download_with_curl(url, destination_path, headers, general_config, site_config, desc)
+		elif method == 'wget':
+			success = download_with_wget(url, destination_path, headers, general_config, site_config, desc)
+		elif method == 'yt-dlp':
+			success = download_with_ytdlp(url, destination_path, headers, general_config, metadata, desc, overwrite=overwrite)
+		elif method == 'ffmpeg':
+			success = download_with_ffmpeg(url, destination_path, general_config, headers, desc, origin=origin)
+	except Exception as e:
+		logger.error(f"Download method '{method}' failed: {e}")
+		return False
 	
 	if success and os.path.exists(destination_path):
 		video_info = get_video_metadata(destination_path)
@@ -915,7 +946,9 @@ def download_file(url, destination_path, method, general_config, site_config, he
 				f"  Bitrate: {video_info['bitrate']}"
 			)
 		else:
-			logger.info(f"Download completed: {os.path.basename(destination_path)} (Metadata extraction failed)")
+			logger.warning(f"Download completed: {os.path.basename(destination_path)} (Metadata extraction failed)")
+	elif not success:
+		logger.error(f"Download failed for {destination_path}")
 	
 	return success
 
@@ -1020,28 +1053,24 @@ def download_with_wget(url, destination_path, headers, general_config, site_conf
 	logger.info("wget download completed successfully")
 	return True
 
-def download_with_ytdlp(url, destination_path, headers, general_config, metadata, desc):
+
+def download_with_ytdlp(url, destination_path, headers, general_config, metadata, desc, overwrite=False):
 	ua = headers.get('User-Agent', random.choice(general_config['user_agents']))
-	command = ["yt-dlp", "-o", destination_path, "--user-agent", ua]
+	command = ["yt-dlp", "-o", destination_path, "--user-agent", ua, "--progress"]
+	if overwrite:
+		command.append("--force-overwrite")
 	if metadata and 'Image' in metadata:
 		command.extend(["--embed-thumbnail", "--convert-thumbnails", "jpg"])
 	command.append(url)
 	
 	logger.debug(f"Executing yt-dlp command: {' '.join(shlex.quote(arg) for arg in command)}")
-	process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
-	
-	progress_regex = re.compile(r'\[download\]\s+(\d+\.\d+)% of ~?\s*(\d+\.\d+)([KMG])iB')
-	with tqdm(unit='B', unit_scale=True, desc=desc) as pbar:
-		for line in process.stdout:
-			match = progress_regex.search(line)
-			if match:
-				percent, size, unit = match.groups()
-				size_bytes = float(size) * {'K': 1024, 'M': 1024**2, 'G': 1024**3}[unit]
-				if pbar.total is None:
-					pbar.total = size_bytes * 100 / float(percent)
-				pbar.update(size_bytes * float(percent) / 100 - pbar.n)
-			if line.strip() and not match:
-				logger.debug(f"yt-dlp output: {line.strip()}")
+	process = subprocess.Popen(
+		command,
+		stdout=sys.stdout,  # Direct yt-dlp progress to terminal
+		stderr=subprocess.STDOUT,  # Errors with stdout
+		universal_newlines=True,
+		bufsize=1  # Line buffering for real-time output
+	)
 	
 	return_code = process.wait()
 	if return_code != 0:
@@ -1049,8 +1078,7 @@ def download_with_ytdlp(url, destination_path, headers, general_config, metadata
 		return False
 	logger.info("yt-dlp download completed successfully")
 	return True
-
-
+	
 	
 def download_with_ffmpeg(url, destination_path, general_config, headers=None, desc="Downloading", origin=None):
 	headers = headers or {}

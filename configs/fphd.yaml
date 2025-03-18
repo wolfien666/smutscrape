@@ -28,6 +28,9 @@ modes:
     url_pattern_pages: "/page/{page}/?s={search}"
     max_pages: 999
     scraper: list_scraper
+    url_encoding_rules:
+      " ": "+"
+      "%20": "+"
   studio:
     url_pattern: "/category/{studio}"
     url_pattern_pages: "/category/{studio}/{page}/"

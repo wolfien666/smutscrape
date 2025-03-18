@@ -4,8 +4,6 @@ base_url: "https://family-sex.me"
 selector_style: css
 no_overwrite: true
 use_selenium: true
-m3u8_mode: true
-
 url_encoding_rules:
   " ": "-"
   "%20": "-"
@@ -15,13 +13,16 @@ modes:
     url_pattern: "/vids/{video_id}"
     scraper: video_scraper
   tag:
-    scraper: list_scraper
     url_pattern: "/porn/{tag}.html"
     url_pattern_pages: "/porn/{tag}-{page}.html"
     max_pages: 999
+    scraper: list_scraper
   search:
     url_pattern: "/search/{search}/"
     scraper: list_scraper
+    url_encoding_rules:
+      " ": "%20"
+      "%20": "%20"
 
 download:
   method: "wget"
@@ -31,17 +32,19 @@ scrapers:
     title:
       selector: "aside.cvmoplc h1"
     download_url:
-      iframe: "iframe"
-      selector: "iframe" # Added to extract src
-      attribute: "src" # Extracts "https://ojiz.net/embed/46419"
-    studios: # Plural for consistency
+      selector: "div#kt_player video"
+      attribute: "src"
+    studios:
       selector: "aside.cvmcaun.cvmtiv a[rel='nofollow']"
     actors:
-      selector: "aside.cvmcaun:contains('Starring:') p a" # No postProcess
+      selector: "aside.cvmcaun:contains('Starring:') p a"
     description:
       selector: "aside.cvmcaun.cvmoplc.de h2"
     tags:
       selector: "aside.cvmcaun:contains('Related Tags:') p a"
+    image:
+      selector: "div#kt_player div.fp-poster img"
+      attribute: "src"
 
   list_scraper:
     video_container:
@@ -53,5 +56,5 @@ scrapers:
         url:
           attribute: "href"
         title:
-          selector: "img" # Assuming thumbnail alt or title
-          attribute: "alt" # Adjust based on list page HTML
+          selector: "img"
+          attribute: "alt"

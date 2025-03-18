@@ -7,8 +7,8 @@ selector_style: css
 name_suffix: " - 9vids"
 no_overwrite: true
 url_encoding_rules:
-  " ": "+"
-  "%20": "+"
+  " ": "-"
+  "%20": "-"
 
 modes:
   video:
@@ -17,6 +17,9 @@ modes:
   search:
     url_pattern: "/?s={search}"
     scraper: list_scraper
+    url_encoding_rules:
+      " ": "+"
+      "%20": "+"
   tag:
     url_pattern: "/tag/{tag}"
     scraper: list_scraper

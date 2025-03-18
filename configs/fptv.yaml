@@ -57,8 +57,7 @@ scrapers:
       fields:
         url:
           attribute: "href"
-        title:
-          {}
+        title: {}
     pagination:
       next_page:
         selector: "ul.pagination li.next a.primary-link"

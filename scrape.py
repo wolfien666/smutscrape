@@ -128,7 +128,7 @@ def construct_url(base_url, pattern, site_config, mode=None, **kwargs):
 			encoded_kwargs[k] = v
 	path = pattern.format(**encoded_kwargs)
 	full_url = urllib.parse.urljoin(base_url, path)
-	logger.info(f"Constructed URL: {full_url}")
+	logger.debug(f"Constructed URL: {full_url}")
 	return full_url
 
 
@@ -716,13 +716,10 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 	print()
 	print()
 	
-	# Page header: pink bars, gold text
-	page_header = f" PAGE {current_page} "
-	page_title = page_header.center(term_width, "═")
-	context = f" {site_config['name'].lower()} {mode}: \"{identifier}\" "
-	context_line = context.center(term_width, "┈")
-	print(colored(page_title, "yellow"))
-	print(colored(context_line, "magenta")) 
+	# Page header: single line with gold text
+	page_info = f" page {current_page}, {site_config['name'].lower()} {mode}: \"{identifier}\" "
+	page_line = page_info.center(term_width, "═")
+	print(colored(page_line, "yellow"))
 	
 	# Process each video
 	success = False
@@ -1442,13 +1439,14 @@ def main():
 	print()
 	if ascii_art:
 		print(ascii_art)
+		
 	else:
 		fallback_text = "S M U T S C R A P E"
 		centered_fallback = fallback_text.center(term_width)
 		print(colored(centered_fallback, "magenta", attrs=["bold"]))
-	bottom_bar = "═" * term_width
-	print(colored(bottom_bar, "yellow", attrs=["bold"]))  # Assuming custom_bar is defined elsewhere; should be bottom_bar?
-	print()
+	# bottom_bar = "═" * term_width
+	# print(colored(bottom_bar, "yellow", attrs=["bold"]))  # Assuming custom_bar is defined elsewhere; should be bottom_bar?
+	# print()
 	
 	# LOGGING
 	log_level = "DEBUG" if args.debug else "INFO"
@@ -1643,7 +1641,7 @@ def main():
 					mode=mode,
 					**{mode: identifier, "page": current_page}
 				)
-				logger.info(f"Starting at custom page {current_page}: {url}")
+				logger.debug(f"Starting at custom page {current_page}: {url}")
 			else:
 				url = construct_url(
 					site_config["base_url"],

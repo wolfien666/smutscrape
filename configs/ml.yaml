@@ -34,6 +34,11 @@ modes:
     url_pattern_pages: "/gv/{group}?page={page}"
     max_pages: 999
     scraper: group_video_list_scraper
+  secret:
+    url_pattern: "/{secret}"
+    url_pattern_pages: "/{secret}?page={page}"
+    max_pages: 999
+    scraper: group_video_list_scraper
 
 download:
   method: "yt-dlp"

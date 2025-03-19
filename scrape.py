@@ -17,6 +17,7 @@ from smb.SMBConnection import SMBConnection
 import random
 from loguru import logger
 from tqdm import tqdm
+from termcolor import colored
 import io
 import shlex
 import json
@@ -39,7 +40,7 @@ CONFIG_DIR = os.path.join(SCRIPT_DIR, 'configs')
 last_vpn_action_time = 0
 session = requests.Session()
 
-
+alert = logger.level("ALERT", no=38, color="<yellow>", icon="⚠️")
 		
 class ProgressFile:
 	"""A file-like wrapper to track progress during SMB upload."""
@@ -127,7 +128,7 @@ def construct_url(base_url, pattern, site_config, mode=None, **kwargs):
 			encoded_kwargs[k] = v
 	path = pattern.format(**encoded_kwargs)
 	full_url = urllib.parse.urljoin(base_url, path)
-	logger.debug(f"Constructed URL: {full_url}")
+	logger.success(f"Constructed URL: {full_url}")
 	return full_url
 
 
@@ -168,16 +169,16 @@ def get_selenium_driver(general_config, force_new=False):
 		try:
 			if chromedriver_path:
 				# Use user-specified ChromeDriver path
-				logger.info(f"Using user-specified ChromeDriver at: {chromedriver_path}")
+				logger.debug(f"Using user-specified ChromeDriver at: {chromedriver_path}")
 				service = Service(executable_path=chromedriver_path)
 			else:
 				# Fallback to webdriver_manager
-				logger.info("No chromedriver_path specified; using webdriver_manager to fetch ChromeDriver")
+				logger.debug("No chromedriver_path specified; using webdriver_manager to fetch ChromeDriver")
 				service = Service(ChromeDriverManager().install())
-				logger.info(f"Using ChromeDriver at: {service.path}")
+				logger.debug(f"Using ChromeDriver at: {service.path}")
 			
 			driver = webdriver.Chrome(service=service, options=chrome_options)
-			logger.info(f"Initialized Selenium driver with Chrome version: {driver.capabilities['browserVersion']}")
+			logger.debug(f"Initialized Selenium driver with Chrome version: {driver.capabilities['browserVersion']}")
 		except Exception as e:
 			logger.error(f"Failed to initialize Selenium driver: {e}")
 			return None
@@ -213,8 +214,6 @@ def generate_nfo_file(video_path, metadata):
 	studio_uppercase = ["DP", "HD", "JAV", "JOI", "MILF", "POV", "3D", "4K"]
 	
 	try:
-		logger.debug(f"Using generate_nfo_file version 1.3")
-		logger.debug(f"Generating NFO with metadata: {metadata}")
 		with open(nfo_path, 'w', encoding='utf-8') as f:
 			f.write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n')
 			f.write('<movie>\n')
@@ -227,43 +226,31 @@ def generate_nfo_file(video_path, metadata):
 				f.write(f"  <premiered>{metadata['date']}</premiered>\n")
 			if 'Code' in metadata and metadata['Code']:
 				f.write(f"  <uniqueid>{metadata['Code']}</uniqueid>\n")
-			if 'tags' in metadata:
-				logger.debug(f"Tags value: {metadata['tags']}")
-				if metadata['tags'] is None:
-					logger.warning(f"Tags is None for {nfo_path}")
-				elif len(metadata['tags']) > 0:
-					for tag in set(metadata['tags']):
-						cleaned_tag = tag.lstrip('#')
-						formatted_tag = custom_title_case(cleaned_tag, tag_uppercase)
-						f.write(f"  <tag>{formatted_tag}</tag>\n")
-			if 'actors' in metadata:
-				logger.debug(f"Actors value: {metadata['actors']}")
-				if metadata['actors'] is None:
-					logger.warning(f"Actors is None for {nfo_path}")
-				elif len(metadata['actors']) > 0:
-					for i, performer in enumerate(metadata['actors'], 1):
-						cleaned_performer = performer.lstrip('#')
-						formatted_performer = custom_title_case(cleaned_performer, tag_uppercase, preserve_mixed_case=True)
-						f.write(f"  <actor>\n    <name>{formatted_performer}</name>\n    <order>{i}</order>\n  </actor>\n")
+			if 'tags' in metadata and len(metadata['tags']) > 0:
+				for tag in set(metadata['tags']):
+					cleaned_tag = tag.lstrip('#')
+					formatted_tag = custom_title_case(cleaned_tag, tag_uppercase)
+					f.write(f"  <tag>{formatted_tag}</tag>\n")
+			if 'actors' in metadata and len(metadata['actors']) > 0:
+				for i, performer in enumerate(metadata['actors'], 1):
+					cleaned_performer = performer.lstrip('#')
+					formatted_performer = custom_title_case(cleaned_performer, tag_uppercase, preserve_mixed_case=True)
+					f.write(f"  <actor>\n    <name>{formatted_performer}</name>\n    <order>{i}</order>\n  </actor>\n")
 			if 'Image' in metadata and metadata['Image']:
 				f.write(f"  <thumb aspect=\"poster\">{metadata['Image']}</thumb>\n")
 			if 'studio' in metadata and metadata['studio']:
 				cleaned_studio = metadata['studio'].lstrip('#')
 				formatted_studio = custom_title_case(cleaned_studio, studio_uppercase, preserve_mixed_case=True)
 				f.write(f"  <studio>{formatted_studio}</studio>\n")
-			elif 'studios' in metadata:
-				logger.debug(f"Studios value: {metadata['studios']}")
-				if metadata['studios'] is None:
-					logger.warning(f"Studios is None for {nfo_path}")
-				elif len(metadata['studios']) > 0:
-					cleaned_studio = metadata['studios'][0].lstrip('#')  # Only take first studio
-					formatted_studio = custom_title_case(cleaned_studio, studio_uppercase, preserve_mixed_case=True)
-					f.write(f"  <studio>{formatted_studio}</studio>\n")
+			elif 'studios' in metadata and len(metadata['studios']) > 0:
+				cleaned_studio = metadata['studios'][0].lstrip('#')
+				formatted_studio = custom_title_case(cleaned_studio, studio_uppercase, preserve_mixed_case=True)
+				f.write(f"  <studio>{formatted_studio}</studio>\n")
 			if 'description' in metadata and metadata['description']:
 				f.write(f"  <plot>{metadata['description']}</plot>\n")
 			
 			f.write('</movie>\n')
-		logger.info(f"Generated NFO file: {nfo_path}")
+		logger.success(f"Generated NFO file: {nfo_path}")
 		return True
 	except Exception as e:
 		logger.error(f"Failed to generate NFO file {nfo_path}: {e}", exc_info=True)  # Include stack trace
@@ -284,13 +271,15 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 	base_origin = urllib.parse.urlparse(original_url).scheme + "://" + urllib.parse.urlparse(original_url).netloc
 	
 	iframe_url = None
+	video_url = None
+	soup = None
+	data = {'title': original_url.split('/')[-2]}  # Default fallback
+	
 	if site_config.get('m3u8_mode', False) and driver:
 		video_scraper = site_config['scrapers']['video_scraper']
-		iframe_config = None
-		for field, config in video_scraper.items():
-			if isinstance(config, dict) and 'iframe' in config:
-				iframe_config = {'enabled': True, 'selector': config['iframe']}
-				break
+		iframe_config = next(({'enabled': True, 'selector': config['iframe']} for field, config in video_scraper.items() 
+							  if isinstance(config, dict) and 'iframe' in config), None)
+		
 		if iframe_config:
 			logger.debug(f"Piercing iframe '{iframe_config['selector']}' for M3U8 extraction")
 			driver.get(original_url)
@@ -309,23 +298,15 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 						headers["Cookie"] = cookies
 						headers["Referer"] = iframe_url
 						headers["User-Agent"] = general_config.get('selenium_user_agent', random.choice(general_config['user_agents']))
-						soup = fetch_page(original_url, general_config['user_agents'], headers, use_selenium, driver)
-						data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config) if soup else {'title': original_url.split('/')[-2]}
-					else:
-						logger.error("Failed to extract M3U8 URL; falling back to page scrape.")
-						video_url = None
-				else:
-					logger.debug("Iframe found but no src attribute.")
-					video_url = None
 			except Exception as e:
-				logger.debug(f"No iframe found or error piercing: {e}")
-				video_url = None
-			soup = fetch_page(original_url, general_config['user_agents'], headers or {}, use_selenium, driver)
-			data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config) if soup else {'title': original_url.split('/')[-2]}
-		else:
-			soup = fetch_page(original_url, general_config['user_agents'], headers or {}, use_selenium, driver)
-			data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config) if soup else {'title': original_url.split('/')[-2]}
-			video_url = data.get('download_url')
+				logger.warning(f"No iframe found or error piercing: {e}")
+		
+		# Fetch page once for metadata, only if needed
+		soup = fetch_page(original_url, general_config['user_agents'], headers or {}, use_selenium, driver)
+		if soup:
+			data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config)
+		video_url = video_url or data.get('download_url')  # Fallback to download_url only if no M3U8
+	
 	else:
 		soup = fetch_page(original_url, general_config['user_agents'], headers or {}, use_selenium, driver)
 		if soup is None and use_selenium:
@@ -348,7 +329,7 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 	data['URL'] = original_url
 	
 	if should_ignore_video(data, general_config['ignored']):
-		logger.info(f"Ignoring video: {video_title}")
+		# logger.info(f"Ignoring video: {video_title}")
 		return
 	
 	file_name = construct_filename(video_title, site_config, general_config)
@@ -386,25 +367,23 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 			temp_nfo_path = os.path.join(temp_dir, f"{file_name.rsplit('.', 1)[0]}.nfo")
 			nfo_exists = file_exists_on_smb(destination_config, smb_nfo_path)
 			if nfo_overwrite or not nfo_exists:
-				logger.debug(f"Calling generate_nfo_file for {destination_path} with metadata: {data}")
 				generate_nfo_file(destination_path, data)
 				if os.path.exists(temp_nfo_path):
 					upload_to_smb(temp_nfo_path, smb_nfo_path, destination_config, nfo_overwrite)
 					os.remove(temp_nfo_path)
 					if nfo_exists:
-						logger.info(f"Overwriting existing NFO at {smb_nfo_path}")
+						logger.success(f"Replaced existing NFO at {smb_nfo_path}")
 					else:
-						logger.info(f"Uploaded new NFO to {smb_nfo_path}")
+						logger.success(f"Uploaded new NFO to {smb_nfo_path}")
 			else:
 				logger.debug(f"NFO file already exists at SMB destination: {smb_nfo_path}, skipping generation")
 		else:
 			nfo_path = f"{destination_path.rsplit('.', 1)[0]}.nfo"
 			nfo_exists = os.path.exists(nfo_path)
 			if nfo_overwrite or not nfo_exists:
-				logger.debug(f"Calling generate_nfo_file for {destination_path} with metadata: {data}")
 				generate_nfo_file(destination_path, data)
 				if nfo_exists:
-					logger.info(f"Overwriting existing NFO at {nfo_path}")
+					logger.success(f"Replaced existing NFO at {nfo_path}")
 			else:
 				logger.debug(f"NFO file already exists at local destination: {nfo_path}, skipping generation")
 	
@@ -453,7 +432,6 @@ def pierce_iframe(driver, url, site_config):
 	"""
 	iframe_config = site_config.get('iframe', {})
 	if not iframe_config.get('enabled', False):
-		logger.debug("Iframe piercing disabled in site_config.")
 		driver.get(url)
 		return url
 	
@@ -462,13 +440,13 @@ def pierce_iframe(driver, url, site_config):
 	time.sleep(random.uniform(1, 2))  # Initial page load
 	
 	try:
-		iframe_selector = iframe_config.get('selector', 'iframe')  # Default to 'iframe' tag
+		iframe_selector = iframe_config.get('selector', 'iframe')
 		iframe = driver.find_element(By.CSS_SELECTOR, iframe_selector)
 		iframe_url = iframe.get_attribute("src")
 		if iframe_url:
-			logger.info(f"Found iframe with src: {iframe_url}")
+			logger.debug(f"Found iframe with src: {iframe_url}")
 			driver.get(iframe_url)
-			time.sleep(random.uniform(1, 2))  # Allow iframe to load
+			time.sleep(random.uniform(1, 2)) 
 			return iframe_url
 		else:
 			logger.debug("Iframe found but no src attribute.")
@@ -493,9 +471,8 @@ def extract_m3u8_urls(driver, url, site_config):
 			};
 		})();
 	""")
-	
-	logger.debug("Waiting for network requests...")
-	time.sleep(5)  # Adjustable via site_config if needed
+
+	time.sleep(5)
 	
 	logs = driver.get_log("performance")
 	m3u8_urls = []
@@ -505,12 +482,12 @@ def extract_m3u8_urls(driver, url, site_config):
 			message = json.loads(log["message"])["message"]
 			if "Network.responseReceived" in message["method"]:
 				request_url = message["params"]["response"]["url"]
-				# logger.debug(f"Network response: {request_url}")
+				logger.debug(f"Network response: {request_url}")
 				if ".m3u8" in request_url:
 					m3u8_urls.append(request_url)
-					logger.info(f"Found M3U8 URL: {request_url}")
+					logger.debug(f"Found M3U8 URL: {request_url}")
 		except KeyError:
-			# logger.debug("Skipping log entry due to missing keys")
+			logger.debug("Skipping log entry due to missing keys")
 			continue
 	
 	if not m3u8_urls:
@@ -521,7 +498,7 @@ def extract_m3u8_urls(driver, url, site_config):
 	cookies_list = driver.get_cookies()
 	cookies_str = "; ".join([f"{c['name']}={c['value']}" for c in cookies_list])
 	logger.debug(f"Cookies after load: {cookies_str if cookies_str else 'None'}")
-	logger.info(f"Selected best M3U8: {best_m3u8}")
+	logger.success(f"Selected best M3U8: {best_m3u8}")
 	return best_m3u8, cookies_str
 
 def fetch_page(url, user_agents, headers, use_selenium=False, driver=None, retry_count=0):
@@ -571,7 +548,8 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 		return data
 	
 	for field, config in selectors.items():
-		logger.debug(f"Extracting field: '{field}'")
+		if field == 'download_url' and site_config.get('m3u8_mode', False):
+			continue
 		if isinstance(config, str):
 			elements = soup.select(config)
 		elif isinstance(config, dict):
@@ -621,10 +599,7 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 			# Handle text-based extraction
 			value = elements[0].text.strip() if hasattr(elements[0], 'text') and elements[0].text else ''
 			if value is None:
-				logger.debug(f"Text for '{field}' is None; defaulting to empty string")
 				value = ''
-		
-		logger.debug(f"Initial value for '{field}': {value}")
 		
 		# Handle multi-value fields with deduplication only for text-based fields
 		if field in ['tags', 'actors', 'producers', 'studios'] and not (isinstance(config, dict) and 'attribute' in config):
@@ -678,21 +653,25 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 						except (ValueError, TypeError) as e:
 							logger.error(f"Failed to convert '{attr_name}' to {attr_type} for '{field}': {e}")
 							value = value[0] if value else ''
-					elif 'first' in step and step['first']:
-						if isinstance(value, list):
-							value = value[0] if value else ''
-							logger.debug(f"Applied 'first' for '{field}': selected {value}")
-						else:
-							logger.debug(f"Skipping 'first' for '{field}' as value is not a list: {value}")
+					elif 'first' in step and step['first'] and isinstance(value, list):
+						value = value[0] if value else ''
 			elif isinstance(value, list) and field not in ['tags', 'actors', 'studios']:
 				# Default to first value for lists without postProcess, except multi-value fields
 				value = value[0] if value else ''
 				logger.debug(f"No postProcess for '{field}' with multiple values; defaulted to first: {value}")
 		
 		data[field] = value if value or isinstance(value, list) else ''
-		logger.debug(f"Final value for '{field}': {data[field]}")
+		logger.info(f"Final value for '{field}': {data[field]}")
 	
 	return data
+
+		
+def get_terminal_width():
+	"""Get the current terminal width, defaulting to 80 if unavailable."""
+	try:
+		return os.get_terminal_size().columns
+	except OSError:
+		return 80
 
 def process_list_page(url, site_config, general_config, current_page=1, mode=None, identifier=None, overwrite_files=False, headers=None, force_new_nfo=False):
 	use_selenium = site_config.get('use_selenium', False)
@@ -708,7 +687,6 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 	
 	container = None
 	if isinstance(container_selector, list):
-		logger.debug(f"Searching for container with selector list: {container_selector}")
 		for selector in container_selector:
 			container = soup.select_one(selector)
 			if container:
@@ -716,14 +694,12 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 				break
 		if not container:
 			logger.error(f"Could not find video container at {url} with any selector in {container_selector}")
-			logger.debug(f"Page HTML excerpt: {str(soup.body)[:500] if soup.body else str(soup)[:500]}...")
 			return None, None
 	else:
 		logger.debug(f"Searching for container with selector: '{container_selector}'")
-		container = soup.select_one(container_selector)
+		container = soup.select_one(container_selector)  # Fixed typo: 'selector' not 'container_selector'
 		if not container:
 			logger.error(f"Could not find video container at {url} with selector '{container_selector}'")
-			logger.debug(f"Page HTML excerpt: {str(soup.body)[:500] if soup.body else str(soup)[:500]}...")
 			return None, None
 		logger.debug(f"Found container: {container.name}[class={container.get('class', [])}]")
 	
@@ -732,28 +708,52 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 	video_elements = container.select(item_selector)
 	logger.debug(f"Found {len(video_elements)} video items")
 	if not video_elements:
-		logger.info(f"No videos found on page {current_page} with selector '{item_selector}'")
-		logger.debug(f"Container HTML excerpt: {str(container)[:500]}...")
+		logger.debug(f"No videos found on page {current_page} with selector '{item_selector}'")
 		return None, None
 	
-	for video_element in video_elements:
-		logger.debug(f"Processing video element: {video_element.get('data-video-id', 'no data-video-id')}")
+	# Get terminal width for full-width separators
+	term_width = get_terminal_width()
+	
+	# Two empty lines before page
+	print()
+	print()
+	
+	# Page header: pink bars, gold text
+	page_header = f" PAGE {current_page} "
+	page_title = page_header.center(term_width, "═")
+	context = f" {site_config['name'].lower()} {mode}: \"{identifier}\" "
+	context_line = context.center(term_width, "┈")
+	print(colored(page_title, "yellow"))
+	print(colored(context_line, "magenta")) 
+	
+	# Process each video
+	for i, video_element in enumerate(video_elements, 1):
 		video_data = extract_data(video_element, list_scraper['video_item']['fields'], driver, site_config)
 		if 'url' in video_data:
 			video_url = video_data['url']
 			if not video_url.startswith(('http://', 'https://')):
 				video_url = f"http:{video_url}" if video_url.startswith('//') else urllib.parse.urljoin(base_url, video_url)
 		elif 'video_key' in video_data:
-			# Pass mode='video' to construct_url for video-specific encoding rules
 			video_url = construct_url(base_url, site_config['modes']['video']['url_pattern'], site_config, mode='video', video_id=video_data['video_key'])
 		else:
 			logger.warning("Unable to construct video URL")
 			continue
 		video_title = video_data.get('title', '').strip() or video_element.text.strip()
-		logger.info(f"Found video: {video_title} - {video_url}")
+		
+		# if i > 1: # < len(video_elements):
+		print()
+		
+		# Video section: pink counter bar, default text
+		counter = f" {i} of {len(video_elements)} "
+		counter_line = f"┈┈┈ {counter} ".ljust(term_width, "┈")
+		print(colored(counter_line, "magenta", attrs=["bold"]))
+		print(video_title)
+		print(f"URL: {video_url}")
+		
+		# Process the video (logs appear here with default colors)
 		process_video_page(video_url, site_config, general_config, overwrite_files, headers, force_new_nfo)
-	
-	# Pagination logic
+		
+	# Pagination logic (unchanged)
 	if mode not in site_config['modes']:
 		logger.warning(f"No pagination for mode '{mode}' as it’s not defined in site_config['modes']")
 		return None, None
@@ -769,7 +769,6 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 	
 	next_url = None
 	if url_pattern_pages:
-		# Pass mode to construct_url for mode-specific encoding rules
 		next_url = construct_url(
 			base_url,
 			url_pattern_pages,
@@ -777,7 +776,7 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 			mode=mode,
 			**{mode: identifier, 'page': current_page + 1}
 		)
-		logger.info(f"Generated next page URL (pattern-based): {next_url}")
+		logger.debug(f"Generated next page URL (pattern-based): {next_url}")
 	elif scraper_pagination:
 		if 'next_page' in scraper_pagination:
 			next_page_config = scraper_pagination['next_page']
@@ -786,7 +785,7 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 				next_url = next_page.get(next_page_config.get('attribute', 'href'))
 				if next_url and not next_url.startswith(('http://', 'https://')):
 					next_url = urllib.parse.urljoin(base_url, next_url)
-				logger.info(f"Found next page URL (selector-based): {next_url}")
+				logger.debug(f"Found next page URL (selector-based): {next_url}")
 			else:
 				logger.warning(f"No 'next' element found with selector '{next_page_config.get('selector')}'")
 	
@@ -798,9 +797,7 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 	
 def should_ignore_video(data, ignored_terms):
 	if not ignored_terms:
-		logger.debug(f"No ignored terms...")
 		return False
-	logger.debug(f"Applying ignored terms subroutine...")
 	ignored_terms_lower = [term.lower() for term in ignored_terms]
 	ignored_terms_encoded = [term.lower().replace(' ', '-') for term in ignored_terms]
 	
@@ -813,14 +810,14 @@ def should_ignore_video(data, ignored_terms):
 			value_lower = value.lower()
 			for term, term_pattern, encoded_pattern in zip(ignored_terms_lower, term_patterns, encoded_patterns):
 				if term_pattern.search(value_lower) or encoded_pattern.search(value_lower):
-					logger.info(f"Ignoring video due to term '{term}' in {field}: '{value}'")
+					logger.warning(f"Ignoring video due to term '{term}' in {field}: '{value}'")
 					return True
 		elif isinstance(value, list):
 			for item in value:
 				item_lower = item.lower()
 				for term, term_pattern, encoded_pattern in zip(ignored_terms_lower, term_patterns, encoded_patterns):
 					if term_pattern.search(item_lower) or encoded_pattern.search(item_lower):
-						logger.info(f"Ignoring video due to term '{term}' in {field}: '{item}'")
+						logger.warning(f"Ignoring video due to term '{term}' in {field}: '{item}'")
 						return True
 	return False
 
@@ -855,7 +852,6 @@ def upload_to_smb(local_path, smb_path, destination_config, overwrite=False):
 				with tqdm(total=file_size, unit='B', unit_scale=True, desc="Uploading to SMB") as pbar:
 					progress_file = ProgressFile(file, pbar)
 					conn.storeFile(destination_config['share'], smb_path, progress_file)
-			logger.info(f"Uploaded to SMB: {smb_path}")
 		else:
 			logger.error("Failed to connect to SMB share.")
 	except Exception as e:
@@ -938,13 +934,8 @@ def download_file(url, destination_path, method, general_config, site_config, he
 	if success and os.path.exists(destination_path):
 		video_info = get_video_metadata(destination_path)
 		if video_info:
-			logger.info(
-				f"Download completed: {os.path.basename(destination_path)}\n"
-				f"  Size: {video_info['size_str']}\n"
-				f"  Duration: {video_info['duration']}\n"
-				f"  Resolution: {video_info['resolution']}\n"
-				f"  Bitrate: {video_info['bitrate']}"
-			)
+			logger.success(f"Download completed: {os.path.basename(destination_path)}")
+			logger.info(f"Size: {video_info['size_str']} · Duration: {video_info['duration']} · Resolution: {video_info['resolution']}")
 		else:
 			logger.warning(f"Download completed: {os.path.basename(destination_path)} (Metadata extraction failed)")
 	elif not success:
@@ -972,11 +963,10 @@ def download_with_requests(url, destination_path, headers, general_config, site_
 					size = f.write(chunk)
 					pbar.update(size)
 					if not total_size:
-						pbar.total = pbar.n  # Grow total with downloaded amount
+						pbar.total = pbar.n
 	
 	if os.path.exists(destination_path):
 		final_size = os.path.getsize(destination_path)
-		logger.info(f"Download completed: {os.path.basename(destination_path)}, Size: {final_size / 1024 / 1024:.2f} MB")
 	else:
 		logger.error("Download failed: File not found")
 		return False
@@ -1012,7 +1002,7 @@ def download_with_curl(url, destination_path, headers, general_config, site_conf
 		logger.error(f"curl failed with return code {return_code}")
 		return False
 	
-	logger.info("curl download completed successfully")
+	logger.success("curl download completed successfully")
 	return True
 
 def download_with_wget(url, destination_path, headers, general_config, site_config, desc):
@@ -1050,7 +1040,7 @@ def download_with_wget(url, destination_path, headers, general_config, site_conf
 	if return_code != 0:
 		logger.error(f"wget failed with return code {return_code}")
 		return False
-	logger.info("wget download completed successfully")
+	logger.success("wget download completed successfully")
 	return True
 
 
@@ -1076,7 +1066,7 @@ def download_with_ytdlp(url, destination_path, headers, general_config, metadata
 	if return_code != 0:
 		logger.error(f"yt-dlp failed with return code {return_code}")
 		return False
-	logger.info("yt-dlp download completed successfully")
+	logger.success("yt-dlp download completed successfully")
 	return True
 	
 	
@@ -1094,8 +1084,8 @@ def download_with_ffmpeg(url, destination_path, general_config, headers=None, de
 	if "Cookie" in headers and headers["Cookie"]:
 		logger.debug(f"Including provided cookie: {headers['Cookie']}")
 		fetch_headers["Cookie"] = headers["Cookie"]
-	else:
-		logger.debug("No cookie provided for fetch")
+	# else:
+	# 	logger.debug("No cookie provided for fetch")
 	if origin:
 		logger.debug(f"Including header for origin: {origin}")
 		fetch_headers["Origin"] = origin
@@ -1165,7 +1155,7 @@ def download_with_ffmpeg(url, destination_path, general_config, headers=None, de
 	if return_code != 0:
 		logger.error(f"FFmpeg failed with return code {return_code}")
 		return False
-	logger.info("FFmpeg download completed successfully")
+	logger.success("FFmpeg download completed successfully")
 	return True
 	
 
@@ -1331,7 +1321,7 @@ def match_url_to_mode(url, site_config):
 		
 		if not placeholder_found:
 			if effective_path == pattern.lstrip('/').lower():
-				logger.debug(f"Matched URL '{url}' to mode '{mode}' with exact pattern '{pattern}'")
+				logger.success(f"Matched URL '{url}' to mode '{mode}' with exact pattern '{pattern}'")
 				return mode, config['scraper']
 			continue
 		
@@ -1341,7 +1331,7 @@ def match_url_to_mode(url, site_config):
 		regex_pattern += '$'
 		
 		if re.match(regex_pattern, effective_path):
-			logger.debug(f"Matched URL '{url}' to mode '{mode}' with pattern '{pattern}'")
+			logger.success(f"Matched URL '{url}' to mode '{mode}' with pattern '{pattern}'")
 			return mode, config['scraper']
 	
 	logger.debug(f"No mode matched for URL: {url}")
@@ -1396,24 +1386,29 @@ def main():
 	args = parser.parse_args()
 	
 	log_level = "DEBUG" if args.debug else "INFO"
-	logger.remove()
-	logger.add(sys.stderr, level=log_level)
+	logger.remove()  # Remove default handler
+	logger.add(
+		sys.stderr,
+		level=log_level,
+		format="<d>{time:YYYYMMDDHHmmss.SSS}</d> | <level>{level:1.1}</level> | <d>{function}:{line}</d> · <level>{message}</level>",
+		colorize=True  # Ensures color tags are processed
+	)
 	general_config = load_config(os.path.join(SCRIPT_DIR, "config.yaml"))
 
 	if not args.args:  # No arguments provided
-		logger.info("Smutscrape: A tool to scrape and download adult videos with metadata.")
-		logger.info("Usage: scrape {site_code} {mode} {query}  OR  scrape {url}")
-		logger.info("Examples:")
-		logger.info("  scrape ph pornstar \"Massy Sweet\"  # Scrape a pornstar's videos")
-		logger.info("  scrape https://motherless.com/2ABC9F3  # Scrape a specific video")
+		print("Smutscrape: A tool to scrape and download adult videos with metadata.")
+		print("Usage: scrape {site_code} {mode} {query}  OR  scrape {url}")
+		print("Examples:")
+		print("  scrape ph pornstar \"Massy Sweet\"  # Scrape a pornstar's videos")
+		print("  scrape https://motherless.com/2ABC9F3  # Scrape a specific video")
 		
-		logger.info("Supported Sites and Modes (loaded from configs):")
+		print("Supported Sites and Modes (loaded from configs):")
 		config_dir = os.path.join(SCRIPT_DIR, "configs")  # Adjust if CONFIG_DIR differs
 		if not os.path.exists(config_dir):
 			logger.error(f"Configs directory '{config_dir}' not found.")
 			sys.exit(1)
 		
-		logger.info("  {:<8} {:<30} {}".format("Code", "Site", "Modes"))  # Header
+		print("  {:<8} {:<30} {}".format("Code", "Site", "Modes"))  # Header
 		supported_sites = []
 		for site_config_file in os.listdir(config_dir):
 			if site_config_file.endswith(".yaml"):
@@ -1428,12 +1423,12 @@ def main():
 		
 		if supported_sites:
 			for site_code, site_name, modes in sorted(supported_sites):
-				logger.info("  {:<8} {:<30} {}".format(site_code, site_name, modes))
+				print("  {:<8} {:<30} {}".format(site_code, site_name, modes))
 		else:
-			logger.info("  No valid site configs found in 'configs' folder.")
+			logger.warning("  No valid site configs found in 'configs' folder.")
 		
-		logger.info("")
-		logger.info("Run 'scrape --help' for more options.")
+		print()
+		print("Run 'scrape --help' for more options.")
 		sys.exit(0)
 
 	try:

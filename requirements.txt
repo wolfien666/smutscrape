@@ -2,8 +2,8 @@
 requests>=2.31.0  # For HTTP requests when Selenium isn’t used
 beautifulsoup4>=4.12.3  # For HTML parsing
 pyyaml>=6.0.1  # For parsing YAML configs
-tqdm
-yt-dlp
+tqdm>=4.6.0
+yt-dlp>=2025.02.19
 
 # Selenium and ChromeDriver management
 selenium>=4.18.1  # For JS-heavy sites, iframe piercing, and M3U8 extraction
@@ -19,6 +19,7 @@ webdavclient3>=3.14.6  # For WebDAV file transfers
 
 # Logging and utilities
 loguru>=0.7.2  # For logging
+termcolor>=2.5.0
 
 # Optional: Improve performance or compatibility (if used in script)
 lxml>=5.1.0  # Faster HTML parsing with BeautifulSoup (optional)

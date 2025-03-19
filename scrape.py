@@ -128,7 +128,7 @@ def construct_url(base_url, pattern, site_config, mode=None, **kwargs):
 			encoded_kwargs[k] = v
 	path = pattern.format(**encoded_kwargs)
 	full_url = urllib.parse.urljoin(base_url, path)
-	logger.success(f"Constructed URL: {full_url}")
+	logger.info(f"Constructed URL: {full_url}")
 	return full_url
 
 
@@ -250,7 +250,7 @@ def generate_nfo_file(video_path, metadata):
 				f.write(f"  <plot>{metadata['description']}</plot>\n")
 			
 			f.write('</movie>\n')
-		logger.success(f"Generated NFO file: {nfo_path}")
+		logger.info(f"Generated NFO file: {nfo_path}")
 		return True
 	except Exception as e:
 		logger.error(f"Failed to generate NFO file {nfo_path}: {e}", exc_info=True)  # Include stack trace
@@ -444,15 +444,15 @@ def pierce_iframe(driver, url, site_config):
 		iframe = driver.find_element(By.CSS_SELECTOR, iframe_selector)
 		iframe_url = iframe.get_attribute("src")
 		if iframe_url:
-			logger.debug(f"Found iframe with src: {iframe_url}")
+			logger.info(f"Found iframe with src: {iframe_url}")
 			driver.get(iframe_url)
 			time.sleep(random.uniform(1, 2)) 
 			return iframe_url
 		else:
-			logger.debug("Iframe found but no src attribute.")
+			logger.warning("Iframe found but no src attribute.")
 			return url
 	except Exception as e:
-		logger.debug(f"No iframe found or error piercing: {e}")
+		logger.warning(f"No iframe found or error piercing: {e}")
 		return url
 
 def extract_m3u8_urls(driver, url, site_config):
@@ -498,7 +498,7 @@ def extract_m3u8_urls(driver, url, site_config):
 	cookies_list = driver.get_cookies()
 	cookies_str = "; ".join([f"{c['name']}={c['value']}" for c in cookies_list])
 	logger.debug(f"Cookies after load: {cookies_str if cookies_str else 'None'}")
-	logger.success(f"Selected best M3U8: {best_m3u8}")
+	logger.info(f"Selected best M3U8: {best_m3u8}")
 	return best_m3u8, cookies_str
 
 def fetch_page(url, user_agents, headers, use_selenium=False, driver=None, retry_count=0):
@@ -666,12 +666,6 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 	return data
 
 		
-def get_terminal_width():
-	"""Get the current terminal width, defaulting to 80 if unavailable."""
-	try:
-		return os.get_terminal_size().columns
-	except OSError:
-		return 80
 
 def process_list_page(url, site_config, general_config, current_page=1, mode=None, identifier=None, overwrite_files=False, headers=None, force_new_nfo=False):
 	use_selenium = site_config.get('use_selenium', False)
@@ -970,7 +964,8 @@ def download_with_requests(url, destination_path, headers, general_config, site_
 	else:
 		logger.error("Download failed: File not found")
 		return False
-	
+		
+	logger.success(f"Successfully completed download to {destination_path}")
 	return True
 	
 def download_with_curl(url, destination_path, headers, general_config, site_config, desc):
@@ -1002,7 +997,7 @@ def download_with_curl(url, destination_path, headers, general_config, site_conf
 		logger.error(f"curl failed with return code {return_code}")
 		return False
 	
-	logger.success("curl download completed successfully")
+	logger.info(f"successfully completed curl download to {destination_path}")
 	return True
 
 def download_with_wget(url, destination_path, headers, general_config, site_config, desc):
@@ -1040,7 +1035,7 @@ def download_with_wget(url, destination_path, headers, general_config, site_conf
 	if return_code != 0:
 		logger.error(f"wget failed with return code {return_code}")
 		return False
-	logger.success("wget download completed successfully")
+	logger.success(f"successfully completed wget download to {destination_path}")
 	return True
 
 
@@ -1066,7 +1061,7 @@ def download_with_ytdlp(url, destination_path, headers, general_config, metadata
 	if return_code != 0:
 		logger.error(f"yt-dlp failed with return code {return_code}")
 		return False
-	logger.success("yt-dlp download completed successfully")
+	logger.success(f"successfully completed yt-dlp download to {destination_path}")
 	return True
 	
 	
@@ -1155,7 +1150,7 @@ def download_with_ffmpeg(url, destination_path, general_config, headers=None, de
 	if return_code != 0:
 		logger.error(f"FFmpeg failed with return code {return_code}")
 		return False
-	logger.success("FFmpeg download completed successfully")
+	logger.success(f"successfully completed ffmpeg download to {destination_path}")
 	return True
 	
 
@@ -1321,7 +1316,7 @@ def match_url_to_mode(url, site_config):
 		
 		if not placeholder_found:
 			if effective_path == pattern.lstrip('/').lower():
-				logger.success(f"Matched URL '{url}' to mode '{mode}' with exact pattern '{pattern}'")
+				logger.info(f"Matched URL '{url}' to mode '{mode}' with exact pattern '{pattern}'")
 				return mode, config['scraper']
 			continue
 		
@@ -1331,7 +1326,7 @@ def match_url_to_mode(url, site_config):
 		regex_pattern += '$'
 		
 		if re.match(regex_pattern, effective_path):
-			logger.success(f"Matched URL '{url}' to mode '{mode}' with pattern '{pattern}'")
+			logger.info(f"Matched URL '{url}' to mode '{mode}' with pattern '{pattern}'")
 			return mode, config['scraper']
 	
 	logger.debug(f"No mode matched for URL: {url}")
@@ -1373,6 +1368,48 @@ def custom_title_case(text, uppercase_list=None, preserve_mixed_case=False):
 			final_text = pattern.sub(term.upper(), final_text)
 	return final_text
 	
+def get_terminal_width():
+		"""Get the current terminal width, defaulting to 80 if unavailable."""
+		try:
+			return os.get_terminal_size().columns
+		except OSError:
+			return 80
+	
+def load_ascii_art(script_dir, term_width):
+	"""Load and center the largest ASCII art file from ./logo/ that fits the terminal width."""
+	logo_dir = os.path.join(script_dir, "logo")
+	if not os.path.exists(logo_dir):
+		logger.warning(f"Logo directory '{logo_dir}' not found.")
+		return None
+	
+	# Get all .txt files with numeric names
+	logo_files = [f for f in os.listdir(logo_dir) if f.endswith(".txt") and f[:-4].isdigit()]
+	if not logo_files:
+		logger.warning(f"No valid ASCII art files found in '{logo_dir}'.")
+		return None
+	
+	# Extract widths and sort
+	widths = [int(f[:-4]) for f in logo_files]
+	widths.sort()
+	
+	# Find the largest width <= term_width
+	suitable_width = max((w for w in widths if w <= term_width), default=None)
+	if suitable_width is None:
+		logger.debug(f"No ASCII art file fits terminal width {term_width}.")
+		return None
+	
+	art_file = os.path.join(logo_dir, f"{suitable_width}.txt")
+	try:
+		with open(art_file, "r", encoding="utf-8") as f:
+			lines = f.read().splitlines()  # Split into lines
+		# Center each line based on terminal width
+		centered_lines = [line.center(term_width) for line in lines if line.strip()]
+		art = "\n".join(centered_lines)
+		return colored(art, "magenta", attrs=["bold"])
+	except Exception as e:
+		logger.error(f"Failed to load ASCII art from '{art_file}': {e}")
+		return None
+
 
 def main():
 	parser = argparse.ArgumentParser(
@@ -1385,6 +1422,24 @@ def main():
 	parser.add_argument("--start_on_page", type=int, default=1, help="Start scraping from this page number.")
 	args = parser.parse_args()
 	
+	# ASCII ART
+	term_width = get_terminal_width()
+	top_bar_text = " welcome to "
+	top_bar = top_bar_text.center(term_width, "═")
+	print(colored(top_bar, "yellow", attrs=["bold"]))
+	ascii_art = load_ascii_art(SCRIPT_DIR, term_width)
+	print()
+	if ascii_art:
+		print(ascii_art)
+	else:
+		fallback_text = "S M U T S C R A P E"
+		centered_fallback = fallback_text.center(term_width)
+		print(colored(centered_fallback, "magenta", attrs=["bold"]))
+	bottom_bar = "═" * term_width
+	print(colored(bottom_bar, "yellow", attrs=["bold"]))
+	print()
+	
+	# LOGGING
 	log_level = "DEBUG" if args.debug else "INFO"
 	logger.remove()  # Remove default handler
 	logger.add(

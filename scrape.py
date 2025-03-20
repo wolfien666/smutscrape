@@ -29,6 +29,8 @@ import json
 import uuid
 from datetime import datetime
 from selenium import webdriver
+from rich.console import Console
+from rich.style import Style
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.service import Service
@@ -39,8 +41,7 @@ CONFIG_DIR = os.path.join(SCRIPT_DIR, 'configs')
 
 last_vpn_action_time = 0
 session = requests.Session()
-
-alert = logger.level("ALERT", no=38, color="<yellow>", icon="⚠️")
+console = Console()
 		
 class ProgressFile:
 	"""A file-like wrapper to track progress during SMB upload."""
@@ -1462,49 +1463,73 @@ def handle_nfo_and_download(video_url, final_metadata, site_config, general_conf
 	else:
 		logger.error(f"Download failed: {file_name}")
 		return False
-	
+
+
 def get_terminal_width():
-		"""Get the current terminal width, defaulting to 80 if unavailable."""
-		try:
-			return os.get_terminal_size().columns
-		except OSError:
-			return 80
-	
+	try:
+		return os.get_terminal_size().columns
+	except OSError:
+		return 80
+
+def interpolate_color(start_rgb, end_rgb, steps, step):
+	r = int(start_rgb[0] + (end_rgb[0] - start_rgb[0]) * step / (steps - 1))
+	g = int(start_rgb[1] + (end_rgb[1] - start_rgb[1]) * step / (steps - 1))
+	b = int(start_rgb[2] + (end_rgb[2] - start_rgb[2]) * step / (steps - 1))
+	return (r, g, b)
+
 def load_ascii_art(script_dir, term_width):
-	"""Load and center the largest ASCII art file from ./logo/ that fits the terminal width."""
 	logo_dir = os.path.join(script_dir, "logo")
+	
 	if not os.path.exists(logo_dir):
 		logger.warning(f"Logo directory '{logo_dir}' not found.")
 		return None
 	
-	# Get all .txt files with numeric names
 	logo_files = [f for f in os.listdir(logo_dir) if f.endswith(".txt") and f[:-4].isdigit()]
 	if not logo_files:
-		logger.warning(f"No valid ASCII art files found in '{logo_dir}'.")
+		logger.warning(f"No valid ASCII art files in '{logo_dir}'.")
 		return None
 	
-	# Extract widths and sort
 	widths = [int(f[:-4]) for f in logo_files]
 	widths.sort()
-	
-	# Find the largest width <= term_width
 	suitable_width = max((w for w in widths if w <= term_width), default=None)
 	if suitable_width is None:
-		logger.debug(f"No ASCII art file fits terminal width {term_width}.")
+		logger.debug(f"No ASCII art fits width {term_width}.")
 		return None
 	
 	art_file = os.path.join(logo_dir, f"{suitable_width}.txt")
 	try:
 		with open(art_file, "r", encoding="utf-8") as f:
-			lines = f.read().splitlines()  # Split into lines
-		# Center each line based on terminal width
-		centered_lines = [line.center(term_width) for line in lines if line.strip()]
-		art = "\n".join(centered_lines)
-		return colored(art, "magenta", attrs=["bold"])
+			# Preserve all spaces, only filter truly empty lines
+			lines = [line for line in f.read().splitlines() if line.strip()]
+		
+		if not lines:
+			return None
+		
+		# Find the longest line to determine art width
+		art_width = max(len(line) for line in lines)
+		# Calculate left padding to center the entire block
+		left_padding = (term_width - art_width) // 2
+		if left_padding < 0:
+			left_padding = 0  # Art too wide, align left
+		
+		# Pad each line to match the longest, then add left padding
+		padded_lines = [line + " " * (art_width - len(line)) for line in lines]
+		centered_lines = [" " * left_padding + line for line in padded_lines]
+		
+		# Apply gradient
+		start_rgb = (255, 105, 180)  # Pink
+		end_rgb = (255, 165, 0)      # Orange
+		steps = len(lines)
+		
+		for i, line in enumerate(centered_lines):
+			rgb = interpolate_color(start_rgb, end_rgb, steps, i)
+			style = Style(color=f"rgb({rgb[0]},{rgb[1]},{rgb[2]})", bold=True)
+			console.print(line, style=style, justify="left", overflow="crop", no_wrap=True)
+		return True
 	except Exception as e:
 		logger.error(f"Failed to load ASCII art from '{art_file}': {e}")
 		return None
-
+		
 
 def main():
 	parser = argparse.ArgumentParser(
@@ -1517,23 +1542,18 @@ def main():
 	parser.add_argument("--start_on_page", type=int, default=1, help="Start scraping from this page number.")
 	args = parser.parse_args()
 	
-	# ASCII ART
+	# Display graphic header
 	term_width = get_terminal_width()
 	top_bar_text = " welcome to "
 	top_bar = top_bar_text.center(term_width, "═")
-	print(colored(top_bar, "yellow", attrs=["bold"]))
+	console.print(top_bar, style=Style(color="yellow", bold=True))
 	ascii_art = load_ascii_art(SCRIPT_DIR, term_width)
-	print()
-	if ascii_art:
-		print(ascii_art)
-		
-	else:
+	if not ascii_art:
 		fallback_text = "S M U T S C R A P E"
-		centered_fallback = fallback_text.center(term_width)
-		print(colored(centered_fallback, "magenta", attrs=["bold"]))
-	# bottom_bar = "═" * term_width
-	# print(colored(bottom_bar, "yellow", attrs=["bold"]))  # Assuming custom_bar is defined elsewhere; should be bottom_bar?
-	# print()
+		console.print(fallback_text.center(term_width), style=Style(color="magenta", bold=True))
+	bottom_bar = "═" * term_width
+	console.print(bottom_bar, style=Style(color="yellow", bold=True))
+	console.print()
 	
 	# LOGGING
 	log_level = "DEBUG" if args.debug else "INFO"
@@ -1767,9 +1787,6 @@ def main():
 			except Exception as e:
 				logger.warning(f"Failed to close Selenium driver: {e}")
 		logger.success("Scraping completed.")
-
-if __name__ == "__main__":
-	main()
 
 if __name__ == "__main__":
 	main()

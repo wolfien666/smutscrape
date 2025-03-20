@@ -20,6 +20,7 @@ webdavclient3>=3.14.6  # For WebDAV file transfers
 # Logging and utilities
 loguru>=0.7.2  # For logging
 termcolor>=2.5.0
+rich>=13.7
 
 # Optional: Improve performance or compatibility (if used in script)
 lxml>=5.1.0  # Faster HTML parsing with BeautifulSoup (optional)

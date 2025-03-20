@@ -202,61 +202,9 @@ def get_selenium_driver(general_config, force_new=False):
 	logger.debug(f"Selenium User-Agent: {user_agent}")
 	return general_config['selenium_driver']
 
-def generate_nfo_file(video_path, metadata):
-	nfo_path = f"{video_path.rsplit('.', 1)[0]}.nfo"
-	
-	tag_uppercase = [
-		"ABDL", "ASMR", "BBW", "BDSM", "DILF", "DP", "HD", "JAV", "JOI", "POV", "BBS", "BS", "BSS",
-		"FD", "FDD", "FDDD", "FDDDD", "FMD", "FMDD", "FMDDD", "FMS", "FMSS", "FS",
-		"FSD", "MD", "MDD", "MDDD", "MDDDD", "MILF", "MMD", "MMS", "MS", "MSD", "MSS",
-		"MSSD", "MSSS", "MSSSS", "MSDD", "SS", "3D", "4K"
-	]
-	studio_uppercase = ["DP", "HD", "JAV", "JOI", "MILF", "POV", "3D", "4K"]
-	
-	try:
-		with open(nfo_path, 'w', encoding='utf-8') as f:
-			f.write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n')
-			f.write('<movie>\n')
-			
-			if 'title' in metadata and metadata['title']:
-				f.write(f"  <title>{metadata['title']}</title>\n")
-			if 'URL' in metadata and metadata['URL']:
-				f.write(f"  <url>{metadata['URL']}</url>\n")
-			if 'date' in metadata and metadata['date']:
-				f.write(f"  <premiered>{metadata['date']}</premiered>\n")
-			if 'Code' in metadata and metadata['Code']:
-				f.write(f"  <uniqueid>{metadata['Code']}</uniqueid>\n")
-			if 'tags' in metadata and len(metadata['tags']) > 0:
-				for tag in set(metadata['tags']):
-					cleaned_tag = tag.lstrip('#')
-					formatted_tag = custom_title_case(cleaned_tag, tag_uppercase)
-					f.write(f"  <tag>{formatted_tag}</tag>\n")
-			if 'actors' in metadata and len(metadata['actors']) > 0:
-				for i, performer in enumerate(metadata['actors'], 1):
-					cleaned_performer = performer.lstrip('#')
-					formatted_performer = custom_title_case(cleaned_performer, tag_uppercase, preserve_mixed_case=True)
-					f.write(f"  <actor>\n    <name>{formatted_performer}</name>\n    <order>{i}</order>\n  </actor>\n")
-			if 'Image' in metadata and metadata['Image']:
-				f.write(f"  <thumb aspect=\"poster\">{metadata['Image']}</thumb>\n")
-			if 'studio' in metadata and metadata['studio']:
-				cleaned_studio = metadata['studio'].lstrip('#')
-				formatted_studio = custom_title_case(cleaned_studio, studio_uppercase, preserve_mixed_case=True)
-				f.write(f"  <studio>{formatted_studio}</studio>\n")
-			elif 'studios' in metadata and len(metadata['studios']) > 0:
-				cleaned_studio = metadata['studios'][0].lstrip('#')
-				formatted_studio = custom_title_case(cleaned_studio, studio_uppercase, preserve_mixed_case=True)
-				f.write(f"  <studio>{formatted_studio}</studio>\n")
-			if 'description' in metadata and metadata['description']:
-				f.write(f"  <plot>{metadata['description']}</plot>\n")
-			
-			f.write('</movie>\n')
-		logger.info(f"Generated NFO file: {nfo_path}")
-		return True
-	except Exception as e:
-		logger.error(f"Failed to generate NFO file {nfo_path}: {e}", exc_info=True)  # Include stack trace
-		raise
 
 def process_video_page(url, site_config, general_config, overwrite_files=False, headers=None, force_new_nfo=False):
+	"""Process a video page: fetch, extract, finalize metadata, and handle NFO/download."""
 	global last_vpn_action_time
 	vpn_config = general_config.get('vpn', {})
 	if vpn_config.get('enabled', False):
@@ -264,169 +212,74 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 		if current_time - last_vpn_action_time > vpn_config.get('new_node_time', 300):
 			handle_vpn(general_config, 'new_node')
 	
-	logger.debug(f"Processing video page: {url}")
+	logger.info(f"Processing video page: {url}")
 	use_selenium = site_config.get('use_selenium', False)
 	driver = get_selenium_driver(general_config) if use_selenium else None
 	original_url = url
-	base_origin = urllib.parse.urlparse(original_url).scheme + "://" + urllib.parse.urlparse(original_url).netloc
 	
+	# Fetch and extract raw metadata
 	iframe_url = None
 	video_url = None
-	soup = None
-	data = {'title': original_url.split('/')[-2]}  # Default fallback
+	raw_data = {'title': original_url.split('/')[-2]}
 	
 	if site_config.get('m3u8_mode', False) and driver:
 		video_scraper = site_config['scrapers']['video_scraper']
 		iframe_config = next(({'enabled': True, 'selector': config['iframe']} for field, config in video_scraper.items() 
 							  if isinstance(config, dict) and 'iframe' in config), None)
-		
 		if iframe_config:
-			logger.debug(f"Piercing iframe '{iframe_config['selector']}' for M3U8 extraction")
+			logger.debug(f"Piercing iframe '{iframe_config['selector']}' for M3U8")
 			driver.get(original_url)
 			time.sleep(random.uniform(1, 2))
 			try:
 				iframe = driver.find_element(By.CSS_SELECTOR, iframe_config['selector'])
 				iframe_url = iframe.get_attribute("src")
 				if iframe_url:
-					logger.info(f"Found iframe with src: {iframe_url}")
+					logger.info(f"Found iframe: {iframe_url}")
 					driver.get(iframe_url)
 					time.sleep(random.uniform(1, 2))
 					m3u8_url, cookies = extract_m3u8_urls(driver, iframe_url, site_config)
 					if m3u8_url:
 						video_url = m3u8_url
 						headers = headers or general_config.get('headers', {}).copy()
-						headers["Cookie"] = cookies
-						headers["Referer"] = iframe_url
-						headers["User-Agent"] = general_config.get('selenium_user_agent', random.choice(general_config['user_agents']))
+						headers.update({"Cookie": cookies, "Referer": iframe_url, 
+										"User-Agent": general_config.get('selenium_user_agent', random.choice(general_config['user_agents']))})
 			except Exception as e:
-				logger.warning(f"No iframe found or error piercing: {e}")
-		
-		# Fetch page once for metadata, only if needed
+				logger.warning(f"Iframe error: {e}")
 		soup = fetch_page(original_url, general_config['user_agents'], headers or {}, use_selenium, driver)
 		if soup:
-			data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config)
-		video_url = video_url or data.get('download_url')  # Fallback to download_url only if no M3U8
-	
+			raw_data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config)
+		video_url = video_url or raw_data.get('download_url')
 	else:
 		soup = fetch_page(original_url, general_config['user_agents'], headers or {}, use_selenium, driver)
 		if soup is None and use_selenium:
 			logger.warning("Selenium failed; retrying with requests")
 			soup = fetch_page(original_url, general_config['user_agents'], headers or {}, False, None)
 		if soup is None:
-			logger.error(f"Failed to fetch video page: {original_url}")
-			return
-		data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config)
-		video_url = data.get('download_url')
+			logger.error(f"Failed to fetch: {original_url}")
+			if driver:
+				driver.quit()
+			return False
+		raw_data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config)
+		video_url = raw_data.get('download_url')
 	
-	logger.debug(f"Extracted video data: {data}")
-	if not video_url or video_url.strip() == '':
-		video_url = original_url
-		logger.debug(f"download_url empty or missing; falling back to page URL: {video_url}")
-	else:
-		logger.debug(f"video_url: {video_url}")
-	video_title = data.get('title', '').strip() or 'Untitled'
-	data['Title'] = video_title
-	data['URL'] = original_url
+	video_url = video_url or original_url
+	logger.debug(f"Video URL: {video_url}")
+	video_title = raw_data.get('title', '').strip() or 'Untitled'
+	raw_data['Title'] = video_title
+	raw_data['URL'] = original_url
 	
-	if should_ignore_video(data, general_config['ignored']):
-		# logger.info(f"Ignoring video: {video_title}")
-		return
+	if should_ignore_video(raw_data, general_config['ignored']):
+		if driver:
+			driver.quit()
+		return True
 	
-	file_name = construct_filename(video_title, site_config, general_config)
-	destination_config = general_config['download_destinations'][0]
-	overwrite = overwrite_files or site_config.get('overwrite_files', general_config.get('overwrite_files', False))
-	nfo_overwrite = overwrite_files or force_new_nfo
-	
-	if destination_config['type'] == 'smb':
-		smb_destination_path = os.path.join(destination_config['path'], file_name)
-		smb_nfo_path = os.path.join(destination_config['path'], f"{file_name.rsplit('.', 1)[0]}.nfo")
-		temp_base = os.path.join(tempfile.gettempdir(), 'smutscrape')
-		temp_dir = destination_config.get('temporary_storage', temp_base)
-		os.makedirs(temp_dir, exist_ok=True)
-		destination_path = os.path.join(temp_dir, file_name)
-		temp_nfo_path = os.path.join(temp_dir, f"{file_name.rsplit('.', 1)[0]}.nfo")
-		video_exists = file_exists_on_smb(destination_config, smb_destination_path)
-		nfo_exists = file_exists_on_smb(destination_config, smb_nfo_path)
-	else:
-		destination_path = os.path.join(destination_config['path'], file_name)
-		nfo_path = f"{destination_path.rsplit('.', 1)[0]}.nfo"
-		video_exists = os.path.exists(destination_path)
-		nfo_exists = os.path.exists(nfo_path)
-	
-	# Handle existing files
-	temp_exists = os.path.exists(destination_path)
-	download_method = site_config['download'].get('method', 'curl')
-	origin_to_use = urllib.parse.urlparse(iframe_url if iframe_url else original_url).scheme + "://" + urllib.parse.urlparse(iframe_url if iframe_url else original_url).netloc
-	
-	make_nfo = general_config.get('make_nfo', False)
-	has_selectors = has_metadata_selectors(site_config)
-	
-	if make_nfo and has_selectors:
-		if destination_config['type'] == 'smb':
-			smb_nfo_path = os.path.join(destination_config['path'], f"{file_name.rsplit('.', 1)[0]}.nfo")
-			temp_nfo_path = os.path.join(temp_dir, f"{file_name.rsplit('.', 1)[0]}.nfo")
-			nfo_exists = file_exists_on_smb(destination_config, smb_nfo_path)
-			if nfo_overwrite or not nfo_exists:
-				generate_nfo_file(destination_path, data)
-				if os.path.exists(temp_nfo_path):
-					upload_to_smb(temp_nfo_path, smb_nfo_path, destination_config, nfo_overwrite)
-					os.remove(temp_nfo_path)
-					if nfo_exists:
-						logger.success(f"Replaced existing NFO at {smb_nfo_path}")
-					else:
-						logger.success(f"Uploaded new NFO to {smb_nfo_path}")
-			else:
-				logger.debug(f"NFO file already exists at SMB destination: {smb_nfo_path}, skipping generation")
-		else:
-			nfo_path = f"{destination_path.rsplit('.', 1)[0]}.nfo"
-			nfo_exists = os.path.exists(nfo_path)
-			if nfo_overwrite or not nfo_exists:
-				generate_nfo_file(destination_path, data)
-				if nfo_exists:
-					logger.success(f"Replaced existing NFO at {nfo_path}")
-			else:
-				logger.debug(f"NFO file already exists at local destination: {nfo_path}, skipping generation")
-	
-	if video_exists and not overwrite_files:
-		logger.info(f"File '{file_name}' exists at destination. Skipping download.")
-		return
-	elif not overwrite_files and temp_exists:
-		logger.debug(f"File '{file_name}' found in temp folder: {destination_path}")
-		video_info = get_video_metadata(destination_path)
-		if video_info:
-			logger.info(f"Valid video found in temp folder: {file_name}. Skipping download and proceeding to upload.")
-			try:
-				if destination_config['type'] == 'smb':
-					upload_to_smb(destination_path, smb_destination_path, destination_config, overwrite_files)
-					os.remove(destination_path)
-				elif destination_config['type'] == 'local':
-					apply_permissions(destination_path, destination_config)
-			except Exception as e:
-				logger.error(f"Post-download processing failed for existing temp file: {e}")
-			return
-		else:
-			logger.warning(f"Invalid or corrupt file in temp folder: {destination_path}. Deleting and re-downloading.")
-			os.remove(destination_path)
-	
-	# Proceed with download
-	logger.info(f"Downloading: {file_name}")
-	success = False
-	if download_file(video_url, destination_path, download_method, general_config, site_config, headers=headers, metadata=data, origin=origin_to_use, overwrite=overwrite_files):
-		try:
-			if destination_config['type'] == 'smb':
-				upload_to_smb(destination_path, smb_destination_path, destination_config, overwrite_files)
-				os.remove(destination_path)
-			elif destination_config['type'] == 'local':
-				apply_permissions(destination_path, destination_config)
-			logger.success(f"Successfully processed video: {file_name}")
-			success = True
-		except Exception as e:
-			logger.error(f"Post-download processing failed: {e}")
-	else:
-		logger.error(f"Download failed; skipping post-processing for {file_name}")
+	# Finalize metadata and handle NFO/download
+	final_metadata = finalize_metadata(raw_data, general_config)  # Pass general_config
+	logger.info(f"Final metadata for '{video_title}': {final_metadata}")
+	success = handle_nfo_and_download(video_url, final_metadata, site_config, general_config, overwrite_files, headers, force_new_nfo)
 	
 	if driver:
-		driver.quit()  # Clean up Selenium driver if used
+		driver.quit()
 	time.sleep(general_config['sleep']['between_videos'])
 	return success
 
@@ -1348,33 +1201,267 @@ def has_metadata_selectors(site_config):
 	metadata_fields = {'tags', 'actors', 'studio', 'studios', 'date', 'code', 'image'}
 	return any(field in video_scraper for field in metadata_fields)
 
-
 def custom_title_case(text, uppercase_list=None, preserve_mixed_case=False):
+	"""Apply custom title casing with exact match overrides from uppercase_list."""
 	if not text:
 		return text
-	uppercase_list = uppercase_list or []  # Ensure it’s never None
-	if preserve_mixed_case and re.search(r'[a-z][A-Z]|[A-Z][a-z]', text) and text not in uppercase_list:
+	uppercase_list = uppercase_list or []
+	# If preserving mixed case (e.g., "McFly") and not in uppercase_list, return as-is
+	if preserve_mixed_case and re.search(r'[a-z][A-Z]|[A-Z][a-z]', text) and text.lower() not in {u.lower() for u in uppercase_list}:
 		return text
-	upper_set = set(term.upper() for term in uppercase_list)
+	
+	# Build a case-insensitive mapping of overrides to their exact form
+	override_map = {term.lower(): term for term in uppercase_list}
+	
+	# Split into words
 	words = text.split()
 	if not words:
-		word_upper = text.upper()
-		return word_upper if word_upper in upper_set else text.title()
-	if not preserve_mixed_case or len(words) > 1:
-		result = []
-		for word in words:
-			word_upper = word.upper()
-			if word_upper in upper_set:
-				result.append(word_upper)
-			else:
-				result.append(word.title())
-		final_text = ' '.join(result)
-	else:
-		final_text = text.title()
-		for term in uppercase_list:
-			pattern = re.compile(r'\b' + re.escape(term) + r'\b', re.IGNORECASE)
-			final_text = pattern.sub(term.upper(), final_text)
+		# Single word: check for override match
+		text_lower = text.lower()
+		return override_map.get(text_lower, text.title())
+	
+	# Process each word
+	result = []
+	for word in words:
+		word_lower = word.lower()
+		if word_lower in override_map:
+			result.append(override_map[word_lower])  # Use exact form (e.g., "BrutalX")
+		else:
+			result.append(word.title() if not preserve_mixed_case or len(words) > 1 else word)
+	
+	final_text = ' '.join(result)
 	return final_text
+	
+def finalize_metadata(metadata, general_config):
+	"""Finalize metadata: deduplicate across fields, apply capitalization rules."""
+	case_overrides = general_config.get('case_overrides', [])
+	tag_case_overrides = general_config.get('tag_case_overrides', [])
+	tag_overrides = case_overrides + tag_case_overrides  # Combine for tags
+	
+	final_metadata = metadata.copy()
+	
+	# Normalize fields to lists and strip '#'
+	actors = [actor.lstrip('#') for actor in final_metadata.get('actors', []) if actor]
+	studios = [studio.lstrip('#') for studio in final_metadata.get('studios', []) if studio]
+	tags = [tag.lstrip('#') for tag in final_metadata.get('tags', []) if tag]
+	
+	# Deduplicate: Actors > Studios > Tags
+	actors_lower = set(a.lower() for a in actors)
+	studios = [s for s in studios if s.lower() not in actors_lower]
+	studios_lower = set(s.lower() for s in studios)
+	tags = [t for t in tags if t.lower() not in actors_lower and t.lower() not in studios_lower]
+	
+	# Apply capitalization
+	final_metadata['actors'] = [custom_title_case(a, case_overrides, preserve_mixed_case=True) for a in actors]
+	final_metadata['studios'] = [custom_title_case(s, case_overrides, preserve_mixed_case=True) for s in studios]
+	final_metadata['tags'] = [custom_title_case(t, tag_overrides) for t in tags]
+	if 'title' in final_metadata and final_metadata['title']:
+		final_metadata['title'] = custom_title_case(final_metadata['title'].strip(), case_overrides)
+	if 'studio' in final_metadata and final_metadata['studio']:
+		final_metadata['studio'] = custom_title_case(final_metadata['studio'].lstrip('#'), case_overrides, preserve_mixed_case=True)
+	
+	return final_metadata
+
+
+def handle_nfo_and_download(video_url, final_metadata, site_config, general_config, overwrite_files=False, headers=None, force_new_nfo=False):
+	"""Handle NFO generation and video download."""
+	file_name = construct_filename(final_metadata['title'], site_config, general_config)
+	destination_config = general_config['download_destinations'][0]
+	overwrite = overwrite_files or site_config.get('overwrite_files', general_config.get('overwrite_files', False))
+	nfo_overwrite = overwrite_files or force_new_nfo
+	
+	# Setup paths
+	if destination_config['type'] == 'smb':
+		smb_destination_path = os.path.join(destination_config['path'], file_name)
+		smb_nfo_path = os.path.join(destination_config['path'], f"{file_name.rsplit('.', 1)[0]}.nfo")
+		temp_base = os.path.join(tempfile.gettempdir(), 'smutscrape')
+		temp_dir = destination_config.get('temporary_storage', temp_base)
+		os.makedirs(temp_dir, exist_ok=True)
+		destination_path = os.path.join(temp_dir, file_name)
+		temp_nfo_path = os.path.join(temp_dir, f"{file_name.rsplit('.', 1)[0]}.nfo")
+		video_exists = file_exists_on_smb(destination_config, smb_destination_path)
+		nfo_exists = file_exists_on_smb(destination_config, smb_nfo_path)
+	else:
+		destination_path = os.path.join(destination_config['path'], file_name)
+		nfo_path = f"{destination_path.rsplit('.', 1)[0]}.nfo"
+		video_exists = os.path.exists(destination_path)
+		nfo_exists = os.path.exists(nfo_path)
+	
+	temp_exists = os.path.exists(destination_path)
+	download_method = site_config['download'].get('method', 'curl')
+	origin_to_use = urllib.parse.urlparse(video_url).scheme + "://" + urllib.parse.urlparse(video_url).netloc
+	
+	make_nfo = general_config.get('make_nfo', False)
+	has_selectors = has_metadata_selectors(site_config)
+	
+	# Generate NFO
+	if make_nfo and has_selectors:
+		if destination_config['type'] == 'smb':
+			if nfo_overwrite or not nfo_exists:
+				generate_nfo_file(destination_path, final_metadata)
+				if os.path.exists(temp_nfo_path):
+					upload_to_smb(temp_nfo_path, smb_nfo_path, destination_config, nfo_overwrite)
+					os.remove(temp_nfo_path)
+					logger.success(f"{'Replaced' if nfo_exists else 'Uploaded'} NFO to {smb_nfo_path}")
+			else:
+				logger.debug(f"NFO exists at {smb_nfo_path}, skipping")
+		else:
+			if nfo_overwrite or not nfo_exists:
+				generate_nfo_file(destination_path, final_metadata)
+				if nfo_exists:
+					logger.success(f"Replaced NFO at {nfo_path}")
+			else:
+				logger.debug(f"NFO exists at {nfo_path}, skipping")
+	
+	# Handle download
+	if video_exists and not overwrite_files:
+		logger.info(f"File '{file_name}' exists at destination. Skipping download.")
+		return True
+	elif not overwrite_files and temp_exists:
+		video_info = get_video_metadata(destination_path)
+		if video_info:
+			logger.info(f"Valid video in temp: {file_name}. Uploading.")
+			if destination_config['type'] == 'smb':
+				upload_to_smb(destination_path, smb_destination_path, destination_config, overwrite_files)
+				os.remove(destination_path)
+			elif destination_config['type'] == 'local':
+				apply_permissions(destination_path, destination_config)
+			return True
+		else:
+			logger.warning(f"Invalid temp file: {destination_path}. Redownloading.")
+			os.remove(destination_path)
+	
+	logger.info(f"Downloading: {file_name}")
+	if download_file(video_url, destination_path, download_method, general_config, site_config, headers=headers, metadata=final_metadata, origin=origin_to_use, overwrite=overwrite_files):
+		if destination_config['type'] == 'smb':
+			upload_to_smb(destination_path, smb_destination_path, destination_config, overwrite_files)
+			os.remove(destination_path)
+		elif destination_config['type'] == 'local':
+			apply_permissions(destination_path, destination_config)
+		logger.success(f"Processed video: {file_name}")
+		return True
+	else:
+		logger.error(f"Download failed: {file_name}")
+		return False
+
+def generate_nfo_file(video_path, metadata):
+	"""Generate NFO file from finalized metadata."""
+	nfo_path = f"{video_path.rsplit('.', 1)[0]}.nfo"
+	
+	try:
+		with open(nfo_path, 'w', encoding='utf-8') as f:
+			f.write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n')
+			f.write('<movie>\n')
+			if 'title' in metadata and metadata['title']:
+				f.write(f"  <title>{metadata['title']}</title>\n")
+			if 'URL' in metadata and metadata['URL']:
+				f.write(f"  <url>{metadata['URL']}</url>\n")
+			if 'date' in metadata and metadata['date']:
+				f.write(f"  <premiered>{metadata['date']}</premiered>\n")
+			if 'Code' in metadata and metadata['Code']:
+				f.write(f"  <uniqueid>{metadata['Code']}</uniqueid>\n")
+			if 'tags' in metadata and metadata['tags']:
+				for tag in metadata['tags']:
+					f.write(f"  <tag>{tag}</tag>\n")
+			if 'actors' in metadata and metadata['actors']:
+				for i, performer in enumerate(metadata['actors'], 1):
+					f.write(f"  <actor>\n    <name>{performer}</name>\n    <order>{i}</order>\n  </actor>\n")
+			if 'Image' in metadata and metadata['Image']:
+				f.write(f"  <thumb aspect=\"poster\">{metadata['Image']}</thumb>\n")
+			if 'studios' in metadata and metadata['studios']:
+				for studio in metadata['studios']:
+					f.write(f"  <studio>{studio}</studio>\n")
+			elif 'studio' in metadata and metadata['studio']:
+				f.write(f"  <studio>{metadata['studio']}</studio>\n")
+			if 'description' in metadata and metadata['description']:
+				f.write(f"  <plot>{metadata['description']}</plot>\n")
+			f.write('</movie>\n')
+		logger.info(f"Generated NFO file: {nfo_path}")
+		return True
+	except Exception as e:
+		logger.error(f"Failed to generate NFO file {nfo_path}: {e}", exc_info=True)
+		raise
+		
+def handle_nfo_and_download(video_url, final_metadata, site_config, general_config, overwrite_files=False, headers=None, force_new_nfo=False):
+	"""Handle NFO generation and video download."""
+	file_name = construct_filename(final_metadata['title'], site_config, general_config)
+	destination_config = general_config['download_destinations'][0]
+	overwrite = overwrite_files or site_config.get('overwrite_files', general_config.get('overwrite_files', False))
+	nfo_overwrite = overwrite_files or force_new_nfo
+	
+	# Setup paths
+	if destination_config['type'] == 'smb':
+		smb_destination_path = os.path.join(destination_config['path'], file_name)
+		smb_nfo_path = os.path.join(destination_config['path'], f"{file_name.rsplit('.', 1)[0]}.nfo")
+		temp_base = os.path.join(tempfile.gettempdir(), 'smutscrape')
+		temp_dir = destination_config.get('temporary_storage', temp_base)
+		os.makedirs(temp_dir, exist_ok=True)
+		destination_path = os.path.join(temp_dir, file_name)
+		temp_nfo_path = os.path.join(temp_dir, f"{file_name.rsplit('.', 1)[0]}.nfo")
+		video_exists = file_exists_on_smb(destination_config, smb_destination_path)
+		nfo_exists = file_exists_on_smb(destination_config, smb_nfo_path)
+	else:
+		destination_path = os.path.join(destination_config['path'], file_name)
+		nfo_path = f"{destination_path.rsplit('.', 1)[0]}.nfo"
+		video_exists = os.path.exists(destination_path)
+		nfo_exists = os.path.exists(nfo_path)
+	
+	temp_exists = os.path.exists(destination_path)
+	download_method = site_config['download'].get('method', 'curl')
+	origin_to_use = urllib.parse.urlparse(video_url).scheme + "://" + urllib.parse.urlparse(video_url).netloc
+	
+	make_nfo = general_config.get('make_nfo', False)
+	has_selectors = has_metadata_selectors(site_config)
+	
+	# Generate NFO
+	if make_nfo and has_selectors:
+		if destination_config['type'] == 'smb':
+			if nfo_overwrite or not nfo_exists:
+				generate_nfo_file(destination_path, final_metadata)
+				if os.path.exists(temp_nfo_path):
+					upload_to_smb(temp_nfo_path, smb_nfo_path, destination_config, nfo_overwrite)
+					os.remove(temp_nfo_path)
+					logger.success(f"{'Replaced' if nfo_exists else 'Uploaded'} NFO to {smb_nfo_path}")
+			else:
+				logger.debug(f"NFO exists at {smb_nfo_path}, skipping")
+		else:
+			if nfo_overwrite or not nfo_exists:
+				generate_nfo_file(destination_path, final_metadata)
+				if nfo_exists:
+					logger.success(f"Replaced NFO at {nfo_path}")
+			else:
+				logger.debug(f"NFO exists at {nfo_path}, skipping")
+	
+	# Handle download
+	if video_exists and not overwrite_files:
+		logger.info(f"File '{file_name}' exists at destination. Skipping download.")
+		return True
+	elif not overwrite_files and temp_exists:
+		video_info = get_video_metadata(destination_path)
+		if video_info:
+			logger.info(f"Valid video in temp: {file_name}. Uploading.")
+			if destination_config['type'] == 'smb':
+				upload_to_smb(destination_path, smb_destination_path, destination_config, overwrite_files)
+				os.remove(destination_path)
+			elif destination_config['type'] == 'local':
+				apply_permissions(destination_path, destination_config)
+			return True
+		else:
+			logger.warning(f"Invalid temp file: {destination_path}. Redownloading.")
+			os.remove(destination_path)
+	
+	logger.info(f"Downloading: {file_name}")
+	if download_file(video_url, destination_path, download_method, general_config, site_config, headers=headers, metadata=final_metadata, origin=origin_to_use, overwrite=overwrite_files):
+		if destination_config['type'] == 'smb':
+			upload_to_smb(destination_path, smb_destination_path, destination_config, overwrite_files)
+			os.remove(destination_path)
+		elif destination_config['type'] == 'local':
+			apply_permissions(destination_path, destination_config)
+		logger.success(f"Processed video: {file_name}")
+		return True
+	else:
+		logger.error(f"Download failed: {file_name}")
+		return False
 	
 def get_terminal_width():
 		"""Get the current terminal width, defaulting to 80 if unavailable."""

@@ -1,8 +1,8 @@
 #configs/fptv.yaml
 
-name: TXXX
-domain: txxx.video
-base_url: "https://txxx.video"
+name: FamilyPornTV
+domain: familyporn.tv
+base_url: "https://familyporn.tv"
 selector_style: css
 no_overwrite: true
 use_selenium: true
@@ -12,7 +12,7 @@ url_encoding_rules:
 
 modes:
   video:
-    url_pattern: "/{video_id}/"
+    url_pattern: "/videos/{video_id}/"
     scraper: video_scraper
   model:
     scraper: list_scraper

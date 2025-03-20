@@ -18,6 +18,7 @@ venv/
 # Log files
 *.log
 logs/
+wget-log
 
 # IDE or OS-specific files
 .DS_Store

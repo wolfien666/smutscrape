@@ -17,7 +17,7 @@ venv/
 
 # Log files
 *.log
-logs/
+logs/*
 wget-log
 
 # IDE or OS-specific files

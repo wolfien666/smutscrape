@@ -1,4 +1,4 @@
-# configs/xnxx.yaml
+# sites/xnxx.yaml
 
 name: XNXX
 shortcode: xn
@@ -12,7 +12,7 @@ download:
 url_encoding_rules:
   " ": "-"
   "%20": "-"
-s
+
 modes:
   video:
     url_pattern: "/{video}/"

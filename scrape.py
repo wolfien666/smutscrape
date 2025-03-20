@@ -38,7 +38,7 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
-CONFIG_DIR = os.path.join(SCRIPT_DIR, 'configs')
+CONFIG_DIR = os.path.join(SCRIPT_DIR, 'sites')
 
 last_vpn_action_time = 0
 session = requests.Session()
@@ -205,7 +205,7 @@ def get_selenium_driver(general_config, force_new=False):
 	return general_config['selenium_driver']
 
 
-def process_video_page(url, site_config, general_config, overwrite_files=False, headers=None, force_new_nfo=False, do_not_ignore=False):
+def process_video_page(url, site_config, general_config, overwrite=False, headers=None, new_nfo=False, do_not_ignore=False):
 	"""Process a video page: fetch, extract, finalize metadata, and handle NFO/download."""
 	global last_vpn_action_time
 	vpn_config = general_config.get('vpn', {})
@@ -278,7 +278,7 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 	# Finalize metadata and handle NFO/download
 	final_metadata = finalize_metadata(raw_data, general_config)  # Pass general_config
 	logger.info(f"Final metadata for '{video_title}': {final_metadata}")
-	success = handle_nfo_and_download(video_url, final_metadata, site_config, general_config, overwrite_files, headers, force_new_nfo)
+	success = handle_nfo_and_download(video_url, final_metadata, site_config, general_config, overwrite, headers, new_nfo)
 	
 	if driver:
 		driver.quit()
@@ -526,7 +526,7 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 
 		
 
-def process_list_page(url, site_config, general_config, current_page=1, mode=None, identifier=None, overwrite_files=False, headers=None, force_new_nfo=False, do_not_ignore=False):
+def process_list_page(url, site_config, general_config, current_page=1, mode=None, identifier=None, overwrite=False, headers=None, new_nfo=False, do_not_ignore=False):
 	use_selenium = site_config.get('use_selenium', False)
 	driver = get_selenium_driver(general_config) if use_selenium else None
 	soup = fetch_page(url, general_config['user_agents'], headers if headers else {}, use_selenium, driver)
@@ -598,7 +598,7 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 		print(colored(counter_line, "magenta"))
 		
 		# Process the video
-		video_success = process_video_page(video_url, site_config, general_config, overwrite_files, headers, force_new_nfo, do_not_ignore)
+		video_success = process_video_page(video_url, site_config, general_config, overwrite, headers, new_nfo, do_not_ignore)
 		if video_success:
 			success = True
 	
@@ -1060,7 +1060,7 @@ def handle_vpn(general_config, action='start'):
 	except subprocess.CalledProcessError as e:
 		logger.error(f"Failed VPN {action}: {e}")
 
-def process_fallback_download(url, general_config, overwrite_files=False):
+def process_fallback_download(url, general_config, overwrite=False):
 	destination_config = general_config['download_destinations'][0]
 	temp_dir = os.path.join(tempfile.gettempdir(), f"download_{uuid.uuid4().hex[:8]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
 	os.makedirs(temp_dir, exist_ok=True)
@@ -1074,13 +1074,13 @@ def process_fallback_download(url, general_config, overwrite_files=False):
 		source_path = os.path.join(temp_dir, downloaded_file)
 		if destination_config['type'] == 'smb':
 			smb_destination_path = os.path.join(destination_config['path'], downloaded_file)
-			if not overwrite_files and file_exists_on_smb(destination_config, smb_destination_path):
+			if not overwrite and file_exists_on_smb(destination_config, smb_destination_path):
 				logger.info(f"File '{downloaded_file}' exists on SMB. Skipping.")
 				continue
 			upload_to_smb(source_path, smb_destination_path, destination_config)
 		elif destination_config['type'] == 'local':
 			final_path = os.path.join(destination_config['path'], downloaded_file)
-			if not overwrite_files and os.path.exists(final_path):
+			if not overwrite and os.path.exists(final_path):
 				logger.info(f"File '{downloaded_file}' exists locally. Skipping.")
 				continue
 			os.makedirs(os.path.dirname(final_path), exist_ok=True)
@@ -1271,12 +1271,12 @@ def finalize_metadata(metadata, general_config):
 	return final_metadata
 
 
-def handle_nfo_and_download(video_url, final_metadata, site_config, general_config, overwrite_files=False, headers=None, force_new_nfo=False):
+def handle_nfo_and_download(video_url, final_metadata, site_config, general_config, overwrite=False, headers=None, new_nfo=False):
 	"""Handle NFO generation and video download."""
 	file_name = construct_filename(final_metadata['title'], site_config, general_config)
 	destination_config = general_config['download_destinations'][0]
-	overwrite = overwrite_files or site_config.get('overwrite_files', general_config.get('overwrite_files', False))
-	nfo_overwrite = overwrite_files or force_new_nfo
+	overwrite = overwrite or site_config.get('overwrite', general_config.get('overwrite', False))
+	nfo_overwrite = overwrite or new_nfo
 	
 	# Setup paths
 	if destination_config['type'] == 'smb':
@@ -1322,15 +1322,15 @@ def handle_nfo_and_download(video_url, final_metadata, site_config, general_conf
 				logger.debug(f"NFO exists at {nfo_path}, skipping")
 	
 	# Handle download
-	if video_exists and not overwrite_files:
+	if video_exists and not overwrite:
 		logger.info(f"File '{file_name}' exists at destination. Skipping download.")
 		return True
-	elif not overwrite_files and temp_exists:
+	elif not overwrite and temp_exists:
 		video_info = get_video_metadata(destination_path)
 		if video_info:
 			logger.info(f"Valid video in temp: {file_name}. Uploading.")
 			if destination_config['type'] == 'smb':
-				upload_to_smb(destination_path, smb_destination_path, destination_config, overwrite_files)
+				upload_to_smb(destination_path, smb_destination_path, destination_config, overwrite)
 				os.remove(destination_path)
 			elif destination_config['type'] == 'local':
 				apply_permissions(destination_path, destination_config)
@@ -1340,9 +1340,9 @@ def handle_nfo_and_download(video_url, final_metadata, site_config, general_conf
 			os.remove(destination_path)
 	
 	logger.info(f"Downloading: {file_name}")
-	if download_file(video_url, destination_path, download_method, general_config, site_config, headers=headers, metadata=final_metadata, origin=origin_to_use, overwrite=overwrite_files):
+	if download_file(video_url, destination_path, download_method, general_config, site_config, headers=headers, metadata=final_metadata, origin=origin_to_use, overwrite=overwrite):
 		if destination_config['type'] == 'smb':
-			upload_to_smb(destination_path, smb_destination_path, destination_config, overwrite_files)
+			upload_to_smb(destination_path, smb_destination_path, destination_config, overwrite)
 			os.remove(destination_path)
 		elif destination_config['type'] == 'local':
 			apply_permissions(destination_path, destination_config)
@@ -1461,16 +1461,11 @@ def find_site_config(site_input):
 	Find a site config by matching site_input against shortcode, name, or domain (case-insensitive).
 	Returns the config dict or None if no match.
 	"""
-	config_dir = os.path.join(SCRIPT_DIR, "configs")
-	if not os.path.exists(config_dir):
-		logger.error(f"Configs directory '{config_dir}' not found.")
-		return None
-	
 	site_input_lower = site_input.lower()
-	for config_file in os.listdir(config_dir):
+	for config_file in os.listdir(CONFIG_DIR):
 		if config_file.endswith(".yaml"):
 			try:
-				with open(os.path.join(config_dir, config_file), 'r') as f:
+				with open(os.path.join(CONFIG_DIR, config_file), 'r') as f:
 					site_config = yaml.safe_load(f)
 				# Check shortcode, name, domain
 				if site_config.get('shortcode', '').lower() == site_input_lower:
@@ -1487,7 +1482,6 @@ def find_site_config(site_input):
 	logger.error(f"No site config found matching '{site_input}' (shortcode, name, or domain)")
 	return None
 
-
 def display_options():
 	console.print("[bold][yellow]Options:[/yellow][/bold]")
 	console.print("  [magenta]--overwrite[/magenta]      # Replace existing files with same name at download destination")
@@ -1497,17 +1491,13 @@ def display_options():
 
 def display_global_examples():
 	console.print("[bold]Randomly Generated Examples:[/bold]")
-	config_dir = os.path.join(SCRIPT_DIR, "configs")
-	if not os.path.exists(config_dir):
-		logger.error(f"Configs directory '{config_dir}' not found.")
-		return
 	
 	# Collect all site/mode/example combos
 	all_examples = []
-	for site_config_file in os.listdir(config_dir):
+	for site_config_file in os.listdir(CONFIG_DIR):
 		if site_config_file.endswith(".yaml"):
 			try:
-				with open(os.path.join(config_dir, site_config_file), 'r') as f:
+				with open(os.path.join(CONFIG_DIR, site_config_file), 'r') as f:
 					site_config = yaml.safe_load(f)
 				site_name = site_config.get("name", "Unknown")
 				shortcode = site_config.get("shortcode", "??")
@@ -1593,7 +1583,7 @@ def main():
 	parser.add_argument("args", nargs="*", help="Site shortcode, name, or domain followed by mode and query (e.g., 'ph search \"big boobs\"'), or a direct URL.")
 	parser.add_argument("--debug", action="store_true", help="Enable detailed debug logging.")
 	parser.add_argument("--overwrite", action="store_true", help="Overwrite existing video files.")
-	parser.add_argument("--force_new_nfo", action="store_true", help="Regenerate .nfo files even if they exist.")
+	parser.add_argument("--new_nfo", action="store_true", help="Regenerate .nfo files even if they exist.")
 	parser.add_argument("--do_not_ignore", action="store_true", help="Override the ignore list in general config.yaml")
 	parser.add_argument("--page", type=int, default=1, help="Start scraping from this page number.")
 	args = parser.parse_args()
@@ -1636,10 +1626,9 @@ def main():
 		console.print()
 		console.print("[bold]Usage:[/bold] [magenta]scrape[/magenta] [yellow]{site}[/yellow] [green]{mode}[/green] [blue]{query}[/blue]  or  [magenta]scrape[/magenta] {url}")
 		console.print()
-		console.print("[bold]Supported Sites[/bold] (loaded from ./configs/):")
-		config_dir = os.path.join(SCRIPT_DIR, "configs")
-		if not os.path.exists(config_dir):
-			logger.error(f"Configs directory '{config_dir}' not found.")
+		console.print(f"[bold]Supported Sites[/bold] (loaded from {CONFIG_DIR}:")
+		if not os.path.exists(CONFIG_DIR):
+			logger.error(f"Configs directory '{CONFIG_DIR}' not found.")
 			sys.exit(1)
 		
 		table = Table(show_edge=True, expand=True, width=term_width)
@@ -1648,10 +1637,10 @@ def main():
 		table.add_column("[bold]Available Metadata[/bold]", width=(term_width//5)*2)
 		
 		supported_sites = []
-		for site_config_file in os.listdir(config_dir):
+		for site_config_file in os.listdir(CONFIG_DIR):
 			if site_config_file.endswith(".yaml"):
 				try:
-					with open(os.path.join(config_dir, site_config_file), 'r') as f:
+					with open(os.path.join(CONFIG_DIR, site_config_file), 'r') as f:
 						site_config = yaml.safe_load(f)
 					site_name = site_config.get("name", "Unknown")
 					site_code = site_config.get("shortcode", "??")
@@ -1667,7 +1656,7 @@ def main():
 			for site_display, modes_display, metadata in sorted(supported_sites):
 				table.add_row(site_display, modes_display, metadata)
 		else:
-			logger.warning("No valid site configs found in 'configs' folder.")
+			logger.warning(f"No valid site configs found in {CONFIG_DIR}")
 			table.add_row("No sites loaded", "", "")
 		
 		console.print(table)
@@ -1683,10 +1672,9 @@ def main():
 				url = args.args[0]
 				logger.debug(f"Looking for config matches for {url}...")
 				matched_site_config = None
-				config_dir = os.path.join(SCRIPT_DIR, "configs")
-				for site_config_file in os.listdir(config_dir):
+				for site_config_file in os.listdir(CONFIG_DIR):
 					if site_config_file.endswith(".yaml"):
-						with open(os.path.join(config_dir, site_config_file), 'r') as f:
+						with open(os.path.join(CONFIG_DIR, site_config_file), 'r') as f:
 							site_config = yaml.safe_load(f)
 						parsed_url = urlparse(url)
 						url_domain = parsed_url.netloc.lower().replace("www.", "")
@@ -1703,7 +1691,7 @@ def main():
 					if mode:
 						logger.info(f"Matched URL to mode '{mode}' with scraper '{scraper}'")
 						if mode == "video":
-							success = process_video_page(url, matched_site_config, general_config, args.overwrite, headers, args.force_new_nfo, True)
+							success = process_video_page(url, matched_site_config, general_config, args.overwrite, headers, args.new_nfo, True)
 						else:
 							identifier = url.split("/")[-1].split(".")[0]
 							current_page = args.page
@@ -1721,7 +1709,7 @@ def main():
 							while url:
 								next_page, new_page_number, page_success = process_list_page(
 									url, matched_site_config, general_config, current_page,
-									mode, identifier, args.overwrite, headers, args.force_new_nfo
+									mode, identifier, args.overwrite, headers, args.new_nfo
 								)
 								success = success or page_success
 								if next_page is None:
@@ -1774,7 +1762,7 @@ def main():
 										while constructed_url:
 											next_page, new_page_number, page_success = process_list_page(
 												constructed_url, matched_site_config, general_config, current_page,
-												mode_name, identifier, args.overwrite, headers, args.force_new_nfo
+												mode_name, identifier, args.overwrite, headers, args.new_nfo
 											)
 											success = success or page_success
 											if next_page is None:
@@ -1798,7 +1786,7 @@ def main():
 				site_input = args.args[0]
 				site_config = find_site_config(site_input)
 				if not site_config:
-					logger.error(f"Site '{site_input}' not found in configs (tried shortcode, name, domain)")
+					logger.error(f"Site '{site_input}' not found as shortcode, name, or domain in {CONFIG_DIR}")
 					sys.exit(1)
 				display_site_details(site_config, term_width)
 				sys.exit(0)
@@ -1810,7 +1798,7 @@ def main():
 			
 			site_config = find_site_config(site_input)
 			if not site_config:
-				logger.error(f"Site '{site_input}' not found in configs (tried shortcode, name, domain)")
+				logger.error(f"Site '{site_input}' not found as shortcode, name, or domain in {CONFIG_DIR}")
 				sys.exit(1)
 			
 			headers = general_config.get("headers", {})
@@ -1845,7 +1833,7 @@ def main():
 				while url:
 					next_page, new_page_number, page_success = process_list_page(
 						url, site_config, general_config, current_page, mode,
-						identifier, args.overwrite, headers, args.force_new_nfo
+						identifier, args.overwrite, headers, args.new_nfo
 					)
 					if next_page is None:
 						break

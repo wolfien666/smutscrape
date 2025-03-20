@@ -50,7 +50,7 @@ modes:
     url_encoding_rules:
       " ": "+"
       "%20": "+"
-    tip: "Download videos responsive to search query"
+    tip: "Download videos from searching"
     examples:
       - "Siblings in love"
       - "Family threesome"

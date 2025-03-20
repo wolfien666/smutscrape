@@ -65,7 +65,7 @@ modes:
   search:
     url_pattern: "/video/search?search={search}"
     scraper: list_scraper
-    tip: "Download videos responsive to search query"
+    tip: "Download videos from searching"
     examples:
       - "Sexy Hot Blonde"
       - "Shower Sex"

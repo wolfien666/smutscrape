@@ -12,7 +12,7 @@ download:
 url_encoding_rules:
   " ": "-"
   "%20": "-"
-
+s
 modes:
   video:
     url_pattern: "/{video}/"
@@ -27,7 +27,7 @@ modes:
     url_encoding_rules:
       " ": "+"
       "%20": "+"
-    tip: "Download videos responsive to search query"
+    tip: "Download videos from searching"
     examples:
       - "Russian homemade"
       - "Skinny girl tied up"

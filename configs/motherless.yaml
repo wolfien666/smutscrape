@@ -28,7 +28,7 @@ modes:
     url_pattern_pages: "/search?term={search}&type=videos&range=0&size=0&sort=date&page={page}"
     max_pages: 999
     scraper: list_scraper
-    tip: "Download videos responsive to search query"
+    tip: "Download videos from searching"
     examples:
       - "Rough doggystyle"
       - "Kelly Teal"

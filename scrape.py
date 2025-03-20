@@ -205,7 +205,7 @@ def get_selenium_driver(general_config, force_new=False):
 	return general_config['selenium_driver']
 
 
-def process_video_page(url, site_config, general_config, overwrite_files=False, headers=None, force_new_nfo=False):
+def process_video_page(url, site_config, general_config, overwrite_files=False, headers=None, force_new_nfo=False, do_not_ignore=False):
 	"""Process a video page: fetch, extract, finalize metadata, and handle NFO/download."""
 	global last_vpn_action_time
 	vpn_config = general_config.get('vpn', {})
@@ -270,7 +270,7 @@ def process_video_page(url, site_config, general_config, overwrite_files=False, 
 	raw_data['Title'] = video_title
 	raw_data['URL'] = original_url
 	
-	if should_ignore_video(raw_data, general_config['ignored']):
+	if do_not_ignore==False and should_ignore_video(raw_data, general_config['ignored']):
 		if driver:
 			driver.quit()
 		return True
@@ -526,7 +526,7 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 
 		
 
-def process_list_page(url, site_config, general_config, current_page=1, mode=None, identifier=None, overwrite_files=False, headers=None, force_new_nfo=False):
+def process_list_page(url, site_config, general_config, current_page=1, mode=None, identifier=None, overwrite_files=False, headers=None, force_new_nfo=False, do_not_ignore=False):
 	use_selenium = site_config.get('use_selenium', False)
 	driver = get_selenium_driver(general_config) if use_selenium else None
 	soup = fetch_page(url, general_config['user_agents'], headers if headers else {}, use_selenium, driver)
@@ -598,7 +598,7 @@ def process_list_page(url, site_config, general_config, current_page=1, mode=Non
 		print(colored(counter_line, "magenta"))
 		
 		# Process the video
-		video_success = process_video_page(video_url, site_config, general_config, overwrite_files, headers, force_new_nfo)
+		video_success = process_video_page(video_url, site_config, general_config, overwrite_files, headers, force_new_nfo, do_not_ignore)
 		if video_success:
 			success = True
 	
@@ -1594,6 +1594,7 @@ def main():
 	parser.add_argument("--debug", action="store_true", help="Enable detailed debug logging.")
 	parser.add_argument("--overwrite", action="store_true", help="Overwrite existing video files.")
 	parser.add_argument("--force_new_nfo", action="store_true", help="Regenerate .nfo files even if they exist.")
+	parser.add_argument("--do_not_ignore", action="store_true", help="Override the ignore list in general config.yaml")
 	parser.add_argument("--page", type=int, default=1, help="Start scraping from this page number.")
 	args = parser.parse_args()
 	
@@ -1702,7 +1703,7 @@ def main():
 					if mode:
 						logger.info(f"Matched URL to mode '{mode}' with scraper '{scraper}'")
 						if mode == "video":
-							success = process_video_page(url, matched_site_config, general_config, args.overwrite, headers, args.force_new_nfo)
+							success = process_video_page(url, matched_site_config, general_config, args.overwrite, headers, args.force_new_nfo, True)
 						else:
 							identifier = url.split("/")[-1].split(".")[0]
 							current_page = args.page
@@ -1736,7 +1737,7 @@ def main():
 						for mode_name in available_modes:
 							if mode_name == "video":
 								logger.info("Trying 'video' mode...")
-								success = process_video_page(url, matched_site_config, general_config, args.overwrite, headers, args.force_new_nfo)
+								success = process_video_page(url, matched_site_config, general_config, args.overwrite, headers, True)
 								attempted_modes.append("video")
 								if success:
 									logger.info("Video mode succeeded; stopping mode attempts.")
@@ -1839,7 +1840,7 @@ def main():
 				if current_page > 1:
 					logger.warning(f"Starting page {current_page} requested, but no 'url_pattern_pages' defined; starting at page 1")
 			if mode == "video":
-				process_video_page(url, site_config, general_config, args.overwrite, headers, args.force_new_nfo)
+				process_video_page(url, site_config, general_config, args.overwrite, headers, True)
 			else:
 				while url:
 					next_page, new_page_number, page_success = process_list_page(

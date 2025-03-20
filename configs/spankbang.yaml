@@ -37,7 +37,7 @@ modes:
     url_pattern_pages: "/s/{search}/{page}/?o=all/"
     max_pages: 999
     scraper: list_scraper
-    tip: "Download videos responsive to search query"
+    tip: "Download videos from searching"
     examples:
       - "Vintage taboo"
       - "Rough doggystyle"

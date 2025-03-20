@@ -1,0 +1,58 @@
+# configs/familysexvideos.yaml
+
+name: Family Sex Videos
+shortcode: fsv
+domain: FamilySexVideos.org
+base_url: "https://familysexvideos.org"
+selector_style: css
+no_overwrite: true
+use_selenium: true
+download:
+  method: "requests"
+url_encoding_rules:
+  " ": "-"
+  "%20": "-"
+
+modes:
+  video:
+    url_pattern: "/en/video/{video}/"
+    scraper: video_scraper
+    tip: "Download video with identifier"
+    examples:
+      - "3824942638978699199"
+      - "6463135743800692830"
+      - "2705852733184453678"
+  search:
+    scraper: list_scraper
+    url_pattern: "/en/search/?search={search}"
+    url_encoding_rules:
+      " ": "+"
+      "%20": "+"
+    tip: "Download videos from searching"
+    examples:
+      - "Mom Son"
+      - "Father Daughter"
+
+scrapers:
+  video_scraper:
+    title:
+      selector: "head title"
+    download_url:
+      selector: "video#my-player_html5_api source[type='video/mp4']"
+      attribute: "src"
+
+  list_scraper:
+    video_container:
+      selector:
+        - "div.thumb"
+    video_item:
+      selector: "a.trd"
+      fields:
+        url:
+          attribute: "href"
+        title:
+          selector: "head title"
+    pagination:
+      next_page:
+        selector: "a.next.page-numbers"
+        attribute: "href"

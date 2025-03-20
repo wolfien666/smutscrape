@@ -3,6 +3,7 @@ config.yaml
 temp_downloads/
 .temp/
 .tmp_downloads/
+testbench/
 
 # Python cache and build artifacts
 __pycache__/

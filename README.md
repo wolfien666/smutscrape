@@ -1,13 +1,13 @@
 ```
-                                  d8P
-                               d888888P
- .d888b,  88bd8b,d88b ?88   d8P  ?88'   .d888b, d8888b  88bd88b d888b8b  ?88,.d88b, d8888b
- ?8b,     88P'`?8P'?8bd88   88   88P    ?8b,   d8P' `P  88P'  `d8P' ?88  `?88'  ?88d8b_,dP
-   `?8b  d88  d88  88P?8(  d88   88b      `?8b 88b     d88     88b  ,88b   88b  d8P88b
-`?888P' d88' d88'  88b`?88P'?8b  `?8b  `?888P' `?888P'd88'     `?88P'`88b  888888P'`?888P'
-                                                                           88P'
-                                                                          d88
-                                                                          ?8P
+                                     d8P                                                   
+                                .d8888889P`                                                
+  .d888b, `8bd8b,d88b `S88   d8P` d88'  .d888b,  d8888b 88bd88b  d888b8b `S88,.d88b, d8888b
+ S8b,     88P'`S8P'S8b d88  d88` 88P   S88b,   d8P' `P  88P'   `d8P' S88  S88'  S88 d8b_,dP
+   `S8b  d88  d88  88P S8l  d88  88b     `S88b 88b      d88     88b  ,88; 88b  d88P 88t    
+`S888P' d88' d88'  88b `S88P'S8b `S8b `S8888P' `S888P' d88'     `S88P'Y88 888888P'  `S888P'
+                                                                          88P'             
+                                                                          d88              
+                                                                         .8P               
 ```
 
 # Smutscrape · _just a scraper for smut, folks!_ 🍆💦

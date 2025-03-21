@@ -1704,7 +1704,7 @@ def render_ascii(input_text, general_config, term_width, font=None):
 			lines = [line.rstrip() for line in art_text.splitlines() if line.strip()]
 			if lines:
 				max_line_width = max(len(line) for line in lines)
-				logger.debug(f"Specified font '{font}': Unbounded width = {max_line_width}")
+				# logger.debug(f"Specified font '{font}': Unbounded width = {max_line_width}")
 				if max_line_width <= max_width:
 					selected_font = font
 					art_width = max_line_width
@@ -1733,32 +1733,29 @@ def render_ascii(input_text, general_config, term_width, font=None):
 				if lines:
 					max_line_width = max(len(line) for line in lines)
 					font_widths[font] = max_line_width
-					logger.debug(f"Font '{font}': Unbounded width = {max_line_width}")
-				else:
-					logger.debug(f"Font '{font}': No valid lines rendered")
+					# logger.debug(f"Font '{font}': Unbounded width = {max_line_width}")
 			except Exception as e:
 				logger.debug(f"Font '{font}' rendering failed: {e}, skipping.")
 				continue
 
 		if not font_widths:
-			logger.warning("No valid fonts found. Using fallback.")
+			# logger.warning("No valid fonts found. Using fallback.")
 			selected_font = "standard"
 			art_width = len(input_text)
 		else:
 			# Filter fonts that fit within max_width
 			qualifying_fonts = [(font, width) for font, width in font_widths.items() if width <= max_width]
-			logger.debug(f"Qualifying fonts (width <= {max_width}): {qualifying_fonts}")
+			# logger.debug(f"Qualifying fonts (width <= {max_width}): {qualifying_fonts}")
 			
 			if not qualifying_fonts:
-				logger.debug(f"No fonts fit within {max_width} characters. Using narrowest available.")
 				qualifying_fonts = sorted(font_widths.items(), key=lambda x: x[1])
 				selected_font, art_width = qualifying_fonts[0]
-				logger.debug(f"Narrowest font selected: '{selected_font}' with width {art_width}")
+				logger.debug(f"No fonts fit within {max_width} characters. Using narrowest available: '{selected_font}' with width {art_width}")
 			else:
 				# Sort by width descending and take top 3
 				sorted_fonts = sorted(qualifying_fonts, key=lambda x: x[1], reverse=True)
 				top_fonts = sorted_fonts[:min(3, len(sorted_fonts))]
-				logger.debug(f"Top qualifying fonts: {top_fonts}")
+				# logger.debug(f"Top qualifying fonts: {top_fonts}")
 				selected_font, art_width = random.choice(top_fonts)
 				logger.debug(f"Selected font: '{selected_font}' with width {art_width}")
 
@@ -1767,7 +1764,7 @@ def render_ascii(input_text, general_config, term_width, font=None):
 		art_text = art.text2art(input_text, font=selected_font)
 		art_text = art_text.replace("\t", "    ")
 		lines = [line.rstrip() for line in art_text.splitlines() if line.strip()]
-		logger.debug(f"Raw lines before trimming: {[line for line in lines]}")
+		# logger.debug(f"Raw lines before trimming: {[line for line in lines]}")
 	except Exception as e:
 		logger.error(f"Failed to render ASCII art with font '{selected_font}': {e}")
 		return False
@@ -1777,11 +1774,11 @@ def render_ascii(input_text, general_config, term_width, font=None):
 	for line in lines:
 		line_width = len(line)
 		if line_width > max_width:
-			logger.debug(f"Line '{line}' width {line_width} exceeds max_width {max_width}. Trimming.")
+			# logger.debug(f"Line '{line}' width {line_width} exceeds max_width {max_width}. Trimming.")
 			final_lines.append(line[:max_width])
 		else:
 			final_lines.append(line)
-		logger.debug(f"Line width after trimming: {len(final_lines[-1])}, Line: '{final_lines[-1]}'")
+		#logger.debug(f"Line width after trimming: {len(final_lines[-1])}, Line: '{final_lines[-1]}'")
 	art_width = max(len(line) for line in final_lines) if final_lines else len(input_text)
 	logger.debug(f"Adjusted art_width: {art_width}")
 

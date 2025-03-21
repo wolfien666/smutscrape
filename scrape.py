@@ -1946,6 +1946,7 @@ def display_site_details(site_config, term_width):
 	
 	display_options()
 
+
 def generate_global_table(term_width, output_path=None):
 	"""Generate the global sites table, optionally saving as Markdown to output_path."""
 	# Build the table
@@ -1955,24 +1956,36 @@ def generate_global_table(term_width, output_path=None):
 	table.add_column("[bold][green]Available Metadata[/green][/bold]", width=(term_width//5)*2)
 	
 	supported_sites = []
+	selenium_sites = set()
+	
 	for site_config_file in os.listdir(SITE_DIR):
 		if site_config_file.endswith(".yaml"):
 			try:
 				with open(os.path.join(SITE_DIR, site_config_file), 'r') as f:
 					site_config = yaml.safe_load(f)
-				site_name = site_config.get("name", "Unknown")
+				site_name = site_config.get("domain", "Unknown")
 				site_code = site_config.get("shortcode", "??")
+				use_selenium = site_config.get("use_selenium", False)
+				
+				# Track sites requiring Selenium
+				if use_selenium:
+					selenium_sites.add(site_code)
+				
 				site_display = f"[magenta][bold]{site_code}[/bold][/magenta] · [magenta]{site_name}[/magenta]"
 				modes = get_available_modes(site_config)
 				modes_display = " · ".join(f"[yellow][bold]{mode}[/bold][/yellow]" for mode in modes) if modes else "[gray]None[/gray]"
 				metadata = has_metadata_selectors(site_config, return_fields=True)
 				metadata_display = " · ".join(f"[green][bold]{field}[/bold][/green]" for field in metadata) if metadata else "None"
-				supported_sites.append((site_display, modes_display, metadata_display))
+				supported_sites.append((site_code, site_name, modes, metadata, use_selenium))
 			except Exception as e:
 				logger.warning(f"Failed to load config '{site_config_file}': {e}")
 	
 	if supported_sites:
-		for site_display, modes_display, metadata_display in sorted(supported_sites):
+		# Fix the unpacking here to match what we stored
+		for site_code, site_name, modes, metadata, use_selenium in sorted(supported_sites, key=lambda x: x[0]):
+			site_display = f"[magenta][bold]{site_code}[/bold][/magenta] · [magenta]{site_name}[/magenta]"
+			modes_display = " · ".join(f"[yellow][bold]{mode}[/bold][/yellow]" for mode in modes) if modes else "[gray]None[/gray]"
+			metadata_display = " · ".join(f"[green][bold]{field}[/bold][/green]" for field in metadata) if metadata else "None"
 			table.add_row(site_display, modes_display, metadata_display)
 	else:
 		logger.warning("No valid site configs found in 'configs' folder.")
@@ -1980,13 +1993,23 @@ def generate_global_table(term_width, output_path=None):
 	
 	if output_path:
 		# Generate Markdown
-		md_lines = ["# Supported Sites\n", "| Site (shortcode) | Scrape Modes | Available Metadata |\n", "|------------------|--------------|--------------------|\n"]
-		for site_display, modes_display, metadata_display in sorted(supported_sites):
-			# Strip rich markup for Markdown
-			site_display_clean = re.sub(r'\[.*?\]', '', site_display).replace(' · ', ' ')
-			modes_display_clean = re.sub(r'\[.*?\]', '', modes_display)
-			metadata_display_clean = re.sub(r'\[.*?\]', '', metadata_display)
-			md_lines.append(f"| {site_display_clean} | {modes_display_clean} | {metadata_display_clean} |\n")
+		md_lines = [
+			"| code   | site                          | modes                          | metadata                       |\n",
+			"| ------ | ----------------------------- | ------------------------------ | ------------------------------ |\n"
+		]
+		
+		for site_code, site_name, modes, metadata, use_selenium in sorted(supported_sites, key=lambda x: x[0]):
+			# Format each column
+			code_str = f"`{site_code}`"
+			site_str = f"**_{site_name}_**" + (" †" if use_selenium else "")
+			modes_str = " · ".join(modes) if modes else "None"
+			metadata_str = " · ".join(metadata) if metadata else "None"
+			md_lines.append(f"| {code_str:<6} | {site_str:<29} | {modes_str:<30} | {metadata_str:<30} |\n")
+		
+		# Add Selenium footnote
+		if selenium_sites:
+			md_lines.append("\n† _Selenium required._\n")
+		
 		try:
 			with open(output_path, 'w', encoding='utf-8') as f:
 				f.writelines(md_lines)

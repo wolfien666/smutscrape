@@ -1852,6 +1852,7 @@ def display_global_examples():
 	console.print(table)
 	console.print()
 
+
 def display_site_details(site_config, term_width):
 	"""Display a detailed readout for a specific site config with domain-based ASCII art."""
 	site_name = site_config.get("name", "Unknown")
@@ -1872,39 +1873,58 @@ def display_site_details(site_config, term_width):
 	render_ascii(site_name, general_config, term_width)
 	console.print()
 	
-	# Rest of the function remains the same
 	site_header = f"{domain} ".ljust(term_width, "┈")
 	console.print(f"[yellow][bold]{site_header}[/bold][/yellow]")
 	console.print()
 	
 	label_width = 12
-	value_indent = " " * (label_width + 1)
+	value_indent = " " * (label_width + 1)  # 13 spaces
 	
-	def print_detail(label, value):
-		label_padded = f"{label:>{label_width}}"
-		lines = []
-		for line in str(value).split("\n"):
-			lines.extend(textwrap.wrap(line, width=term_width - label_width - 1))
-		console.print(f"{label_padded} {lines[0]}")
-		for line in lines[1:]:
-			console.print(f"{value_indent}{line}")
+def display_site_details(site_config, term_width):
+	"""Display a detailed readout for a specific site config with domain-based ASCII art."""
+	site_name = site_config.get("name", "Unknown")
+	shortcode = site_config.get("shortcode", "??")
+	domain = site_config.get("domain", "n/a")
+	base_url = site_config.get("base_url", "https://example.com")
+	video_uri = site_config.get("modes", {}).get("video", {}).get("url_pattern", "/watch/0123456.html")
+	download_method = site_config.get("download", {}).get("method", "N/A")
+	use_selenium = site_config.get("use_selenium", False)
+	name_suffix = site_config.get("name_suffix", None)
+	metadata = has_metadata_selectors(site_config, return_fields=True)
+	site_note = site_config.get("note", None)
 	
-	print_detail("Domain:", f"[bold]{domain}[/bold]")
-	print_detail("Shortcode:", f"[bold]{shortcode}[/bold]")
-	print_detail("Method:", f"[bold]{download_method}[/bold]")
-	print_detail("Metadata:", metadata)
-	
-	if site_note:
-		print_detail("Note:", site_note)
-	if name_suffix:
-		print_detail("Note:", f"Filenames are appended with [bold]\"{name_suffix}\"[/bold].")
-	if use_selenium:
-		print_detail("Note:", "[yellow][bold]selenium[/bold][/yellow] and [yellow][bold]chromedriver[/bold][/yellow] are required to scrape this site.")
-		print_detail("", "See: https://github.com/io-flux/smutscrape#selenium--chromedriver-%EF%B8%8F%EF%B8%8F")
-	
+	# Use domain ASCII art instead of logo
+	general_config = load_configuration('general')
+	# console.print("═" * term_width, style=Style(color="yellow"))
 	console.print()
-	console.print(f"    Usage: [magenta]scrape {shortcode} {{mode}} {{query}}[/magenta]")
-	console.print(f"           [magenta]scrape {base_url}{video_uri}[/magenta]")
+	render_ascii(site_name, general_config, term_width)
+	console.print()
+	
+	# site_header = f"{domain} ".ljust(term_width, "┈")
+	# console.print(f"[yellow][bold]{site_header}[/bold][/yellow]")
+	console.print()
+	
+	label_width = 12
+	
+	# Print basic fields directly
+	console.print(f"{'Domain:':>{label_width}} [bold]{domain}[/bold]")
+	console.print(f"{'Shortcode:':>{label_width}} [bold]{shortcode}[/bold]")
+	console.print(f"{'Method:':>{label_width}} [bold]{download_method}[/bold]")
+	console.print(f"{'Metadata:':>{label_width}} {', '.join(metadata)}")  # Join metadata with commas
+	
+	# Print notes directly
+	if site_note:
+		console.print(f"{'Note:':>{label_width}} {site_note}")
+	if name_suffix:
+		console.print(f"{'Note:':>{label_width}} Filenames are appended with [bold]\"{name_suffix}\"[/bold].")
+	if use_selenium:
+		console.print(f"{'Note:':>{label_width}} [yellow][bold]selenium[/bold][/yellow] and [yellow][bold]chromedriver[/bold][/yellow] are required to scrape this site.")
+		console.print(f"{'':>{label_width}} See: https://github.com/io-flux/smutscrape#selenium--chromedriver-%EF%B8%8F%EF%B8%8F")
+	
+	console.print()  # Single blank line before usage
+	# Align both usage lines
+	console.print(f"{'Usage:':>{label_width}} [magenta]scrape {shortcode} {{mode}} {{query}}[/magenta]")
+	console.print(f"{'':>{label_width}} [magenta]scrape {base_url}{video_uri}[/magenta]")
 	console.print()
 	
 	modes = site_config.get("modes", {})
@@ -1925,7 +1945,6 @@ def display_site_details(site_config, term_width):
 		console.print()
 	
 	display_options()
-
 
 def generate_global_table(term_width, output_path=None):
 	"""Generate the global sites table, optionally saving as Markdown to output_path."""
@@ -1980,8 +1999,8 @@ def generate_global_table(term_width, output_path=None):
 
 
 def display_usage(term_width):
-	console.print("[bold]Usage:[/bold] [red]scrape[/red] [magenta]{site}[/magenta] [mode]{mode}[/mode] {query}")
-	console.print("       scrape {url}")
+	console.print("[bold]Usage:[/bold] [red]scrape[/red] [magenta]{site}[/magenta] [yellow]{mode}[/yellow] [blue]{query}[/blue]")
+	console.print("       [red]scrape[/red] [blue]{url}[/blue]")
 	console.print()
 	console.print("[yellow][bold]Supported Sites[/bold] (loaded from ./configs/):[/yellow]")
 	console.print()
@@ -2091,6 +2110,7 @@ def main():
 	)
 	
 	general_config = load_configuration('general')
+	print()
 	render_ascii("Smutscrape", general_config, term_width)
 	
 	if args.stable:
@@ -2098,6 +2118,7 @@ def main():
 		sys.exit(0)
 	
 	if not args.args:
+		print()
 		display_usage(term_width)
 		sys.exit(0)
 	

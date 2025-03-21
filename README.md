@@ -100,14 +100,13 @@ Build commands with `scrape {code} {mode} {query}` using the table below.
 | `fphd` | **_familypornhd.com_** †      | `video` · `category` · `tag` · `studio`                            | Title · Studios · Actors · Tags · Description                |
 | `fptv` | **_familyporn.tv_** †         | `video` · `search` · `category` · `actors`                         | Title · Studios · Actors · Tags · Description                |
 | `fs`   | **_family-sex.me_** †         | `video` · `search` · `tag`                                         | Title · Studios · Actors · Tags · Description                |
-| `fsv`  | **_familysexvideos.org_** †   | `video` · `search`                                                 | Title                                                        |
 | `if`   | **_incestflix.com_**          | `video` · `search`‡ · `tag`‡                                       | Title · Studios · Actors · Tags · Image                      |
+| `ig`   | **_incest.guru_**             | `video` · `search`‡ · `tag`‡                                       | Title · Studios · Actors · Tags · Image                      |
 | `lf`   | **_lonefun.com_**             | `video` · `search` · `tag`                                         | Title · Tags · Description                                   |
 | `ml`   | **_motherless.com_** †        | `video` · `search` · `category` · `user` · `group`                 | Title · Tags                                                 |
 | `ph`   | **_pornhub.com_** †           | `video` · `model` · `category` · `channel` · `search` · `pornstar` | Title · Studios · Actors · Tags · Date · Code · Image        |
 | `sb`   | **_spankbang.com_**           | `video` · `model` · `search` · `tag`                               | Title · Actors · Tags · Description                          |
 | `tna`  | **_tnaflix.com_**             | `video` · `search`                                                 | Title · Studios · Actors · Tags · Description · Date         |
-| `triv` | **_toprealincestvideos.com_** | `video` · `search` · `category`                                    | Title                                                        |
 | `xh`   | **_xhamster.com_**            | `video` · `search` · `category` · `pornstar`                       | Title · Studios · Actors · Tags                              |
 | `xnxx` | **_xnxx.com_** †              | `video` · `search` · `channel` · `pornstar` · `tag` · `pornmaker`  | Title · Studios · Actors · Tags · Description · Date · Image |
 | `xv`   | **_xvideos.com_**             | `video` · `search` · `channel` · `model` · `tag`                   | Title                                                        |

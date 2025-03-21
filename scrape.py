@@ -1950,10 +1950,10 @@ def generate_global_table(term_width, output_path=None):
 	"""Generate the global sites table, optionally saving as Markdown to output_path."""
 	# Build the table with original style plus separate code column
 	table = Table(show_edge=True, expand=True, width=term_width)
-	table.add_column("[bold][magenta]code[/magenta][/bold]", width=8, justify="left")
-	table.add_column("[bold][magenta]Site[/magenta][/bold]", width=(term_width-8)//4)
-	table.add_column("[bold][yellow]Scrape Modes[/yellow][/bold]", width=(term_width-8)//3)
-	table.add_column("[bold][green]Available Metadata[/green][/bold]", width=(term_width-8)//3)
+	table.add_column("[bold][magenta]code[/magenta][/bold]", width=6, justify="left")
+	table.add_column("[bold][magenta]site[/magenta][/bold]", width=12, justify="left") # (term_width-8)//4)
+	table.add_column("[bold][yellow]modes[/yellow][/bold]", width=(term_width-8)//3)
+	table.add_column("[bold][green]metadata[/green][/bold]", width=(term_width-8)//3)
 	
 	supported_sites = []
 	selenium_sites = set()
@@ -1989,7 +1989,7 @@ def generate_global_table(term_width, output_path=None):
 			code_display = f"[magenta][bold]{site_code}[/bold][/magenta]"
 			site_display = f"[magenta]{site_name}[/magenta]" + (" †" if use_selenium else "")
 			modes_display = " · ".join(
-				f"[yellow][bold]{mode}[/bold][/yellow]" + ("‡" if has_special_encoding else "")
+				f"[yellow][bold]{mode}[/bold][/yellow]" + (" ‡" if has_special_encoding else "")
 				for mode in modes
 			) if modes else "[gray]None[/gray]"
 			metadata_display = " · ".join(f"[green][bold]{field}[/bold][/green]" for field in metadata) if metadata else "None"

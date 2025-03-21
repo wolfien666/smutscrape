@@ -14,6 +14,8 @@
 
 A Python-based tool to scrape and download adult content from various websites straight to your preferred data store. Whether it’s videos, tags, or search results, **_smutscrape_**`has you covered—discreetly and efficiently. Supports multiple download methods, advanced scraping with Selenium for tricky sites, and metadata extraction stored in`.nfo` files for media management. 😈
 
+![Screenshot](https://github.com/io-flux/smutscrape/raw/main/screenshot.jpg)
+
 ---
 
 ## Requirements 🧰

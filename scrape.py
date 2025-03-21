@@ -1816,7 +1816,7 @@ def display_options():
 	console.print("  [magenta]-h[/magenta], [magenta]--help[/magenta]             # Show help submenu")
 
 def display_global_examples():
-	console.print("[bold]Randomly Generated Examples:[/bold]")
+	console.print("[yellow][bold]Randomly Generated Examples:[/bold][/yellow]")
 	
 	# Collect all site/mode/example combos
 	all_examples = []
@@ -1943,7 +1943,7 @@ def display_site_details(site_config, term_width):
 			mode_table.add_row(mode, tip, example_cmd)
 		console.print(mode_table)
 		console.print()
-	
+	console.print()
 	display_options()
 
 def generate_global_table(term_width, output_path=None):
@@ -2001,9 +2001,9 @@ def generate_global_table(term_width, output_path=None):
 	# Prepare footnotes
 	footnotes = []
 	if selenium_sites:
-		footnotes.append("[italic]† Selenium required.[/italic]")
+		footnotes.append("[italic]† [yellow][bold]Selenium[/bold][/yellow] required.[/italic]")
 	if encoding_rule_sites:
-		footnotes.append("[italic]‡ Special URL encoding applied.[/italic]")
+		footnotes.append("[italic]‡ Combine terms with \'&\' to search them together.[/italic]")
 	
 	if output_path:
 		# Generate Markdown (unchanged from your last working version)
@@ -2045,6 +2045,7 @@ def display_usage(term_width):
 	console.print()
 	global_table = generate_global_table(term_width)  # Get the table object
 	console.print(global_table)  # Print it once with full color control
+	console.print()
 	console.print()
 	display_global_examples()
 	display_options()

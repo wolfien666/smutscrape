@@ -31,7 +31,7 @@ modes:
     url_pattern_pages: "/tag/{tag}/page/{page}"
     max_pages: 999
     scraper: list_scraper
-    tip: "Download videos with specifix tag(s)"
+    tip: "Download videos with specific tag(s)"
     note: "Tags can be a performer or studio, family relationship (BS for brother/sister, MSD for mother/son/daughter, etc.), sex act (doggystyle, creampie), or other quality (dirty talk, reluctant, etc.). Combine two tags with \" & \" for a compound query."
     examples:
       - "Lily LaBeau"

@@ -43,7 +43,7 @@ modes:
     scraper: list_scraper
     url_pattern: "/search/{search}/"
     max_pages: 999
-    tip: "Download videos from searching"
+    tip: "Download videos from search results"
     examples:
       - "Siblings secretly fuck"
       - "Rough doggystyle"

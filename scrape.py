@@ -2,6 +2,7 @@
 
 import argparse
 import yaml
+import art
 import requests
 import cloudscraper
 from bs4 import BeautifulSoup
@@ -14,10 +15,8 @@ import sys
 import urllib.parse
 from urllib.parse import urlparse
 from smb.SMBConnection import SMBConnection
+from datetime import datetime
 import random
-from loguru import logger
-from tqdm import tqdm
-from termcolor import colored
 import io
 import shlex
 import json
@@ -27,18 +26,23 @@ import shutil
 import shlex
 import json
 import uuid
-from datetime import datetime
-from selenium import webdriver
+from loguru import logger
+from tqdm import tqdm
+from termcolor import colored
+import textwrap
+import pyfiglet
 from rich.console import Console
 from rich.table import Table
 from rich.style import Style
+from rich.text import Text
+from selenium import webdriver
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
-CONFIG_DIR = os.path.join(SCRIPT_DIR, 'sites')
+SITE_DIR = os.path.join(SCRIPT_DIR, 'sites')
 
 last_vpn_action_time = 0
 session = requests.Session()
@@ -59,15 +63,38 @@ class ProgressFile:
 	
 	def __getattr__(self, name):
 		return getattr(self.file_obj, name)
-		
 
-def load_config(config_file):
-	with open(config_file, 'r') as file:
-		return yaml.safe_load(file)
-
-def load_site_config(site):
-	config_path = os.path.join(CONFIG_DIR, f'{site}.yaml')
-	return load_config(config_path)
+def load_configuration(config_type='general', identifier=None):
+	"""Load general or site-specific configuration."""
+	if config_type == 'general':
+		config_path = os.path.join(SCRIPT_DIR, 'config.yaml')
+		try:
+			with open(config_path, 'r') as file:
+				return yaml.safe_load(file)
+		except Exception as e:
+			logger.error(f"Failed to load general config from '{config_path}': {e}")
+			raise
+	
+	elif config_type == 'site':
+		if not identifier:
+			raise ValueError("Site identifier required for site config loading")
+		identifier_lower = identifier.lower()
+		for config_file in os.listdir(SITE_DIR):
+			if config_file.endswith('.yaml'):
+				config_path = os.path.join(SITE_DIR, config_file)
+				try:
+					with open(config_path, 'r') as f:
+						config = yaml.safe_load(f)
+					if any(config.get(key, '').lower() == identifier_lower 
+						   for key in ['shortcode', 'name', 'domain']):
+						logger.debug(f"Loaded site config for '{identifier}' from '{config_file}'")
+						return config
+				except Exception as e:
+					logger.warning(f"Failed to load config '{config_file}': {e}")
+		logger.error(f"No site config found for '{identifier}'")
+		return None
+	
+	raise ValueError(f"Unknown config type: {config_type}")
 
 def process_title(title, invalid_chars):
 	logger.debug(f"Processing {title} for invalid chars...")
@@ -205,8 +232,95 @@ def get_selenium_driver(general_config, force_new=False):
 	return general_config['selenium_driver']
 
 
+def process_url(url, site_config, general_config, overwrite, re_nfo, start_page):
+	"""Process a URL, determining the appropriate mode and handling it."""
+	headers = general_config.get("headers", {}).copy()
+	headers["User-Agent"] = random.choice(general_config["user_agents"])
+	mode, scraper = match_url_to_mode(url, site_config)
+	
+	if mode:
+		logger.info(f"Matched URL to mode '{mode}' with scraper '{scraper}'")
+		if mode == "video":
+			success = process_video_page(url, site_config, general_config, overwrite, headers, re_nfo)
+		else:
+			identifier = url.split("/")[-1].split(".")[0]
+			current_page = start_page
+			mode_config = site_config["modes"][mode]
+			if current_page > 1 and mode_config.get("url_pattern_pages"):
+				url = construct_url(
+					site_config["base_url"],
+					mode_config["url_pattern_pages"],
+					site_config,
+					mode=mode,
+					**{mode: identifier, "page": current_page}
+				)
+				logger.info(f"Starting at custom page {current_page}: {url}")
+			success = False
+			while url:
+				next_page, new_page_number, page_success = process_list_page(
+					url, site_config, general_config, current_page,
+					mode, identifier, overwrite, headers, re_nfo
+				)
+				success = success or page_success
+				url = next_page
+				current_page = new_page_number
+				time.sleep(general_config["sleep"]["between_pages"])
+	else:
+		logger.warning("URL didn't match any specific mode; attempting all configured modes.")
+		available_modes = site_config.get("modes", {})
+		for mode_name in available_modes:
+			if mode_name == "video":
+				logger.info("Trying 'video' mode...")
+				success = process_video_page(url, site_config, general_config, overwrite, headers, re_nfo)
+				if success:
+					logger.info("Video mode succeeded.")
+					break
+			else:
+				logger.info(f"Attempting mode '{mode_name}'...")
+				identifier = url.split("/")[-1].split(".")[0]
+				current_page = start_page
+				mode_config = site_config["modes"][mode_name]
+				if mode_config.get("url_pattern"):
+					try:
+						constructed_url = construct_url(
+							site_config["base_url"],
+							mode_config["url_pattern"],
+							site_config,
+							mode=mode_name,
+							**{mode_name: identifier}
+						)
+						if current_page > 1 and mode_config.get("url_pattern_pages"):
+							constructed_url = construct_url(
+								site_config["base_url"],
+								mode_config["url_pattern_pages"],
+								site_config,
+								mode=mode_name,
+								**{mode_name: identifier, "page": current_page}
+							)
+							logger.info(f"Starting at custom page {current_page}: {constructed_url}")
+						success = False
+						while constructed_url:
+							next_page, new_page_number, page_success = process_list_page(
+								constructed_url, site_config, general_config, current_page,
+								mode_name, identifier, overwrite, headers, re_nfo
+							)
+							success = success or page_success
+							url = next_page
+							current_page = new_page_number
+							time.sleep(general_config["sleep"]["between_pages"])
+						if success:
+							logger.info(f"Mode '{mode_name}' succeeded.")
+							break
+					except Exception as e:
+						logger.debug(f"Mode '{mode_name}' failed: {e}")
+						continue
+		if not success:
+			logger.error(f"Failed to process URL '{url}' with any mode.")
+			process_fallback_download(url, general_config, overwrite)
+			
+
 def process_video_page(url, site_config, general_config, overwrite=False, headers=None, new_nfo=False, do_not_ignore=False):
-	"""Process a video page: fetch, extract, finalize metadata, and handle NFO/download."""
+	"""Process a video page and orchestrate download, NFO, and file management."""
 	global last_vpn_action_time
 	vpn_config = general_config.get('vpn', {})
 	if vpn_config.get('enabled', False):
@@ -265,20 +379,33 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
 		video_url = raw_data.get('download_url')
 	
 	video_url = video_url or original_url
-	logger.debug(f"Video URL: {video_url}")
 	video_title = raw_data.get('title', '').strip() or 'Untitled'
 	raw_data['Title'] = video_title
 	raw_data['URL'] = original_url
 	
-	if do_not_ignore==False and should_ignore_video(raw_data, general_config['ignored']):
+	if not do_not_ignore and should_ignore_video(raw_data, general_config['ignored']):
 		if driver:
 			driver.quit()
 		return True
 	
-	# Finalize metadata and handle NFO/download
-	final_metadata = finalize_metadata(raw_data, general_config)  # Pass general_config
-	logger.info(f"Final metadata for '{video_title}': {final_metadata}")
-	success = handle_nfo_and_download(video_url, final_metadata, site_config, general_config, overwrite, headers, new_nfo)
+	final_metadata = finalize_metadata(raw_data, general_config)
+	file_name = construct_filename(final_metadata['title'], site_config, general_config)
+	destination_config = general_config['download_destinations'][0]
+	
+	# Determine temporary or final path
+	if destination_config['type'] == 'smb':
+		temp_dir = destination_config.get('temporary_storage', os.path.join(tempfile.gettempdir(), 'smutscrape'))
+		os.makedirs(temp_dir, exist_ok=True)
+		destination_path = os.path.join(temp_dir, file_name)
+	else:
+		destination_path = os.path.join(destination_config['path'], file_name)
+	
+	# Execute steps
+	success = download_video(video_url, destination_path, site_config, general_config, headers, final_metadata, overwrite)
+	if success and general_config.get('make_nfo', False) and has_metadata_selectors(site_config):
+		generate_nfo(destination_path, final_metadata, overwrite or new_nfo)
+	if success and destination_config['type'] == 'smb':
+		manage_file(destination_path, destination_config, overwrite)
 	
 	if driver:
 		driver.quit()
@@ -1195,6 +1322,11 @@ def match_url_to_mode(url, site_config):
 	logger.debug(f"No mode matched for URL: {url}")
 	return None, None
 
+
+def get_available_modes(site_config):
+	"""Return a list of available scrape modes for a site config, excluding 'video'."""
+	return [m for m in site_config.get("modes", {}).keys() if m != "video"]
+
 def has_metadata_selectors(site_config, return_fields=False):
 	"""
 	Check if the site config has selectors for metadata fields beyond title and download_url.
@@ -1205,7 +1337,7 @@ def has_metadata_selectors(site_config, return_fields=False):
 	metadata_fields = [field for field in video_scraper.keys() if field not in excluded]
 	
 	if return_fields:
-		return ", ".join(sorted(metadata_fields)) if metadata_fields else "None"
+		return sorted(metadata_fields) if metadata_fields else []
 	return bool(metadata_fields)
 
 
@@ -1271,92 +1403,27 @@ def finalize_metadata(metadata, general_config):
 	return final_metadata
 
 
-def handle_nfo_and_download(video_url, final_metadata, site_config, general_config, overwrite=False, headers=None, new_nfo=False):
-	"""Handle NFO generation and video download."""
-	file_name = construct_filename(final_metadata['title'], site_config, general_config)
-	destination_config = general_config['download_destinations'][0]
-	overwrite = overwrite or site_config.get('overwrite', general_config.get('overwrite', False))
-	nfo_overwrite = overwrite or new_nfo
-	
-	# Setup paths
-	if destination_config['type'] == 'smb':
-		smb_destination_path = os.path.join(destination_config['path'], file_name)
-		smb_nfo_path = os.path.join(destination_config['path'], f"{file_name.rsplit('.', 1)[0]}.nfo")
-		temp_base = os.path.join(tempfile.gettempdir(), 'smutscrape')
-		temp_dir = destination_config.get('temporary_storage', temp_base)
-		os.makedirs(temp_dir, exist_ok=True)
-		destination_path = os.path.join(temp_dir, file_name)
-		temp_nfo_path = os.path.join(temp_dir, f"{file_name.rsplit('.', 1)[0]}.nfo")
-		video_exists = file_exists_on_smb(destination_config, smb_destination_path)
-		nfo_exists = file_exists_on_smb(destination_config, smb_nfo_path)
-	else:
-		destination_path = os.path.join(destination_config['path'], file_name)
-		nfo_path = f"{destination_path.rsplit('.', 1)[0]}.nfo"
-		video_exists = os.path.exists(destination_path)
-		nfo_exists = os.path.exists(nfo_path)
-	
-	temp_exists = os.path.exists(destination_path)
-	download_method = site_config['download'].get('method', 'curl')
-	origin_to_use = urllib.parse.urlparse(video_url).scheme + "://" + urllib.parse.urlparse(video_url).netloc
-	
-	make_nfo = general_config.get('make_nfo', False)
-	has_selectors = has_metadata_selectors(site_config)
-	
-	# Generate NFO
-	if make_nfo and has_selectors:
-		if destination_config['type'] == 'smb':
-			if nfo_overwrite or not nfo_exists:
-				generate_nfo_file(destination_path, final_metadata)
-				if os.path.exists(temp_nfo_path):
-					upload_to_smb(temp_nfo_path, smb_nfo_path, destination_config, nfo_overwrite)
-					os.remove(temp_nfo_path)
-					logger.success(f"{'Replaced' if nfo_exists else 'Uploaded'} NFO to {smb_nfo_path}")
-			else:
-				logger.debug(f"NFO exists at {smb_nfo_path}, skipping")
-		else:
-			if nfo_overwrite or not nfo_exists:
-				generate_nfo_file(destination_path, final_metadata)
-				if nfo_exists:
-					logger.success(f"Replaced NFO at {nfo_path}")
-			else:
-				logger.debug(f"NFO exists at {nfo_path}, skipping")
-	
-	# Handle download
-	if video_exists and not overwrite:
-		logger.info(f"File '{file_name}' exists at destination. Skipping download.")
-		return True
-	elif not overwrite and temp_exists:
-		video_info = get_video_metadata(destination_path)
-		if video_info:
-			logger.info(f"Valid video in temp: {file_name}. Uploading.")
-			if destination_config['type'] == 'smb':
-				upload_to_smb(destination_path, smb_destination_path, destination_config, overwrite)
-				os.remove(destination_path)
-			elif destination_config['type'] == 'local':
-				apply_permissions(destination_path, destination_config)
-			return True
-		else:
-			logger.warning(f"Invalid temp file: {destination_path}. Redownloading.")
-			os.remove(destination_path)
-	
-	logger.info(f"Downloading: {file_name}")
-	if download_file(video_url, destination_path, download_method, general_config, site_config, headers=headers, metadata=final_metadata, origin=origin_to_use, overwrite=overwrite):
-		if destination_config['type'] == 'smb':
-			upload_to_smb(destination_path, smb_destination_path, destination_config, overwrite)
-			os.remove(destination_path)
-		elif destination_config['type'] == 'local':
-			apply_permissions(destination_path, destination_config)
-		logger.success(f"Processed video: {file_name}")
-		return True
-	else:
-		logger.error(f"Download failed: {file_name}")
-		return False
+def generate_nfo(destination_path, metadata, overwrite=False):
+	"""Generate an NFO file alongside the video.
 
-def generate_nfo_file(video_path, metadata):
-	"""Generate NFO file from finalized metadata."""
-	nfo_path = f"{video_path.rsplit('.', 1)[0]}.nfo"
-	
+	Args:
+		destination_path (str): Path to the video file.
+		metadata (dict): Metadata to include in the NFO file.
+		overwrite (bool): If True, overwrite existing NFO file. Defaults to False.
+
+	Returns:
+		bool: True if NFO generation succeeded, False otherwise.
+	"""
+	# Compute NFO file path
+	nfo_path = f"{destination_path.rsplit('.', 1)[0]}.nfo"
+
+	# Check if NFO exists and respect overwrite flag
+	if os.path.exists(nfo_path) and not overwrite:
+		logger.debug(f"NFO exists at {nfo_path}. Skipping generation.")
+		return True
+
 	try:
+		# Write the NFO file
 		with open(nfo_path, 'w', encoding='utf-8') as f:
 			f.write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n')
 			f.write('<movie>\n')
@@ -1384,11 +1451,86 @@ def generate_nfo_file(video_path, metadata):
 			if 'description' in metadata and metadata['description']:
 				f.write(f"  <plot>{metadata['description']}</plot>\n")
 			f.write('</movie>\n')
-		logger.info(f"Generated NFO file: {nfo_path}")
+
+		# Log success
+		logger.success(f"{'Replaced' if os.path.exists(nfo_path) else 'Generated'} NFO at {nfo_path}")
 		return True
+
 	except Exception as e:
-		logger.error(f"Failed to generate NFO file {nfo_path}: {e}", exc_info=True)
-		raise
+		logger.error(f"Failed to generate NFO at {nfo_path}: {e}", exc_info=True)
+		return False
+
+
+def download_video(video_url, destination_path, site_config, general_config, headers=None, metadata=None, overwrite=False):
+	"""Download a video file to a temporary or final path."""
+	download_method = site_config.get('download', {}).get('method', 'curl')
+	origin = urllib.parse.urlparse(video_url).scheme + "://" + urllib.parse.urlparse(video_url).netloc
+	
+	if os.path.exists(destination_path) and not overwrite:
+		video_info = get_video_metadata(destination_path)
+		if video_info:
+			logger.info(f"Valid video exists at {destination_path}. Skipping download.")
+			return True
+		else:
+			logger.warning(f"Invalid video file at {destination_path}. Redownloading.")
+			os.remove(destination_path)
+	
+	logger.info(f"Downloading to {destination_path}")
+	success = download_file(
+		video_url, destination_path, download_method, general_config, site_config,
+		headers=headers, metadata=metadata, origin=origin, overwrite=overwrite
+	)
+	if success:
+		logger.success(f"Downloaded video to {destination_path}")
+	else:
+		logger.error(f"Failed to download video to {destination_path}")
+	return success
+
+
+def manage_file(destination_path, destination_config, overwrite=False):
+	"""Move or upload the video (and NFO) to the final destination."""
+	if destination_config['type'] == 'smb':
+		smb_path = os.path.join(destination_config['path'], os.path.basename(destination_path))
+		smb_nfo_path = os.path.join(destination_config['path'], f"{os.path.basename(destination_path).rsplit('.', 1)[0]}.nfo")
+		if not overwrite and file_exists_on_smb(destination_config, smb_path):
+			logger.info(f"File exists on SMB at {smb_path}. Skipping upload.")
+			return True
+		
+		# Upload video
+		upload_to_smb(destination_path, smb_path, destination_config, overwrite)
+		os.remove(destination_path)
+		
+		# Upload NFO if it exists
+		temp_nfo_path = f"{destination_path.rsplit('.', 1)[0]}.nfo"
+		if os.path.exists(temp_nfo_path):
+			upload_to_smb(temp_nfo_path, smb_nfo_path, destination_config, overwrite)
+			os.remove(temp_nfo_path)
+		
+		logger.success(f"Uploaded to SMB: {smb_path}")
+	else:  # Local destination
+		final_path = os.path.join(destination_config['path'], os.path.basename(destination_path))
+		os.makedirs(os.path.dirname(final_path), exist_ok=True)
+		if not overwrite and os.path.exists(final_path):
+			logger.info(f"File exists locally at {final_path}. Skipping move.")
+			return True
+		
+		shutil.move(destination_path, final_path)
+		apply_permissions(final_path, destination_config)
+		logger.success(f"Moved to local destination: {final_path}")
+	
+	return True
+
+
+
+def cleanup(general_config):
+	"""Clean up resources like Selenium driver."""
+	if 'selenium_driver' in general_config and general_config['selenium_driver']:
+		try:
+			general_config['selenium_driver'].quit()
+			logger.info("Selenium driver closed.")
+		except Exception as e:
+			logger.warning(f"Failed to close Selenium driver: {e}")
+	print()
 
 
 def get_terminal_width():
@@ -1397,107 +1539,279 @@ def get_terminal_width():
 	except OSError:
 		return 80
 
-def interpolate_color(start_rgb, end_rgb, steps, step):
-	r = int(start_rgb[0] + (end_rgb[0] - start_rgb[0]) * step / (steps - 1))
-	g = int(start_rgb[1] + (end_rgb[1] - start_rgb[1]) * step / (steps - 1))
-	b = int(start_rgb[2] + (end_rgb[2] - start_rgb[2]) * step / (steps - 1))
-	return (r, g, b)
 
-def load_ascii_art(script_dir, term_width):
-	logo_dir = os.path.join(script_dir, "logo")
+def generate_adaptive_gradient(num_lines):
+	"""Generate a gradient pair with intensity adapted to the number of lines."""
+	# Gradient pairs in reds, oranges, pinks, purples, and blues (darker, moodier shades)
+	base_gradients = [
+		((139, 0, 0), (255, 69, 0)),       # Dark Red to Dark Orange
+		((128, 0, 128), (199, 21, 133)),   # Dark Purple to Medium Violet Red
+		((65, 105, 225), (106, 90, 205)),  # Royal Blue to Slate Blue
+		((178, 34, 34), (147, 112, 219)),  # Firebrick to Medium Purple
+		((220, 20, 60), (138, 43, 226)),   # Crimson to Blue Violet
+		((255, 99, 71), (186, 85, 211)),   # Tomato to Medium Orchid
+	]
 	
-	if not os.path.exists(logo_dir):
-		logger.warning(f"Logo directory '{logo_dir}' not found.")
-		return None
+	# Choose a base gradient
+	start_rgb, end_rgb = random.choice(base_gradients)
 	
-	logo_files = [f for f in os.listdir(logo_dir) if f.endswith(".txt") and f[:-4].isdigit()]
-	if not logo_files:
-		logger.warning(f"No valid ASCII art files in '{logo_dir}'.")
-		return None
+	# Convert to HSV for easier manipulation
+	start_hsv = rgb_to_hsv(*start_rgb)
+	end_hsv = rgb_to_hsv(*end_rgb)
 	
-	widths = [int(f[:-4]) for f in logo_files]
-	widths.sort()
-	suitable_width = max((w for w in widths if w <= term_width), default=None)
-	if suitable_width is None:
-		logger.debug(f"No ASCII art fits width {term_width}.")
-		return None
+	# Calculate how much to scale the gradient based on line count
+	if num_lines <= 3:
+		# Scale down the hue difference for short ASCII art
+		hue_diff = (end_hsv[0] - start_hsv[0]) % 360
+		if hue_diff > 180:
+			hue_diff = 360 - hue_diff
+		
+		# Reduce the hue difference based on line count
+		scale_factor = 0.2 + (num_lines / 10)  # 0.3 for 1 line, 0.4 for 2 lines, 0.5 for 3 lines
+		new_hue_diff = hue_diff * scale_factor
+		
+		# Calculate new end hue
+		new_end_hue = (start_hsv[0] + (new_hue_diff if hue_diff < 180 else -new_hue_diff)) % 360
+		
+		# Create new end color with scaled hue but original saturation and value
+		new_end_hsv = (new_end_hue, end_hsv[1], end_hsv[2])
+		new_end_rgb = hsv_to_rgb(*new_end_hsv)
+		
+		return start_rgb, new_end_rgb
 	
-	art_file = os.path.join(logo_dir, f"{suitable_width}.txt")
-	try:
-		with open(art_file, "r", encoding="utf-8") as f:
-			# Preserve all spaces, only filter truly empty lines
-			lines = [line for line in f.read().splitlines() if line.strip()]
-		
-		if not lines:
-			return None
-		
-		# Find the longest line to determine art width
-		art_width = max(len(line) for line in lines)
-		# Calculate left padding to center the entire block
-		left_padding = (term_width - art_width) // 2
-		if left_padding < 0:
-			left_padding = 0  # Art too wide, align left
-		
-		# Pad each line to match the longest, then add left padding
-		padded_lines = [line + " " * (art_width - len(line)) for line in lines]
-		centered_lines = [" " * left_padding + line for line in padded_lines]
-		
-		# Apply gradient
-		start_rgb = (255, 105, 180)  # Pink
-		end_rgb = (255, 165, 0)      # Orange
-		steps = len(lines)
-		
-		for i, line in enumerate(centered_lines):
-			rgb = interpolate_color(start_rgb, end_rgb, steps, i)
-			style = Style(color=f"rgb({rgb[0]},{rgb[1]},{rgb[2]})", bold=True)
-			console.print(line, style=style, justify="left", overflow="crop", no_wrap=True)
-		return True
-	except Exception as e:
-		logger.error(f"Failed to load ASCII art from '{art_file}': {e}")
-		return None
+	# For medium ASCII art (4-7 lines), use a moderate gradient
+	elif num_lines <= 7:
+		return start_rgb, end_rgb
+	
+	# For large ASCII art (8+ lines), use full gradient
+	else:
+		return start_rgb, end_rgb
 
-def find_site_config(site_input):
+def color_distance(color1, color2):
+	"""Calculate perceptual distance between two RGB colors using a simplified CIEDE2000 approach."""
+	# Convert to HSV for more perceptual measurement
+	hsv1 = rgb_to_hsv(*color1)
+	hsv2 = rgb_to_hsv(*color2)
+	
+	# Calculate hue distance (in degrees, accounting for wrap-around)
+	hue_dist = min(abs(hsv1[0] - hsv2[0]), 360 - abs(hsv1[0] - hsv2[0])) / 180.0
+	
+	# Calculate saturation and value distances
+	sat_dist = abs(hsv1[1] - hsv2[1])
+	val_dist = abs(hsv1[2] - hsv2[2])
+	
+	# Weighted combination (hue changes are more noticeable)
+	# Scale is 0-1 where 1 is maximum possible distance
+	return 0.6 * hue_dist + 0.2 * sat_dist + 0.2 * val_dist
+	
+def hsv_to_rgb(h, s, v):
+	"""Convert HSV color to RGB color."""
+	if s == 0.0:
+		return int(v * 255), int(v * 255), int(v * 255)
+	
+	i = int(h * 6)
+	f = (h * 6) - i
+	p = v * (1 - s)
+	q = v * (1 - s * f)
+	t = v * (1 - s * (1 - f))
+	
+	i %= 6
+	
+	if i == 0:
+		r, g, b = v, t, p
+	elif i == 1:
+		r, g, b = q, v, p
+	elif i == 2:
+		r, g, b = p, v, t
+	elif i == 3:
+		r, g, b = p, q, v
+	elif i == 4:
+		r, g, b = t, p, v
+	else:
+		r, g, b = v, p, q
+	
+	return int(r * 255), int(g * 255), int(b * 255)
+
+def rgb_to_hsv(r, g, b):
+	"""Convert RGB color to HSV color."""
+	r, g, b = r/255.0, g/255.0, b/255.0
+	mx = max(r, g, b)
+	mn = min(r, g, b)
+	df = mx - mn
+	
+	if mx == mn:
+		h = 0
+	elif mx == r:
+		h = (60 * ((g-b)/df) + 360) % 360
+	elif mx == g:
+		h = (60 * ((b-r)/df) + 120) % 360
+	elif mx == b:
+		h = (60 * ((r-g)/df) + 240) % 360
+		
+	s = 0 if mx == 0 else df/mx
+	v = mx
+	
+	return h, s, v
+
+def interpolate_color(start_rgb, end_rgb, steps, current_step):
+	"""Interpolate between two RGB colors."""
+	r = start_rgb[0] + (end_rgb[0] - start_rgb[0]) * current_step / (steps - 1) if steps > 1 else start_rgb[0]
+	g = start_rgb[1] + (end_rgb[1] - start_rgb[1]) * current_step / (steps - 1) if steps > 1 else start_rgb[1]
+	b = start_rgb[2] + (end_rgb[2] - start_rgb[2]) * current_step / (steps - 1) if steps > 1 else start_rgb[2]
+	return int(r), int(g), int(b)
+	
+
+
+def render_ascii(input_text, general_config, term_width, font=None):
+	"""Render ASCII art for the given input text using the art library with a specified or random font and gradient.
+
+	Args:
+		input_text (str): The text to render as ASCII art.
+		general_config (dict): Configuration dictionary containing a list of fonts.
+		term_width (int): The width of the terminal in characters.
+		font (str, optional): Specific font to use. If None, a random font is selected from the config.
+
+	Returns:
+		bool: True if rendering succeeded, False otherwise.
 	"""
-	Find a site config by matching site_input against shortcode, name, or domain (case-insensitive).
-	Returns the config dict or None if no match.
-	"""
-	site_input_lower = site_input.lower()
-	for config_file in os.listdir(CONFIG_DIR):
-		if config_file.endswith(".yaml"):
+	# Calculate max width (90% of terminal width)
+	max_width = int(term_width * 0.9)
+	logger.debug(f"Terminal width: {term_width}, Max width (90%): {max_width}")
+
+	# If a specific font is provided, try to use it
+	selected_font = None
+	art_width = None
+	if font:
+		try:
+			# Test if the font is valid by rendering the text
+			art_text = art.text2art(input_text, font=font)
+			art_text = art_text.replace("\t", "    ")
+			lines = [line.rstrip() for line in art_text.splitlines() if line.strip()]
+			if lines:
+				max_line_width = max(len(line) for line in lines)
+				logger.debug(f"Specified font '{font}': Unbounded width = {max_line_width}")
+				if max_line_width <= max_width:
+					selected_font = font
+					art_width = max_line_width
+					logger.debug(f"Specified font '{font}' fits within max_width {max_width}. Using it.")
+				else:
+					logger.debug(f"Specified font '{font}' width {max_line_width} exceeds max_width {max_width}. Falling back to random selection.")
+			else:
+				logger.debug(f"Specified font '{font}': No valid lines rendered. Falling back to random selection.")
+		except Exception as e:
+			logger.debug(f"Specified font '{font}' rendering failed: {e}. Falling back to random selection.")
+
+	# If no valid font was specified or the specified font doesn't fit, select a random font
+	if not selected_font:
+		fonts = general_config.get("fonts", [])
+		if not fonts:
+			logger.warning("No fonts specified in general_config['fonts']. Falling back to default.")
+			fonts = ["standard"]
+
+		# Sample all fonts to get their unbounded width
+		font_widths = {}
+		for font in fonts:
 			try:
-				with open(os.path.join(CONFIG_DIR, config_file), 'r') as f:
-					site_config = yaml.safe_load(f)
-				# Check shortcode, name, domain
-				if site_config.get('shortcode', '').lower() == site_input_lower:
-					logger.debug(f"Matched '{site_input}' to shortcode '{site_config['shortcode']}' in '{config_file}'")
-					return site_config
-				if site_config.get('name', '').lower() == site_input_lower:
-					logger.debug(f"Matched '{site_input}' to name '{site_config['name']}' in '{config_file}'")
-					return site_config
-				if site_config.get('domain', '').lower() == site_input_lower:
-					logger.debug(f"Matched '{site_input}' to domain '{site_config['domain']}' in '{config_file}'")
-					return site_config
+				art_text = art.text2art(input_text, font=font)
+				art_text = art_text.replace("\t", "    ")
+				lines = [line.rstrip() for line in art_text.splitlines() if line.strip()]
+				if lines:
+					max_line_width = max(len(line) for line in lines)
+					font_widths[font] = max_line_width
+					logger.debug(f"Font '{font}': Unbounded width = {max_line_width}")
+				else:
+					logger.debug(f"Font '{font}': No valid lines rendered")
 			except Exception as e:
-				logger.warning(f"Failed to load config '{config_file}': {e}")
-	logger.error(f"No site config found matching '{site_input}' (shortcode, name, or domain)")
-	return None
+				logger.debug(f"Font '{font}' rendering failed: {e}, skipping.")
+				continue
+
+		if not font_widths:
+			logger.warning("No valid fonts found. Using fallback.")
+			selected_font = "standard"
+			art_width = len(input_text)
+		else:
+			# Filter fonts that fit within max_width
+			qualifying_fonts = [(font, width) for font, width in font_widths.items() if width <= max_width]
+			logger.debug(f"Qualifying fonts (width <= {max_width}): {qualifying_fonts}")
+			
+			if not qualifying_fonts:
+				logger.debug(f"No fonts fit within {max_width} characters. Using narrowest available.")
+				qualifying_fonts = sorted(font_widths.items(), key=lambda x: x[1])
+				selected_font, art_width = qualifying_fonts[0]
+				logger.debug(f"Narrowest font selected: '{selected_font}' with width {art_width}")
+			else:
+				# Sort by width descending and take top 3
+				sorted_fonts = sorted(qualifying_fonts, key=lambda x: x[1], reverse=True)
+				top_fonts = sorted_fonts[:min(3, len(sorted_fonts))]
+				logger.debug(f"Top qualifying fonts: {top_fonts}")
+				selected_font, art_width = random.choice(top_fonts)
+				logger.debug(f"Selected font: '{selected_font}' with width {art_width}")
+
+	# Render final art with the selected font
+	try:
+		art_text = art.text2art(input_text, font=selected_font)
+		art_text = art_text.replace("\t", "    ")
+		lines = [line.rstrip() for line in art_text.splitlines() if line.strip()]
+		logger.debug(f"Raw lines before trimming: {[line for line in lines]}")
+	except Exception as e:
+		logger.error(f"Failed to render ASCII art with font '{selected_font}': {e}")
+		return False
+	
+	# Trim each line to max_width
+	final_lines = []
+	for line in lines:
+		line_width = len(line)
+		if line_width > max_width:
+			logger.debug(f"Line '{line}' width {line_width} exceeds max_width {max_width}. Trimming.")
+			final_lines.append(line[:max_width])
+		else:
+			final_lines.append(line)
+		logger.debug(f"Line width after trimming: {len(final_lines[-1])}, Line: '{final_lines[-1]}'")
+	art_width = max(len(line) for line in final_lines) if final_lines else len(input_text)
+	logger.debug(f"Adjusted art_width: {art_width}")
+
+	# Pad lines to art_width for consistent centering
+	final_lines = [line.ljust(art_width) for line in final_lines]
+
+	# Center the art
+	left_padding = (term_width - art_width) // 2 if art_width < term_width else 0
+	centered_lines = [" " * left_padding + line for line in final_lines]
+	logger.debug(f"Art centered with padding: {left_padding}, Total lines: {len(centered_lines)}, Final width: {art_width}")
+
+	# Apply adaptive gradient
+	start_rgb, end_rgb = generate_adaptive_gradient(len(centered_lines))
+	steps = len(centered_lines)
+
+	for i, line in enumerate(centered_lines):
+		if steps > 1:
+			rgb = interpolate_color(start_rgb, end_rgb, steps, i)
+		else:
+			rgb = start_rgb
+		style = Style(color=f"rgb({rgb[0]},{rgb[1]},{rgb[2]})", bold=True)
+		text = Text(line, style=style)
+		console.print(text, justify="left", overflow="crop", no_wrap=True)
+
+	return True
 
 def display_options():
+
 	console.print("[bold][yellow]Options:[/yellow][/bold]")
-	console.print("  [magenta]--overwrite[/magenta]      # Replace existing files with same name at download destination")
-	console.print("  [magenta]--new_nfo[/magenta]        # Update the metadata in existing .nfo files")
-	console.print("  [magenta]--page {number}[/magenta]  # Scrape results starting on provided page number")
-	console.print("  [magenta]--debug[/magenta]          # Enable detailed debug logging")
+	console.print("  [magenta]-o[/magenta], [magenta]--overwrite[/magenta]        # Replace files with same name at download destination")
+	console.print("  [magenta]-n[/magenta], [magenta]--re_nfo[/magenta]           # Replace metadata in existing .nfo files")
+	console.print("  [magenta]-p[/magenta], [magenta]--page[/magenta] [yellow]{ page }[/yellow]    # Start scraping on given page of results")
+	console.print("  [magenta]-t[/magenta], [magenta]--stable[/magenta] [yellow]{ path }[/yellow]  # Output table of current site configurations")
+	console.print("  [magenta]-d[/magenta], [magenta]--debug[/magenta]            # Enable detailed debug logging")
+	console.print("  [magenta]-h[/magenta], [magenta]--help[/magenta]             # Show help submenu")
 
 def display_global_examples():
 	console.print("[bold]Randomly Generated Examples:[/bold]")
 	
 	# Collect all site/mode/example combos
 	all_examples = []
-	for site_config_file in os.listdir(CONFIG_DIR):
+	for site_config_file in os.listdir(SITE_DIR):
 		if site_config_file.endswith(".yaml"):
 			try:
-				with open(os.path.join(CONFIG_DIR, site_config_file), 'r') as f:
+				with open(os.path.join(SITE_DIR, site_config_file), 'r') as f:
 					site_config = yaml.safe_load(f)
 				site_name = site_config.get("name", "Unknown")
 				shortcode = site_config.get("shortcode", "??")
@@ -1519,56 +1833,80 @@ def display_global_examples():
 	table.add_column("[yellow]Effect[/yellow]", justify="left")
 	
 	for site_name, shortcode, mode, tip, example in selected_examples:
-		cmd = f"[magenta]scrape[/magenta] [yellow]{shortcode}[/yellow] [green]{mode}[/green] [blue]\"{example}\"[/blue]"
-		effect = f"{tip} [bold][blue]\"{example}\"[/blue][/bold] on [bold][yellow]{site_name}[/yellow][/bold]"
+		cmd = f"[red]scrape[/red] [magenta]{shortcode}[/magenta] [yellow]{mode}[/yellow] [blue]\"{example}\"[/blue]"
+		effect = f"{tip} [blue]\"{example}\"[/blue] on [magenta]{site_name}[/magenta]"
 		table.add_row(cmd, effect)
 	
 	console.print(table)
 	console.print()
 
 def display_site_details(site_config, term_width):
-	"""Display a detailed readout for a specific site config."""
+	"""Display a detailed readout for a specific site config with domain-based ASCII art."""
 	site_name = site_config.get("name", "Unknown")
 	shortcode = site_config.get("shortcode", "??")
-	domain = site_config.get("domain", "unknown domain")
+	domain = site_config.get("domain", "n/a")
 	base_url = site_config.get("base_url", "https://example.com")
 	video_uri = site_config.get("modes", {}).get("video", {}).get("url_pattern", "/watch/0123456.html")
 	download_method = site_config.get("download", {}).get("method", "N/A")
 	use_selenium = site_config.get("use_selenium", False)
 	name_suffix = site_config.get("name_suffix", None)
 	metadata = has_metadata_selectors(site_config, return_fields=True)
+	site_note = site_config.get("note", None)
 	
-	# Combine counter and URL into a single left-aligned line with "┈" padding
-	site_header = f"{site_name} ".ljust(term_width, "┈")
+	# Use domain ASCII art instead of logo
+	general_config = load_configuration('general')
+	console.print("═" * term_width, style=Style(color="yellow"))
+	console.print()
+	render_ascii(site_name, general_config, term_width)
+	console.print()
+	
+	# Rest of the function remains the same
+	site_header = f"{domain} ".ljust(term_width, "┈")
 	console.print(f"[yellow][bold]{site_header}[/bold][/yellow]")
 	console.print()
-	console.print(f"   Domain: [bold]{domain}[/bold]")
-	console.print(f"Shortcode: [bold]{shortcode}[/bold]")
-	console.print(f"   Method: [bold]{download_method}[/bold]")
-	console.print(f" Metadata: {metadata}")
+	
+	label_width = 12
+	value_indent = " " * (label_width + 1)
+	
+	def print_detail(label, value):
+		label_padded = f"{label:>{label_width}}"
+		lines = []
+		for line in str(value).split("\n"):
+			lines.extend(textwrap.wrap(line, width=term_width - label_width - 1))
+		console.print(f"{label_padded} {lines[0]}")
+		for line in lines[1:]:
+			console.print(f"{value_indent}{line}")
+	
+	print_detail("Domain:", f"[bold]{domain}[/bold]")
+	print_detail("Shortcode:", f"[bold]{shortcode}[/bold]")
+	print_detail("Method:", f"[bold]{download_method}[/bold]")
+	print_detail("Metadata:", metadata)
+	
+	if site_note:
+		print_detail("Note:", site_note)
 	if name_suffix:
-		console.print(f"     Note: Filenames are appended with \"{name_suffix}\".")
+		print_detail("Note:", f"Filenames are appended with [bold]\"{name_suffix}\"[/bold].")
 	if use_selenium:
-		console.print(f"     Note: [yellow][bold]selenium[/bold][/yellow] and [yellow][bold]chromedriver[/bold][/yellow] are required to scrape this site.")
-		console.print(f"           See: https://github.com/io-flux/smutscrape#selenium--chromedriver-%EF%B8%8F%EF%B8%8F")
+		print_detail("Note:", "[yellow][bold]selenium[/bold][/yellow] and [yellow][bold]chromedriver[/bold][/yellow] are required to scrape this site.")
+		print_detail("", "See: https://github.com/io-flux/smutscrape#selenium--chromedriver-%EF%B8%8F%EF%B8%8F")
+	
 	console.print()
 	console.print(f"    Usage: [magenta]scrape {shortcode} {{mode}} {{query}}[/magenta]")
 	console.print(f"           [magenta]scrape {base_url}{video_uri}[/magenta]")
 	console.print()
 	
-	# Modes Table
 	modes = site_config.get("modes", {})
 	if modes:
 		console.print("[yellow][bold]Available Modes:[/bold][/yellow]")
 		mode_table = Table(show_edge=True, expand=True, width=term_width)
-		mode_table.add_column("[bold]Mode[/bold]", width=7)
+		mode_table.add_column("[bold]Mode[/bold]", width=15)
 		mode_table.add_column("[bold]Purpose[/bold]", width=(term_width//10)*4)
 		mode_table.add_column("[bold]Example[/bold]", width=term_width//2)
 		
 		for mode, config in modes.items():
 			tip = config.get("tip", "No description available")
 			examples = config.get("examples", ["N/A"])
-			example = random.choice(examples)  # Pick a random example
+			example = random.choice(examples)
 			example_cmd = f"[magenta]scrape {shortcode} {mode} \"{example}\"[/magenta]"
 			mode_table.add_row(mode, tip, example_cmd)
 		console.print(mode_table)
@@ -1576,30 +1914,150 @@ def display_site_details(site_config, term_width):
 	
 	display_options()
 
+
+def generate_global_table(term_width, output_path=None):
+	"""Generate the global sites table, optionally saving as Markdown to output_path."""
+	# Build the table
+	table = Table(show_edge=True, expand=True, width=term_width)
+	table.add_column("[bold][magenta]Site[/magenta][/bold]", width=term_width//5)
+	table.add_column("[bold][yellow]Scrape Modes[/yellow][/bold]", width=(term_width//5)*2)
+	table.add_column("[bold][green]Available Metadata[/green][/bold]", width=(term_width//5)*2)
+	
+	supported_sites = []
+	for site_config_file in os.listdir(SITE_DIR):
+		if site_config_file.endswith(".yaml"):
+			try:
+				with open(os.path.join(SITE_DIR, site_config_file), 'r') as f:
+					site_config = yaml.safe_load(f)
+				site_name = site_config.get("name", "Unknown")
+				site_code = site_config.get("shortcode", "??")
+				site_display = f"[magenta][bold]{site_code}[/bold][/magenta] · [magenta]{site_name}[/magenta]"
+				modes = get_available_modes(site_config)
+				modes_display = " · ".join(f"[yellow][bold]{mode}[/bold][/yellow]" for mode in modes) if modes else "[gray]None[/gray]"
+				metadata = has_metadata_selectors(site_config, return_fields=True)
+				metadata_display = " · ".join(f"[green][bold]{field}[/bold][/green]" for field in metadata) if metadata else "None"
+				supported_sites.append((site_display, modes_display, metadata_display))
+			except Exception as e:
+				logger.warning(f"Failed to load config '{site_config_file}': {e}")
+	
+	if supported_sites:
+		for site_display, modes_display, metadata_display in sorted(supported_sites):
+			table.add_row(site_display, modes_display, metadata_display)
+	else:
+		logger.warning("No valid site configs found in 'configs' folder.")
+		table.add_row("No sites loaded", "", "")
+	
+	if output_path:
+		# Generate Markdown
+		md_lines = ["# Supported Sites\n", "| Site (shortcode) | Scrape Modes | Available Metadata |\n", "|------------------|--------------|--------------------|\n"]
+		for site_display, modes_display, metadata_display in sorted(supported_sites):
+			# Strip rich markup for Markdown
+			site_display_clean = re.sub(r'\[.*?\]', '', site_display).replace(' · ', ' ')
+			modes_display_clean = re.sub(r'\[.*?\]', '', modes_display)
+			metadata_display_clean = re.sub(r'\[.*?\]', '', metadata_display)
+			md_lines.append(f"| {site_display_clean} | {modes_display_clean} | {metadata_display_clean} |\n")
+		try:
+			with open(output_path, 'w', encoding='utf-8') as f:
+				f.writelines(md_lines)
+			logger.info(f"Saved site table to '{output_path}' in Markdown format.")
+		except Exception as e:
+			logger.error(f"Failed to write Markdown table to '{output_path}': {e}")
+		return None
+	
+	return table
+
+
+def display_usage(term_width):
+	console.print("[bold]Usage:[/bold] [red]scrape[/red] [magenta]{site}[/magenta] [mode]{mode}[/mode] {query}")
+	console.print("       scrape {url}")
+	console.print()
+	console.print("[yellow][bold]Supported Sites[/bold] (loaded from ./configs/):[/yellow]")
+	console.print()
+	global_table = generate_global_table(term_width)  # Get the table object
+	console.print(global_table)  # Print it once with full color control
+	console.print()
+	display_global_examples()
+	display_options()
+	
+
+def handle_single_arg(arg, general_config, args, term_width):
+	"""Handle a single argument: either a site identifier or a URL."""
+	if arg.startswith(("http://", "https://")):
+		site_config = None
+		for config_file in os.listdir(SITE_DIR):
+			config = load_configuration('site', os.path.splitext(config_file)[0])
+			if config and urlparse(arg).netloc.lower().replace("www.", "") == config.get('domain', '').lower():
+				site_config = config
+				break
+		if site_config:
+			console.print("═" * term_width, style=Style(color="yellow"))
+			console.print()
+			render_ascii(site_config.get("domain", "unknown"), general_config, term_width)
+			console.print()
+			process_url(arg, site_config, general_config, args.overwrite, args.re_nfo, args.page)
+		else:
+			logger.warning(f"No site config matched for URL '{arg}'. Falling back to yt-dlp.")
+			process_fallback_download(arg, general_config, args.overwrite)
+	else:
+		site_config = load_configuration('site', arg)
+		if site_config:
+			display_site_details(site_config, term_width)
+		sys.exit(0 if site_config else 1)
+		
+
+def handle_multi_arg(args, general_config, args_obj):
+	"""Handle multiple arguments: site, mode, and query."""
+	site_config = load_configuration('site', args[0])
+	if not site_config:
+		logger.error(f"Site '{args[0]}' not found in configs")
+		sys.exit(1)
+	
+	mode, identifier = args[1], " ".join(args[2:])
+	if mode not in site_config['modes']:
+		logger.error(f"Unsupported mode '{mode}' for site '{args[0]}'")
+		sys.exit(1)
+	
+	mode_config = site_config['modes'][mode]
+	current_page = args_obj.page
+	url = construct_url(
+		site_config['base_url'],
+		mode_config.get('url_pattern_pages', mode_config['url_pattern']) if current_page > 1 else mode_config['url_pattern'],
+		site_config, mode=mode, **{mode: identifier, 'page': current_page if current_page > 1 else 1}
+	)
+	
+	# Display domain ASCII art before processing
+	term_width = get_terminal_width()
+	console.print("═" * term_width, style=Style(color="yellow"))
+	console.print()
+	render_ascii(site_config.get("domain", "unknown"), general_config, term_width)
+	console.print()
+	
+	handle_vpn(general_config, 'start')
+	if mode == 'video':
+		process_video_page(url, site_config, general_config, args_obj.overwrite, general_config.get('headers', {}), args_obj.re_nfo)
+	else:
+		while url:
+			next_page, new_page_number, _ = process_list_page(
+				url, site_config, general_config, current_page, mode, identifier,
+				args_obj.overwrite, general_config.get('headers', {}), args_obj.re_nfo
+			)
+			url = next_page
+			current_page = new_page_number
+			time.sleep(general_config['sleep']['between_pages'])
+
 def main():
 	parser = argparse.ArgumentParser(
-		description="Smutscrape: Scrape and download adult content from various sites with metadata saved in .nfo files."
+		description="Smutscrape: Scrape and download adult content with metadata in .nfo files."
 	)
-	parser.add_argument("args", nargs="*", help="Site shortcode, name, or domain followed by mode and query (e.g., 'ph search \"big boobs\"'), or a direct URL.")
-	parser.add_argument("--debug", action="store_true", help="Enable detailed debug logging.")
-	parser.add_argument("--overwrite", action="store_true", help="Overwrite existing video files.")
-	parser.add_argument("--new_nfo", action="store_true", help="Regenerate .nfo files even if they exist.")
-	parser.add_argument("--do_not_ignore", action="store_true", help="Override the ignore list in general config.yaml")
-	parser.add_argument("--page", type=int, default=1, help="Start scraping from this page number.")
+	parser.add_argument("args", nargs="*", help="Site shortcode/mode/query or URL.")
+	parser.add_argument("-d", "--debug", action="store_true", help="Enable detailed debug logging.")
+	parser.add_argument("-o", "--overwrite", action="store_true", help="Overwrite existing video files.")
+	parser.add_argument("-n", "--re_nfo", action="store_true", help="Regenerate .nfo files even if they exist.")
+	parser.add_argument("-p", "--page", type=int, default=1, help="Start scraping from this page number.")
+	parser.add_argument("-t", "--stable", type=str, help="Output site table in Markdown and exit.")
 	args = parser.parse_args()
 	
 	term_width = get_terminal_width()
-	
-	# Display graphic header
-	top_bar_text = " welcome to "
-	top_bar = top_bar_text.center(term_width, "═")
-	console.print(top_bar, style=Style(color="yellow"))
-	console.print()
-	ascii_art = load_ascii_art(SCRIPT_DIR, term_width)
-	if not ascii_art:
-		fallback_text = "S M U T S C R A P E"
-		console.print(fallback_text.center(term_width), style=Style(color="magenta", bold=True))
-	console.print()
 	
 	# Logging setup
 	log_level = "DEBUG" if args.debug else "INFO"
@@ -1619,242 +2077,32 @@ def main():
 		colorize=True,
 		filter=lambda record: record["level"].name != "DEBUG"
 	)
-	general_config = load_config(os.path.join(SCRIPT_DIR, "config.yaml"))
 	
-	if not args.args:  # No arguments, show full usage
-		console.print("Smutscrape helps you get the smut you desire without opening a browser.")
-		console.print()
-		console.print("[bold]Usage:[/bold] [magenta]scrape[/magenta] [yellow]{site}[/yellow] [green]{mode}[/green] [blue]{query}[/blue]  or  [magenta]scrape[/magenta] {url}")
-		console.print()
-		console.print(f"[bold]Supported Sites[/bold] (loaded from {CONFIG_DIR}:")
-		if not os.path.exists(CONFIG_DIR):
-			logger.error(f"Configs directory '{CONFIG_DIR}' not found.")
-			sys.exit(1)
-		
-		table = Table(show_edge=True, expand=True, width=term_width)
-		table.add_column("[bold][yellow]Site (shortcode)[/yellow][/bold]", width=term_width//5)
-		table.add_column("[bold][green]Scrape Modes[/green][/bold]", width=(term_width//5)*2)
-		table.add_column("[bold]Available Metadata[/bold]", width=(term_width//5)*2)
-		
-		supported_sites = []
-		for site_config_file in os.listdir(CONFIG_DIR):
-			if site_config_file.endswith(".yaml"):
-				try:
-					with open(os.path.join(CONFIG_DIR, site_config_file), 'r') as f:
-						site_config = yaml.safe_load(f)
-					site_name = site_config.get("name", "Unknown")
-					site_code = site_config.get("shortcode", "??")
-					site_display = f"{site_name} ({site_code})"
-					modes = [m for m in site_config.get("modes", {}).keys() if m != "video"]
-					modes_display = ", ".join(modes) if modes else "None"
-					metadata = has_metadata_selectors(site_config, return_fields=True)
-					supported_sites.append((site_display, modes_display, metadata))
-				except Exception as e:
-					logger.warning(f"Failed to load config '{site_config_file}': {e}")
-		
-		if supported_sites:
-			for site_display, modes_display, metadata in sorted(supported_sites):
-				table.add_row(site_display, modes_display, metadata)
-		else:
-			logger.warning(f"No valid site configs found in {CONFIG_DIR}")
-			table.add_row("No sites loaded", "", "")
-		
-		console.print(table)
-		console.print()
-		console.print()
-		display_global_examples()
-		display_options()
+	general_config = load_configuration('general')
+	render_ascii("Smutscrape", general_config, term_width)
+	
+	if args.stable:
+		generate_global_table(term_width, output_path=args.stable)
+		sys.exit(0)
+	
+	if not args.args:
+		display_usage(term_width)
 		sys.exit(0)
 	
 	try:
-		if len(args.args) == 1:  # Single arg: site or URL
-			if args.args[0].startswith(("http://", "https://")):  # URL case
-				url = args.args[0]
-				logger.debug(f"Looking for config matches for {url}...")
-				matched_site_config = None
-				for site_config_file in os.listdir(CONFIG_DIR):
-					if site_config_file.endswith(".yaml"):
-						with open(os.path.join(CONFIG_DIR, site_config_file), 'r') as f:
-							site_config = yaml.safe_load(f)
-						parsed_url = urlparse(url)
-						url_domain = parsed_url.netloc.lower().replace("www.", "")
-						config_domain = site_config.get("domain", "").lower()
-						if url_domain == config_domain:
-							matched_site_config = site_config
-							break
-				
-				if matched_site_config:
-					headers = general_config.get("headers", {}).copy()
-					headers["User-Agent"] = random.choice(general_config["user_agents"])
-					mode, scraper = match_url_to_mode(url, matched_site_config)
-					
-					if mode:
-						logger.info(f"Matched URL to mode '{mode}' with scraper '{scraper}'")
-						if mode == "video":
-							success = process_video_page(url, matched_site_config, general_config, args.overwrite, headers, args.new_nfo, True)
-						else:
-							identifier = url.split("/")[-1].split(".")[0]
-							current_page = args.page
-							mode_config = matched_site_config["modes"][mode]
-							if current_page > 1 and mode_config.get("url_pattern_pages"):
-								url = construct_url(
-									matched_site_config["base_url"],
-									mode_config["url_pattern_pages"],
-									matched_site_config,
-									mode=mode,
-									**{mode: identifier, "page": current_page}
-								)
-								logger.info(f"Starting at custom page {current_page}: {url}")
-							success = False
-							while url:
-								next_page, new_page_number, page_success = process_list_page(
-									url, matched_site_config, general_config, current_page,
-									mode, identifier, args.overwrite, headers, args.new_nfo
-								)
-								success = success or page_success
-								if next_page is None:
-									break
-								url = next_page
-								current_page = new_page_number
-								time.sleep(general_config["sleep"]["between_pages"])
-					else:
-						logger.warning("URL didn't match any specific mode; attempting all configured modes.")
-						available_modes = matched_site_config.get("modes", {})
-						attempted_modes = []
-						
-						for mode_name in available_modes:
-							if mode_name == "video":
-								logger.info("Trying 'video' mode...")
-								success = process_video_page(url, matched_site_config, general_config, args.overwrite, headers, True)
-								attempted_modes.append("video")
-								if success:
-									logger.info("Video mode succeeded; stopping mode attempts.")
-									break
-							else:
-								logger.info(f"Attempting mode '{mode_name}'...")
-								attempted_modes.append(mode_name)
-								identifier = url.split("/")[-1].split(".")[0]
-								current_page = args.page
-								mode_config = matched_site_config["modes"][mode_name]
-								
-								if mode_config.get("url_pattern"):
-									try:
-										constructed_url = construct_url(
-											matched_site_config["base_url"],
-											mode_config["url_pattern"],
-											matched_site_config,
-											mode=mode_name,
-											**{mode_name: identifier}
-										)
-										if current_page > 1 and mode_config.get("url_pattern_pages"):
-											constructed_url = construct_url(
-												matched_site_config["base_url"],
-												mode_config["url_pattern_pages"],
-												matched_site_config,
-												mode=mode_name,
-												**{mode_name: identifier, "page": current_page}
-											)
-											logger.info(f"Starting at custom page {current_page}: {constructed_url}")
-										else:
-											logger.info(f"Attempting: {constructed_url}")
-										
-										success = False
-										while constructed_url:
-											next_page, new_page_number, page_success = process_list_page(
-												constructed_url, matched_site_config, general_config, current_page,
-												mode_name, identifier, args.overwrite, headers, args.new_nfo
-											)
-											success = success or page_success
-											if next_page is None:
-												break
-											constructed_url = next_page
-											current_page = new_page_number
-											time.sleep(general_config["sleep"]["between_pages"])
-										if success:
-											logger.info(f"Mode '{mode_name}' succeeded; stopping mode attempts.")
-											break
-									except Exception as e:
-										logger.debug(f"Mode '{mode_name}' failed: {e}")
-										continue
-						
-						if not success and len(attempted_modes) == len(available_modes):
-							logger.error(f"Failed to process URL '{url}' with any mode: {', '.join(attempted_modes)}")
-							process_fallback_download(url, general_config, args.overwrite)
-				else:
-					process_fallback_download(url, general_config, args.overwrite)
-			else:  # Site-only case
-				site_input = args.args[0]
-				site_config = find_site_config(site_input)
-				if not site_config:
-					logger.error(f"Site '{site_input}' not found as shortcode, name, or domain in {CONFIG_DIR}")
-					sys.exit(1)
-				display_site_details(site_config, term_width)
-				sys.exit(0)
-		
-		elif len(args.args) >= 3:  # Site + mode + query
-			site_input = args.args[0]
-			mode = args.args[1]
-			identifier = " ".join(args.args[2:])
-			
-			site_config = find_site_config(site_input)
-			if not site_config:
-				logger.error(f"Site '{site_input}' not found as shortcode, name, or domain in {CONFIG_DIR}")
-				sys.exit(1)
-			
-			headers = general_config.get("headers", {})
-			handle_vpn(general_config, "start")
-			if mode not in site_config["modes"]:
-				logger.error(f"Unsupported mode '{mode}' for site '{site_input}'")
-				sys.exit(1)
-			mode_config = site_config["modes"][mode]
-			current_page = args.page
-			if current_page > 1 and mode_config.get("url_pattern_pages"):
-				url = construct_url(
-					site_config["base_url"],
-					mode_config["url_pattern_pages"],
-					site_config,
-					mode=mode,
-					**{mode: identifier, "page": current_page}
-				)
-				logger.debug(f"Starting at custom page {current_page}: {url}")
-			else:
-				url = construct_url(
-					site_config["base_url"],
-					mode_config["url_pattern"],
-					site_config,
-					mode=mode,
-					**{mode: identifier}
-				)
-				if current_page > 1:
-					logger.warning(f"Starting page {current_page} requested, but no 'url_pattern_pages' defined; starting at page 1")
-			if mode == "video":
-				process_video_page(url, site_config, general_config, args.overwrite, headers, True)
-			else:
-				while url:
-					next_page, new_page_number, page_success = process_list_page(
-						url, site_config, general_config, current_page, mode,
-						identifier, args.overwrite, headers, args.new_nfo
-					)
-					if next_page is None:
-						break
-					url = next_page
-					current_page = new_page_number
-					time.sleep(general_config["sleep"]["between_pages"])
+		if len(args.args) == 1:
+			handle_single_arg(args.args[0], general_config, args, term_width)
+		elif len(args.args) >= 3:
+			handle_multi_arg(args.args, general_config, args)
 		else:
-			logger.error("Invalid arguments. Provide site (shortcode, name, or domain), mode, and identifier, or a URL.")
+			logger.error("Invalid arguments. Use: scrape {site} {mode} {query} or scrape {url}")
 			sys.exit(1)
 	except KeyboardInterrupt:
 		logger.warning("Interrupted by user.")
 	except Exception as e:
 		logger.error(f"Error: {e}")
 	finally:
-		if "selenium_driver" in general_config and general_config["selenium_driver"] is not None:
-			try:
-				general_config["selenium_driver"].quit()
-				logger.info("Selenium driver closed cleanly.")
-			except Exception as e:
-				logger.warning(f"Failed to close Selenium driver: {e}")
-		print()
+		cleanup(general_config)
 
 if __name__ == "__main__":
 	main()

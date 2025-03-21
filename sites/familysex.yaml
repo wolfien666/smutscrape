@@ -1,6 +1,6 @@
 # sites/familysex.yaml
 
-name: Family Sex
+name: "Family Sex"
 shortcode: fs
 domain: Family-Sex.me
 base_url: "https://family-sex.me"
@@ -43,7 +43,7 @@ modes:
     url_encoding_rules:
       " ": "%20"
       "%20": "%20"
-    tip: "Download videos from searching"
+    tip: "Download videos from search results"
     examples:
       - "Naughty little sister"
   model:

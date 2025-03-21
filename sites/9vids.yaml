@@ -32,7 +32,7 @@ modes:
     url_encoding_rules:
       " ": "+"
       "%20": "+"
-    tip: "Download videos from searching"
+    tip: "Download videos from search results"
     examples:
       - "Mom dad daughter"
       - "Skinny daughter"

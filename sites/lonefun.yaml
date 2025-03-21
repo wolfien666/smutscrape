@@ -24,7 +24,7 @@ modes:
     url_pattern_pages: "/search?keyword={search}&page_id={page}"
     max_pages: 999
     scraper: list_scraper
-    tip: "Download videos from searching"
+    tip: "Download videos from search results"
     examples:
       - "Real Incest"
       - "Mom"

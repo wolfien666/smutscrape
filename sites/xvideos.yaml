@@ -22,7 +22,7 @@ modes:
   search:
     url_pattern: "/?k={search}"
     scraper: list_scraper
-    tip: "Download videos from searching"
+    tip: "Download videos from search results"
     examples:
       - "Mom dad daughter"
   studio:

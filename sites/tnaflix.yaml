@@ -2,7 +2,7 @@
 
 name: TNAflix
 shortcode: tna
-domain: tnaflix.com
+domain: TNAflix.com
 base_url: "https://www.tnaflix.com"
 selector_style: css
 no_overwrite: true
@@ -23,7 +23,7 @@ modes:
     url_pattern_pages: "/search?what={search}&page={page}"
     scraper: list_scraper
     max_pages: 999
-    tip: "Download videos from searching on TNAFlix"
+    tip: "Download videos from search results on TNAFlix"
     examples:
       - "Step-sister is stuck"
       - "Step-mom is stuck"

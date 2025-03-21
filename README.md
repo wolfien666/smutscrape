@@ -94,32 +94,14 @@ Build commands with `scrape {code} {mode} {query}` using the table below.
 
 ### Supported Sites & Modes 🌐
 
-| code   | site                          | modes                                                              | metadata                                                     |
-| ------ | ----------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------ |
-| `9v`   | **_9vids.com_**               | `video` · `search` · `tag`                                         | Title · Tags                                                 |
-| `fphd` | **_familypornhd.com_** †      | `video` · `category` · `tag` · `studio`                            | Title · Studios · Actors · Tags · Description                |
-| `fptv` | **_familyporn.tv_** †         | `video` · `search` · `category` · `actors`                         | Title · Studios · Actors · Tags · Description                |
-| `fs`   | **_family-sex.me_** †         | `video` · `search` · `tag`                                         | Title · Studios · Actors · Tags · Description                |
-| `if`   | **_incestflix.com_**          | `video` · `search`‡ · `tag`‡                                       | Title · Studios · Actors · Tags · Image                      |
-| `ig`   | **_incest.guru_**             | `video` · `search`‡ · `tag`‡                                       | Title · Studios · Actors · Tags · Image                      |
-| `lf`   | **_lonefun.com_**             | `video` · `search` · `tag`                                         | Title · Tags · Description                                   |
-| `ml`   | **_motherless.com_** †        | `video` · `search` · `category` · `user` · `group`                 | Title · Tags                                                 |
-| `ph`   | **_pornhub.com_** †           | `video` · `model` · `category` · `channel` · `search` · `pornstar` | Title · Studios · Actors · Tags · Date · Code · Image        |
-| `sb`   | **_spankbang.com_**           | `video` · `model` · `search` · `tag`                               | Title · Actors · Tags · Description                          |
-| `tna`  | **_tnaflix.com_**             | `video` · `search`                                                 | Title · Studios · Actors · Tags · Description · Date         |
-| `xh`   | **_xhamster.com_**            | `video` · `search` · `category` · `pornstar`                       | Title · Studios · Actors · Tags                              |
-| `xnxx` | **_xnxx.com_** †              | `video` · `search` · `channel` · `pornstar` · `tag` · `pornmaker`  | Title · Studios · Actors · Tags · Description · Date · Image |
-| `xv`   | **_xvideos.com_**             | `video` · `search` · `channel` · `model` · `tag`                   | Title                                                        |
-
-# Supported Sites
 | code   | site                          | modes                          | metadata                       |
 | ------ | ----------------------------- | ------------------------------ | ------------------------------ |
 | `9v`   | **_9Vids.com_** †             | search · tag                   | tags                           |
 | `fphd` | **_FamilyPornHD.com_** †      | tag · model · search · studio  | actors · description · studios · tags |
 | `fptv` | **_FamilyPorn.tv_** †         | model · category · search · studio | actors · description · studios · tags |
 | `fs`   | **_Family-Sex.me_** †         | tag · search · model           | actors · description · image · studios · tags |
-| `if`   | **_IncestFlix.com_**          | tag                            | actors · image · studios · tags |
-| `ig`   | **_Incest.Guru_**             | tag                            | actors · image · studios · tags |
+| `if`   | **_IncestFlix.com_**          | tag‡                           | actors · image · studios · tags |
+| `ig`   | **_Incest.Guru_**             | tag‡                           | actors · image · studios · tags |
 | `lf`   | **_lonefun.com_**             | search                         | description · tags             |
 | `ml`   | **_motherless.com_** †        | search · category · user · group · group_code · tag | tags                           |
 | `ph`   | **_pornhub.com_** †           | model · category · catnum · studio · search · pornstar | actors · code · date · image · studios · tags |

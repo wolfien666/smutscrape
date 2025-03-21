@@ -30,7 +30,6 @@ from loguru import logger
 from tqdm import tqdm
 from termcolor import colored
 import textwrap
-import pyfiglet
 from rich.console import Console
 from rich.table import Table
 from rich.style import Style
@@ -391,6 +390,22 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
 	final_metadata = finalize_metadata(raw_data, general_config)
 	file_name = construct_filename(final_metadata['title'], site_config, general_config)
 	destination_config = general_config['download_destinations'][0]
+	
+	# Check SMB existence early for SMB destinations
+	if destination_config['type'] == 'smb':
+		smb_path = os.path.join(destination_config['path'], file_name)
+		if not overwrite and file_exists_on_smb(destination_config, smb_path):
+			logger.info(f"File '{smb_path}' exists on SMB share. Skipping download.")
+			# Optionally check NFO if required
+			if general_config.get('make_nfo', False) and has_metadata_selectors(site_config):
+				smb_nfo_path = os.path.join(destination_config['path'], f"{file_name.rsplit('.', 1)[0]}.nfo")
+				if not (new_nfo or file_exists_on_smb(destination_config, smb_nfo_path)):
+					temp_nfo_path = os.path.join(tempfile.gettempdir(), 'smutscrape', f"{file_name.rsplit('.', 1)[0]}.nfo")
+					os.makedirs(os.path.dirname(temp_nfo_path), exist_ok=True)
+					generate_nfo(temp_nfo_path, final_metadata, True)
+					upload_to_smb(temp_nfo_path, smb_nfo_path, destination_config, overwrite)
+					os.remove(temp_nfo_path)
+			return True
 	
 	# Determine temporary or final path
 	if destination_config['type'] == 'smb':

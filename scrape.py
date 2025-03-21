@@ -1946,69 +1946,83 @@ def display_site_details(site_config, term_width):
 	
 	display_options()
 
-
 def generate_global_table(term_width, output_path=None):
 	"""Generate the global sites table, optionally saving as Markdown to output_path."""
-	# Build the table
+	# Build the table with original style plus separate code column
 	table = Table(show_edge=True, expand=True, width=term_width)
-	table.add_column("[bold][magenta]Site[/magenta][/bold]", width=term_width//5)
-	table.add_column("[bold][yellow]Scrape Modes[/yellow][/bold]", width=(term_width//5)*2)
-	table.add_column("[bold][green]Available Metadata[/green][/bold]", width=(term_width//5)*2)
+	table.add_column("[bold][magenta]code[/magenta][/bold]", width=8, justify="left")
+	table.add_column("[bold][magenta]Site[/magenta][/bold]", width=(term_width-8)//4)
+	table.add_column("[bold][yellow]Scrape Modes[/yellow][/bold]", width=(term_width-8)//3)
+	table.add_column("[bold][green]Available Metadata[/green][/bold]", width=(term_width-8)//3)
 	
 	supported_sites = []
 	selenium_sites = set()
+	encoding_rule_sites = set()
 	
 	for site_config_file in os.listdir(SITE_DIR):
 		if site_config_file.endswith(".yaml"):
 			try:
 				with open(os.path.join(SITE_DIR, site_config_file), 'r') as f:
 					site_config = yaml.safe_load(f)
-				site_name = site_config.get("domain", "Unknown")
+				site_name = site_config.get("name", "Unknown")
 				site_code = site_config.get("shortcode", "??")
 				use_selenium = site_config.get("use_selenium", False)
 				
-				# Track sites requiring Selenium
+				# Check for Selenium
 				if use_selenium:
 					selenium_sites.add(site_code)
 				
-				site_display = f"[magenta][bold]{site_code}[/bold][/magenta] · [magenta]{site_name}[/magenta]"
+				# Check for special URL encoding rules
+				url_rules = site_config.get("url_encoding_rules", {})
+				has_special_encoding = " & " in url_rules or "&" in url_rules
+				if has_special_encoding:
+					encoding_rule_sites.add(site_code)
+				
 				modes = get_available_modes(site_config)
-				modes_display = " · ".join(f"[yellow][bold]{mode}[/bold][/yellow]" for mode in modes) if modes else "[gray]None[/gray]"
 				metadata = has_metadata_selectors(site_config, return_fields=True)
-				metadata_display = " · ".join(f"[green][bold]{field}[/bold][/green]" for field in metadata) if metadata else "None"
-				supported_sites.append((site_code, site_name, modes, metadata, use_selenium))
+				supported_sites.append((site_code, site_name, modes, metadata, use_selenium, has_special_encoding))
 			except Exception as e:
 				logger.warning(f"Failed to load config '{site_config_file}': {e}")
 	
 	if supported_sites:
-		# Fix the unpacking here to match what we stored
-		for site_code, site_name, modes, metadata, use_selenium in sorted(supported_sites, key=lambda x: x[0]):
-			site_display = f"[magenta][bold]{site_code}[/bold][/magenta] · [magenta]{site_name}[/magenta]"
-			modes_display = " · ".join(f"[yellow][bold]{mode}[/bold][/yellow]" for mode in modes) if modes else "[gray]None[/gray]"
+		for site_code, site_name, modes, metadata, use_selenium, has_special_encoding in sorted(supported_sites, key=lambda x: x[0]):
+			code_display = f"[magenta][bold]{site_code}[/bold][/magenta]"
+			site_display = f"[magenta]{site_name}[/magenta]" + (" †" if use_selenium else "")
+			modes_display = " · ".join(
+				f"[yellow][bold]{mode}[/bold][/yellow]" + ("‡" if has_special_encoding else "")
+				for mode in modes
+			) if modes else "[gray]None[/gray]"
 			metadata_display = " · ".join(f"[green][bold]{field}[/bold][/green]" for field in metadata) if metadata else "None"
-			table.add_row(site_display, modes_display, metadata_display)
+			table.add_row(code_display, site_display, modes_display, metadata_display)
 	else:
 		logger.warning("No valid site configs found in 'configs' folder.")
-		table.add_row("No sites loaded", "", "")
+		table.add_row("[magenta][bold]??[/bold][/magenta]", "[magenta]No sites loaded[/magenta]", "[gray]None[/gray]", "None")
+	
+	# Prepare footnotes
+	footnotes = []
+	if selenium_sites:
+		footnotes.append("[italic]† Selenium required.[/italic]")
+	if encoding_rule_sites:
+		footnotes.append("[italic]‡ Special URL encoding applied.[/italic]")
 	
 	if output_path:
-		# Generate Markdown
+		# Generate Markdown (unchanged from your last working version)
 		md_lines = [
 			"| code   | site                          | modes                          | metadata                       |\n",
 			"| ------ | ----------------------------- | ------------------------------ | ------------------------------ |\n"
 		]
 		
-		for site_code, site_name, modes, metadata, use_selenium in sorted(supported_sites, key=lambda x: x[0]):
-			# Format each column
+		for site_code, site_name, modes, metadata, use_selenium, has_special_encoding in sorted(supported_sites, key=lambda x: x[0]):
 			code_str = f"`{site_code}`"
 			site_str = f"**_{site_name}_**" + (" †" if use_selenium else "")
-			modes_str = " · ".join(modes) if modes else "None"
+			modes_str = " · ".join(mode + (" ‡" if has_special_encoding else "") for mode in modes) if modes else "None"
 			metadata_str = " · ".join(metadata) if metadata else "None"
 			md_lines.append(f"| {code_str:<6} | {site_str:<29} | {modes_str:<30} | {metadata_str:<30} |\n")
 		
-		# Add Selenium footnote
 		if selenium_sites:
 			md_lines.append("\n† _Selenium required._\n")
+		if encoding_rule_sites:
+			md_lines.append("‡ _Combine terms with "&"._\n")
 		
 		try:
 			with open(output_path, 'w', encoding='utf-8') as f:
@@ -2018,7 +2032,9 @@ def generate_global_table(term_width, output_path=None):
 			logger.error(f"Failed to write Markdown table to '{output_path}': {e}")
 		return None
 	
-	return table
+	# Return table and footnotes as a Group for display below the table
+	from rich.console import Group
+	return Group(table, *footnotes) if footnotes else table
 
 
 def display_usage(term_width):

@@ -2010,7 +2010,7 @@ def generate_global_table(term_width, output_path=None):
 		if selenium_sites:
 			md_lines.append("\n† _Selenium required._\n")
 		if encoding_rule_sites:
-			md_lines.append("‡ _Combine terms with "&"._\n")
+			md_lines.append("‡ _Combine terms with \"&\"._\n")
 		
 		try:
 			with open(output_path, 'w', encoding='utf-8') as f:

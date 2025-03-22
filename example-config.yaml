@@ -119,20 +119,12 @@ headers:
 # Fonts to use for site ascii headers (script randomly selects one from the 3 largest that fit in the terminal) 
 fonts:
   - 4max
-  - amc_3_lin
   - bolger
-  - colossal
   - georgia11
-  - georgi16
-  - poison
   - roman
   - santa_clara
-  - smpoison
-  - stellar
-  - swan
   - tarty1
   - tarty2
-  - tarty4
+  - tarty8
   - bold_script
   - fancy59
-  - fancy134

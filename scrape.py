@@ -1556,51 +1556,41 @@ def get_terminal_width():
 
 
 def generate_adaptive_gradient(num_lines):
-	"""Generate a gradient pair with intensity adapted to the number of lines."""
-	# Gradient pairs in reds, oranges, pinks, purples, and blues (darker, moodier shades)
+	"""Generate subtle red/purple/pink gradients with HSV fixes."""
 	base_gradients = [
-		((139, 0, 0), (255, 69, 0)),       # Dark Red to Dark Orange
-		((128, 0, 128), (199, 21, 133)),   # Dark Purple to Medium Violet Red
-		((65, 105, 225), (106, 90, 205)),  # Royal Blue to Slate Blue
-		((178, 34, 34), (147, 112, 219)),  # Firebrick to Medium Purple
-		((220, 20, 60), (138, 43, 226)),   # Crimson to Blue Violet
-		((255, 99, 71), (186, 85, 211)),   # Tomato to Medium Orchid
+		((94, 38, 95), (199, 62, 119)),     
+		((76, 25, 91), (181, 58, 127)),     
+		((109, 33, 79), (214, 93, 107)),    
+		((126, 35, 58), (228, 116, 112)),   
+		((82, 19, 64), (188, 65, 119)),     
+		((55, 23, 62), (168, 45, 106)),     
+		((139, 0, 55), (255, 105, 97))      
 	]
 	
-	# Choose a base gradient
 	start_rgb, end_rgb = random.choice(base_gradients)
+	start_h, start_s, start_v = rgb_to_hsv(*start_rgb)
+	end_h, end_s, end_v = rgb_to_hsv(*end_rgb)
 	
-	# Convert to HSV for easier manipulation
-	start_hsv = rgb_to_hsv(*start_rgb)
-	end_hsv = rgb_to_hsv(*end_rgb)
+	line_factor = min(num_lines / 12, 1.0)
+	hue_scale = 0.4 + (line_factor * 0.6)
+	sat_scale = 0.8 + (0.3 * line_factor)
 	
-	# Calculate how much to scale the gradient based on line count
-	if num_lines <= 3:
-		# Scale down the hue difference for short ASCII art
-		hue_diff = (end_hsv[0] - start_hsv[0]) % 360
-		if hue_diff > 180:
-			hue_diff = 360 - hue_diff
-		
-		# Reduce the hue difference based on line count
-		scale_factor = 0.2 + (num_lines / 10)  # 0.3 for 1 line, 0.4 for 2 lines, 0.5 for 3 lines
-		new_hue_diff = hue_diff * scale_factor
-		
-		# Calculate new end hue
-		new_end_hue = (start_hsv[0] + (new_hue_diff if hue_diff < 180 else -new_hue_diff)) % 360
-		
-		# Create new end color with scaled hue but original saturation and value
-		new_end_hsv = (new_end_hue, end_hsv[1], end_hsv[2])
-		new_end_rgb = hsv_to_rgb(*new_end_hsv)
-		
-		return start_rgb, new_end_rgb
+	hue_diff = ((end_h - start_h + 180) % 360) - 180
+	adj_hue_diff = hue_diff * hue_scale
+	new_end_h = (start_h + adj_hue_diff) % 360
 	
-	# For medium ASCII art (4-7 lines), use a moderate gradient
-	elif num_lines <= 7:
-		return start_rgb, end_rgb
+	if 60 < new_end_h < 270:
+		new_end_h = 270 if new_end_h > 180 else 60
 	
-	# For large ASCII art (8+ lines), use full gradient
-	else:
-		return start_rgb, end_rgb
+	new_end_s = min(end_s * sat_scale, 0.9)
+	new_end_v = end_v * (0.85 + (0.15 * line_factor))
+	
+	# FIX APPLIED HERE: Normalize hue to 0-1 range
+	new_end_rgb = hsv_to_rgb(new_end_h / 360.0, new_end_s, new_end_v)
+	
+	clamped_rgb = tuple(min(max(v, 0), 255) for v in new_end_rgb)
+	return start_rgb, clamped_rgb
+
 
 def color_distance(color1, color2):
 	"""Calculate perceptual distance between two RGB colors using a simplified CIEDE2000 approach."""
@@ -1792,6 +1782,7 @@ def render_ascii(input_text, general_config, term_width, font=None):
 
 	# Apply adaptive gradient
 	start_rgb, end_rgb = generate_adaptive_gradient(len(centered_lines))
+	logger.debug(f"start_rgb: {start_rgb}, end_rgb: {end_rgb}")
 	steps = len(centered_lines)
 
 	for i, line in enumerate(centered_lines):
@@ -1807,16 +1798,16 @@ def render_ascii(input_text, general_config, term_width, font=None):
 
 def display_options():
 
-	console.print("[bold][yellow]Options:[/yellow][/bold]")
-	console.print("  [magenta]-o[/magenta], [magenta]--overwrite[/magenta]        # Replace files with same name at download destination")
-	console.print("  [magenta]-n[/magenta], [magenta]--re_nfo[/magenta]           # Replace metadata in existing .nfo files")
-	console.print("  [magenta]-p[/magenta], [magenta]--page[/magenta] [yellow]{ page }[/yellow]    # Start scraping on given page of results")
-	console.print("  [magenta]-t[/magenta], [magenta]--stable[/magenta] [yellow]{ path }[/yellow]  # Output table of current site configurations")
-	console.print("  [magenta]-d[/magenta], [magenta]--debug[/magenta]            # Enable detailed debug logging")
-	console.print("  [magenta]-h[/magenta], [magenta]--help[/magenta]             # Show help submenu")
+	console.print("[bold][yellow]optional arguments:[/yellow][/bold]")
+	console.print("  [magenta]-o[/magenta], [magenta]--overwrite[/magenta]        # replace files with same name at download destination")
+	console.print("  [magenta]-n[/magenta], [magenta]--re_nfo[/magenta]           # replace metadata in existing .nfo files")
+	console.print("  [magenta]-p[/magenta], [magenta]--page[/magenta] [yellow]{ page }[/yellow]    # start scraping on given page of results")
+	console.print("  [magenta]-t[/magenta], [magenta]--stable[/magenta] [yellow]{ path }[/yellow]  # output table of current site configurations")
+	console.print("  [magenta]-d[/magenta], [magenta]--debug[/magenta]            # enable detailed debug logging")
+	console.print("  [magenta]-h[/magenta], [magenta]--help[/magenta]             # show help submenu")
 
 def display_global_examples():
-	console.print("[yellow][bold]Randomly Generated Examples:[/bold][/yellow]")
+	console.print("[yellow][bold]examples[/bold] (generated from ./sites/):[/yellow]")
 	
 	# Collect all site/mode/example combos
 	all_examples = []
@@ -1841,8 +1832,8 @@ def display_global_examples():
 	
 	# Display in a borderless table
 	table = Table(show_edge=False, expand=True, show_lines=False, show_header=True)
-	table.add_column("[magenta][bold]Command[/bold][/magenta]", justify="right")
-	table.add_column("[yellow]Effect[/yellow]", justify="left")
+	table.add_column("[magenta][bold]command[/bold][/magenta]", justify="right")
+	table.add_column("[yellow]action[/yellow]", justify="left")
 	
 	for site_name, shortcode, mode, tip, example in selected_examples:
 		cmd = f"[red]scrape[/red] [magenta]{shortcode}[/magenta] [yellow]{mode}[/yellow] [blue]\"{example}\"[/blue]"
@@ -1904,33 +1895,33 @@ def display_site_details(site_config, term_width):
 	label_width = 12
 	
 	# Print basic fields directly
-	console.print(f"{'Name:':>{label_width}} [bold]{site_name}[/bold] ({shortcode})")
-	console.print(f"{'Homepage:':>{label_width}} [bold]{base_url}[/bold]")
-	console.print(f"{'Downloader:':>{label_width}} [bold]{download_method}[/bold]")
-	console.print(f"{'Metadata:':>{label_width}} {', '.join(metadata)}") 
+	console.print(f"{'name:':>{label_width}} [bold]{site_name}[/bold] ({shortcode})")
+	console.print(f"{'homepage:':>{label_width}} [bold]{base_url}[/bold]")
+	console.print(f"{'downloader:':>{label_width}} [bold]{download_method}[/bold]")
+	console.print(f"{'metadata:':>{label_width}} {', '.join(metadata)}") 
 	
 	# Print notes directly
 	if site_note:
-		console.print(f"{'Note:':>{label_width}} {site_note}")
+		console.print(f"{'note:':>{label_width}} {site_note}")
 	if name_suffix:
-		console.print(f"{'Note:':>{label_width}} Filenames are appended with [bold]\"{name_suffix}\"[/bold].")
+		console.print(f"{'note:':>{label_width}} Filenames are appended with [bold]\"{name_suffix}\"[/bold].")
 	if use_selenium:
-		console.print(f"{'Note:':>{label_width}} [yellow][bold]selenium[/bold][/yellow] and [yellow][bold]chromedriver[/bold][/yellow] are required to scrape this site.")
+		console.print(f"{'note:':>{label_width}} [yellow][bold]selenium[/bold][/yellow] and [yellow][bold]chromedriver[/bold][/yellow] are required to scrape this site.")
 		console.print(f"{'':>{label_width}} See: https://github.com/io-flux/smutscrape#selenium--chromedriver-%EF%B8%8F%EF%B8%8F")
 	
 	console.print()  # Single blank line before usage
 	# Align both usage lines
-	console.print(f"{'Usage:':>{label_width}} [magenta]scrape {shortcode} {{mode}} {{query}}[/magenta]")
+	console.print(f"{'usage:':>{label_width}} [magenta]scrape {shortcode} {{mode}} {{query}}[/magenta]")
 	console.print(f"{'':>{label_width}} [magenta]scrape {base_url}{video_uri}[/magenta]")
 	console.print()
 	
 	modes = site_config.get("modes", {})
 	if modes:
-		console.print("[yellow][bold]Available Modes:[/bold][/yellow]")
+		console.print("[yellow][bold]supported modes:[/bold][/yellow]")
 		mode_table = Table(show_edge=True, expand=True, width=term_width)
-		mode_table.add_column("[bold]Mode[/bold]", width=15)
-		mode_table.add_column("[bold]Purpose[/bold]", width=(term_width//10)*4)
-		mode_table.add_column("[bold]Example[/bold]", width=term_width//2)
+		mode_table.add_column("[bold]mode[/bold]", width=15)
+		mode_table.add_column("[bold]function[/bold]", width=(term_width//10)*4)
+		mode_table.add_column("[bold]example[/bold]", width=term_width//2)
 		
 		for mode, config in modes.items():
 			tip = config.get("tip", "No description available")
@@ -1998,9 +1989,9 @@ def generate_global_table(term_width, output_path=None):
 	# Prepare footnotes
 	footnotes = []
 	if selenium_sites:
-		footnotes.append("[italic]† [yellow][bold]Selenium[/bold][/yellow] required.[/italic]")
+		footnotes.append("[italic]† [yellow][bold]selenium[/bold][/yellow] and [yellow][bold]chromedriver[/bold][/yellow] required.[/italic]")
 	if encoding_rule_sites:
-		footnotes.append("[italic]‡ Combine terms with \'&\' to search them together.[/italic]")
+		footnotes.append("[italic]‡ combine terms with \'&\' to search them together.[/italic]")
 	
 	if output_path:
 		# Generate Markdown (unchanged from your last working version)
@@ -2035,10 +2026,10 @@ def generate_global_table(term_width, output_path=None):
 
 
 def display_usage(term_width):
-	console.print("[bold]Usage:[/bold] [red]scrape[/red] [magenta]{site}[/magenta] [yellow]{mode}[/yellow] [blue]{query}[/blue]")
+	console.print("usage: [red]scrape[/red] [magenta]{site}[/magenta] [yellow]{mode}[/yellow] [blue]{query}[/blue]")
 	console.print("       [red]scrape[/red] [blue]{url}[/blue]")
 	console.print()
-	console.print("[yellow][bold]Supported Sites[/bold] (loaded from ./configs/):[/yellow]")
+	console.print("[yellow][bold]supported sites[/bold] (loaded from ./sites/):[/yellow]")
 	console.print()
 	global_table = generate_global_table(term_width)  # Get the table object
 	console.print(global_table)  # Print it once with full color control

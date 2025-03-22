@@ -67,6 +67,12 @@ scrapers:
   video_scraper:
     title:
       selector: "head title"
+    studios:
+      selector: "div.video-metadata li.main-uploader a span.name"
+    actors:
+      selector: "div.video-metadata li.model a span.name"
+    tags:
+      selector: "div.video-metadata li a[href^=\"/tags/\"]"
 
   list_scraper:
     video_container:

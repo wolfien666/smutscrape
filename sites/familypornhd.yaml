@@ -55,8 +55,8 @@ modes:
       - "Siblings in love"
       - "Family threesome"
   studio:
-    url_pattern: "/category/{studio}"
-    url_pattern_pages: "/category/{studio}/{page}/"
+    url_pattern: "/tag/{studio}"
+    url_pattern_pages: "/tag/{studio}/{page}/"
     max_pages: 99
     scraper: list_scraper
     tip: "Download videos from studio"

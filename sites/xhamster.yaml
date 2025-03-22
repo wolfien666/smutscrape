@@ -57,12 +57,12 @@ modes:
     examples:
       - "Vintage taboo"
       - "Sister rough doggystyle"
-  category:
-    url_pattern: "/categories/{category}"
-    url_pattern_pages: "/categories/{category}/{page}"
+  tag:
+    url_pattern: "/categories/{tag}"
+    url_pattern_pages: "/categories/{tag}/{page}"
     scraper: list_scraper
     max_pages: 999
-    tip: "Download videos in category"
+    tip: "Download videos in tag"
     examples:
       - "18 Year Old"
       - "Brutal Sex"

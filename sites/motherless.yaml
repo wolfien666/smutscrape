@@ -32,12 +32,12 @@ modes:
     examples:
       - "Rough doggystyle"
       - "Kelly Teal"
-  category:
-    url_pattern: "/porn/{category}/videos"
-    url_pattern_pages: "/porn/{category}/videos&page={page}"
+  tag:
+    url_pattern: "/porn/{tag}/videos"
+    url_pattern_pages: "/porn/{tag}/videos&page={page}"
     max_pages: 999
     scraper: list_scraper
-    tip: "Download videos under category"
+    tip: "Download videos under tag"
     examples:
       - "Funny"
       - "Bisexual"

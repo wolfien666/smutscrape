@@ -31,10 +31,10 @@ modes:
       - "Ashley Fires"
       - "Vera King"
       - "Kenna James"
-  category:
+  tag:
     scraper: list_scraper
-    url_pattern: "/categories/{category}/"
-    tip: "Download videos under category"
+    url_pattern: "/categories/{tag}/"
+    tip: "Download videos under tag"
     examples:
       - "Brother Sister"
       - "Mother Son"

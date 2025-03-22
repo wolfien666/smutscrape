@@ -2,7 +2,7 @@
 
 A Python-based tool to scrape and download adult content from various websites straight to your preferred data store. Whether it’s videos, tags, or search results, **_smutscrape_**`has you covered—discreetly and efficiently. Supports multiple download methods, advanced scraping with Selenium for tricky sites, and metadata extraction stored in`.nfo` files for media management. 😈
 
-![Screenshot](https://github.com/io-flux/smutscrape/raw/main/smutscrape.jpg)
+![Screenshot](https://github.com/io-flux/smutscrape/raw/main/screenshots/screenshot1.jpg)
 
 ---
 
@@ -86,23 +86,23 @@ Build commands with `scrape {code} {mode} {query}` using the table below.
 
 | code   | site                          | modes                          | metadata                       |
 | ------ | ----------------------------- | ------------------------------ | ------------------------------ |
-| `9v`   | **_9Vids.com_** †             | search · tag                   | tags                           |
-| `fphd` | **_FamilyPornHD.com_** †      | tag · model · search · studio  | actors · description · studios · tags |
-| `fptv` | **_FamilyPorn.tv_** †         | model · category · search · studio | actors · description · studios · tags |
-| `fs`   | **_Family-Sex.me_** †         | tag · search · model           | actors · description · image · studios · tags |
-| `if`   | **_IncestFlix.com_**          | tag‡                           | actors · image · studios · tags |
-| `ig`   | **_Incest.Guru_**             | tag‡                           | actors · image · studios · tags |
-| `lf`   | **_lonefun.com_**             | search                         | description · tags             |
-| `ml`   | **_motherless.com_** †        | search · category · user · group · group_code · tag | tags                           |
-| `ph`   | **_pornhub.com_** †           | model · category · catnum · studio · search · pornstar | actors · code · date · image · studios · tags |
-| `sb`   | **_spankbang.com_**           | model · search · tag           | actors · description · tags    |
-| `tna`  | **_TNAflix.com_**             | search                         | actors · date · description · studios · tags |
-| `xh`   | **_xhamster.com_**            | model · studio · search · category | actors · studios · tags        |
-| `xn`   | **_xnxx.com_** †              | search · model · tag · studio  | actors · date · description · image · studios · tags |
-| `xv`   | **_xvideos.com_**             | search · studio · model · tag  | None                           |
+| `9v`   | **_9Vids_** †                 | search · tag                   | tags                           |
+| `fphd` | **_FamilyPornHD_** †          | tag · model · search · studio  | actors · description · studios · tags |
+| `fptv` | **_FamilyPorn_** †            | model · tag · search · studio  | actors · description · studios · tags |
+| `fs`   | **_Family Sex_** †            | tag · search · model           | actors · description · image · studios · tags |
+| `if`   | **_IncestFlix_**              | tag ‡                          | actors · image · studios · tags |
+| `ig`   | **_IncestGuru_**              | tag ‡                          | actors · image · studios · tags |
+| `lf`   | **_LoneFun_**                 | search                         | description · tags             |
+| `ml`   | **_Motherless_** †            | search · tag · user · group · group_code | tags                           |
+| `ph`   | **_PornHub_** †               | model · category · tag · studio · search · pornstar | actors · code · date · image · studios · tags |
+| `sb`   | **_SpankBang_**               | model · search · tag           | actors · description · tags    |
+| `tna`  | **_TNAflix_**                 | search                         | actors · date · description · studios · tags |
+| `xh`   | **_xHamster_**                | model · studio · search · tag  | actors · studios · tags        |
+| `xn`   | **_XNXX_** †                  | search · model · tag · studio  | actors · date · description · image · studios · tags |
+| `xv`   | **_XVideos_**                 | search · studio · model · tag · playlist | actors · studios · tags        |
 
 † _Selenium required._
-‡ _Combine two search or tag queries with '&'._
+‡ _Combine terms with "&"._
 
 ### Examples 🙋
 
@@ -152,6 +152,8 @@ Metadata (e.g., titles, tags, actors) is scraped and saved in `.nfo` files for m
 ---
 
 ## Advanced Configuration ⚙️
+
+![Screenshot](https://github.com/io-flux/smutscrape/raw/main/screenshots/screenshot2.jpg)
 
 ### Selenium & Chromedriver 🕵️‍♂️
 

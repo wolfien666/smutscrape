@@ -1895,22 +1895,19 @@ def display_site_details(site_config, term_width):
 	
 	# Use domain ASCII art instead of logo
 	general_config = load_configuration('general')
-	# console.print("═" * term_width, style=Style(color="yellow"))
 	console.print()
-	render_ascii(site_name, general_config, term_width)
+	render_ascii(domain, general_config, term_width)
 	console.print()
 	
-	# site_header = f"{domain} ".ljust(term_width, "┈")
-	# console.print(f"[yellow][bold]{site_header}[/bold][/yellow]")
 	console.print()
 	
 	label_width = 12
 	
 	# Print basic fields directly
-	console.print(f"{'Domain:':>{label_width}} [bold]{domain}[/bold]")
-	console.print(f"{'Shortcode:':>{label_width}} [bold]{shortcode}[/bold]")
-	console.print(f"{'Method:':>{label_width}} [bold]{download_method}[/bold]")
-	console.print(f"{'Metadata:':>{label_width}} {', '.join(metadata)}")  # Join metadata with commas
+	console.print(f"{'Name:':>{label_width}} [bold]{site_name}[/bold] ({shortcode})")
+	console.print(f"{'Homepage:':>{label_width}} [bold]{base_url}[/bold]")
+	console.print(f"{'Downloader:':>{label_width}} [bold]{download_method}[/bold]")
+	console.print(f"{'Metadata:':>{label_width}} {', '.join(metadata)}") 
 	
 	# Print notes directly
 	if site_note:

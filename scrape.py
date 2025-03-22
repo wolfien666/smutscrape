@@ -1073,8 +1073,8 @@ def download_with_ytdlp(url, destination_path, headers, general_config, metadata
 def download_with_ffmpeg(url, destination_path, general_config, headers=None, desc="Downloading", origin=None):
 	headers = headers or {}
 	ua = headers.get('User-Agent', random.choice(general_config['user_agents']))
-	if "Headless" in ua:
-		ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+	# if "Headless" in ua:
+	#	ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 	
 	fetch_headers = {
 		"User-Agent": ua,

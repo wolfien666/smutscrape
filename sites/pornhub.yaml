@@ -76,6 +76,9 @@ modes:
     url_pattern: "/pornstar/{pornstar}"
     scraper: list_scraper
     tip: "Download videos featuring pornstar"
+    url_encoding_rules:
+      " ": "-"
+      "%20": "-"
     note: "Pornstars are typically more established than models"
     examples:
       - "Massy Sweet"

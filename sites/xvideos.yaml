@@ -1,7 +1,9 @@
 # sites/xvideos.yaml
-name: xVideos
+# Work in progress; need to add more metadata scrapers/selectors
+
+name: XVideos
 shortcode: xv
-domain: xVideos.com
+domain: xvideos.com
 base_url: "https://www.xvideos.com"
 selector_style: css
 no_overwrite: true
@@ -53,19 +55,18 @@ modes:
       - "Girl Enjoying Sex"
       - "Reverse Cowgirl"
       - "Tiny Tits Porn"
+  playlist:
+    url_pattern: "/favorite/{playlist}"
+    url_pattern_page: "/favorite/{playlist}/{page}"
+    scraper: list_scraper
+    tip: "Download videos from playlist"
+    examples:
+      - ""
 
 scrapers:
   video_scraper:
     title:
       selector: "head title"
-    studios:
-      selector: "div.video-metadata li.main-uploader a span.name"
-    actors:
-      selector: "div.video-metadata li.model a span.name"
-    tags:
-      selector: "div.video-metadata li a[href^=\"/tags/\"]"
-    description:
-      selector: "div#tab-description p"  # Placeholder; may need adjustment
 
   list_scraper:
     video_container:

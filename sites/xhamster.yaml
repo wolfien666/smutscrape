@@ -1,8 +1,8 @@
 # sites/xhamster.yaml
 
-name: XHamster
+name: xHamster
 shortcode: xh
-domain: xhamster.com
+domain: xHamster.com
 base_url: "https://xhamster.com"
 selector_style: css
 no_overwrite: true

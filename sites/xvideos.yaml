@@ -1,9 +1,7 @@
 # sites/xvideos.yaml
-# Work in progress; need to add more metadata scrapers/selectors
-
-name: XVideos
+name: xVideos
 shortcode: xv
-domain: xvideos.com
+domain: xVideos.com
 base_url: "https://www.xvideos.com"
 selector_style: css
 no_overwrite: true
@@ -60,6 +58,14 @@ scrapers:
   video_scraper:
     title:
       selector: "head title"
+    studios:
+      selector: "div.video-metadata li.main-uploader a span.name"
+    actors:
+      selector: "div.video-metadata li.model a span.name"
+    tags:
+      selector: "div.video-metadata li a[href^=\"/tags/\"]"
+    description:
+      selector: "div#tab-description p"  # Placeholder; may need adjustment
 
   list_scraper:
     video_container:

@@ -2,7 +2,7 @@
 
 name: XNXX
 shortcode: xn
-domain: xnxx.com
+domain: XNXX.com
 base_url: "https://www.xnxx.com"
 selector_style: css
 no_overwrite: true

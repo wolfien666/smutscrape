@@ -2,7 +2,7 @@
 
 name: Motherless
 shortcode: ml
-domain: motherless.com
+domain: Motherless.com
 base_url: "https://motherless.com"
 selector_style: css
 no_overwrite: true

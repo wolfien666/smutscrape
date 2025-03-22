@@ -2,7 +2,7 @@
 
 name: SpankBang
 shortcode: sb
-domain: spankbang.com
+domain: SpankBang.com
 base_url: "https://spankbang.com"
 selector_style: css
 no_overwrite: true

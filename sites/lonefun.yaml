@@ -2,7 +2,7 @@
 
 name: LoneFun
 shortcode: lf
-domain: lonefun.com
+domain: LoneFun.com
 base_url: "https://lonefun.com"
 selector_style: css
 no_overwrite: true

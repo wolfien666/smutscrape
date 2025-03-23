@@ -101,7 +101,9 @@ Curated notes including tips, caveats, available metadata, special requirements,
 
 ### Full Command
 
-Build commands with `scrape {code} {mode} {query}`, referring to the table of codes, sites, modes, and metadata:
+Build commands with `scrape {code} {mode} {query}`, referring to the following table:
+
+#### Table of supported sites, modes, and metadata:
 
 | code   | site                          | modes                          | metadata                       |
 | ------ | ----------------------------- | ------------------------------ | ------------------------------ |
@@ -120,28 +122,14 @@ Build commands with `scrape {code} {mode} {query}`, referring to the table of co
 | `xn`   | **_XNXX_** †                  | search · model · tag · studio  | actors · date · description · image · studios · tags |
 | `xv`   | **_XVideos_**                 | search · studio · model · tag · playlist | actors · studios · tags        |
 
+---
+
 † _Selenium required._  
 ‡ _Combine terms with "&"._
 
-### Command-Line Arguments
-
-```bash
-scrape [args] [optional arguments]
-```
-
-- `-p, --page {page.video}` – Start scraping on the given page and video offset (e.g., `12.9` for page 12, ninth video).  
-- `-o, --overwrite` – Downloads every responsive video, ignoring `.state` and overwriting existing files with the same name. ⚠  
-- `-n, --re_nfo` – Operates independently of `--overwrite`, regenerating `.nfo` files with fresh metadata even for existing videos, overwriting any matching `.nfo` files. ⚠  
-- `-a, --applystate` – Retroactively adds URLs to `.state` when matching files exist at your destination, speeding up future runs by skipping known videos without re-downloading.  
-- `-t, --stable {path}` – Generates a Markdown-formatted table of current site configurations with supported modes, metadata, and example queries, matching the one below but dynamically built from `./sites/` configs. Outputs to the specified file path (e.g., `sites.md`).  
-- `-d, --debug` – Enables detailed debug logging.  
-- `-h, --help` – Shows the help submenu.  
-
-**⚠ Caution**: Using `--overwrite` or `--re_nfo` risks overwriting different videos or `.nfo` files with identical names—a growing concern as your collection expands and generic titles (e.g., "Hot Scene") collide. Mitigate this by adding `name_suffix: "{unique site identifier}"` in a site’s YAML config (e.g., `name_suffix: " - Motherless.com"` for Motherless, where duplicate titles are rampant).
-
 ---
 
-### Examples 🙋
+#### Usage Examples 🙋
 
 - **Pornhub: Massy Sweet’s Pornstar Page 👧**
 
@@ -189,6 +177,24 @@ Metadata (e.g., titles, tags, actors) is scraped and saved in `.nfo` files for m
 ---
 
 ## Advanced Configuration ⚙️
+
+### Command-Line Arguments
+
+```bash
+scrape [args] [optional arguments]
+```
+
+- `-p, --page {page.video}` – Start scraping on the given page and video offset (e.g., `12.9` for page 12, ninth video).  
+- `-o, --overwrite` – Downloads every responsive video, ignoring `.state` and overwriting existing files with the same name. ⚠  
+- `-n, --re_nfo` – Operates independently of `--overwrite`, regenerating `.nfo` files with fresh metadata even for existing videos, overwriting any matching `.nfo` files. ⚠  
+- `-a, --applystate` – Retroactively adds URLs to `.state` when matching files exist at your destination, speeding up future runs by skipping known videos without re-downloading.  
+- `-t, --stable {path}` – Generates a Markdown-formatted table of current site configurations with supported modes, metadata, and example queries, matching the one below but dynamically built from `./sites/` configs. Outputs to the specified file path (e.g., `sites.md`).  
+- `-d, --debug` – Enables detailed debug logging.  
+- `-h, --help` – Shows the help submenu.  
+
+**⚠ Caution**: Using `--overwrite` or `--re_nfo` risks overwriting different videos or `.nfo` files with identical names—a growing concern as your collection expands and generic titles (e.g., "Hot Scene") collide. Mitigate this by adding `name_suffix: "{unique site identifier}"` in a site’s YAML config (e.g., `name_suffix: " - Motherless.com"` for Motherless, where duplicate titles are rampant).
+
+---
 
 ### Download Destinations 📁
 

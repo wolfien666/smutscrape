@@ -522,7 +522,7 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
 		if current_time - last_vpn_action_time > vpn_config.get('new_node_time', 300):
 			handle_vpn(general_config, 'new_node')
 	
-	logger.info(f"Processing video page: {url}")
+	logger.debug(f"Processing video page: {url}")
 	use_selenium = site_config.get('use_selenium', False)
 	driver = get_selenium_driver(general_config) if use_selenium else None
 	original_url = url
@@ -1035,7 +1035,7 @@ def download_file(url, destination_path, method, general_config, site_config, he
 		video_info = get_video_metadata(temp_path)
 		if video_info:
 			os.rename(temp_path, destination_path)  # Rename only if valid
-			logger.success(f"Download completed: {os.path.basename(destination_path)}")
+			logger.debug(f"Download completed: {os.path.basename(destination_path)}")
 			logger.info(f"Size: {video_info['size_str']} · Duration: {video_info['duration']} · Resolution: {video_info['resolution']}")
 			return True
 		else:
@@ -1174,7 +1174,7 @@ def download_with_ytdlp(url, destination_path, headers, general_config, metadata
 	if return_code != 0:
 		logger.error(f"yt-dlp failed with return code {return_code}")
 		return False
-	logger.info(f"Successfully completed yt-dlp download to {destination_path}")
+	logger.debug(f"Successfully completed yt-dlp download to {destination_path}")
 	return True
 	
 	
@@ -1439,7 +1439,7 @@ def match_url_to_mode(url, site_config):
 		regex_pattern += '$'
 		
 		if re.match(regex_pattern, effective_path):
-			logger.info(f"Matched URL '{url}' to mode '{mode}' with pattern '{pattern}'")
+			logger.debug(f"Matched URL '{url}' to mode '{mode}' with pattern '{pattern}'")
 			return mode, config['scraper']
 	
 	logger.debug(f"No mode matched for URL: {url}")
@@ -2240,7 +2240,7 @@ def main():
 	
 	# Load state once at startup
 	state_set = load_state()
-	logger.info(f"Loaded {len(state_set)} URLs from state file")
+	logger.debug(f"Loaded {len(state_set)} URLs from state file")
 	
 	print()
 	render_ascii("Smutscrape", general_config, term_width)

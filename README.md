@@ -1,8 +1,8 @@
-```
-▒█▀▀▀█ █▀▄▀█ █░░█ ▀▀█▀▀ █▀▀ █▀▀ █▀▀█ █▀▀█ █▀▀█ █▀▀ 
-░▀▀▀▄▄ █░▀░█ █░░█ ░░█░░ ▀▀█ █░░ █▄▄▀ █▄▄█ █░░█ █▀▀ 
-▒█▄▄▄█ ▀░░░▀ ░▀▀▀ ░░▀░░ ▀▀▀ ▀▀▀ ▀░▀▀ ▀░░▀ █▀▀▀ ▀▀▀ 
-```
+   ```
+   ▒█▀▀▀█ █▀▄▀█ █░░█ ▀▀█▀▀ █▀▀ █▀▀ █▀▀█ █▀▀█ █▀▀█ █▀▀ 
+   ░▀▀▀▄▄ █░▀░█ █░░█ ░░█░░ ▀▀█ █░░ █▄▄▀ █▄▄█ █░░█ █▀▀ 
+   ▒█▄▄▄█ ▀░░░▀ ░▀▀▀ ░░▀░░ ▀▀▀ ▀▀▀ ▀░▀▀ ▀░░▀ █▀▀▀ ▀▀▀ 
+   ```
 
 # _Securing smut to salty pervs over CLI_ 🍆💦
 
@@ -85,13 +85,17 @@ All Python dependencies are in `requirements.txt`.
 
 Run `python scrape.py` (or `scrape` if symlinked) to download adult content and save metadata in `.nfo` files. With no arguments, you’ll get a detailed, aesthetic readout of all supported site modes on your system, dynamically generated from `./sites/` configurations (see left image below). Alternatively, running `scrape {code}` (e.g., `scrape ml`) provides detailed info about that site—curated notes, tips, caveats, available metadata, special requirements, and usage examples (see right image below).
 
-<div style="display: flex; justify-content: space-around; align-items: center;"><div style="text-align: center;"> <a href="https://github.com/io-flux/smutscrape/raw/main/screenshots/screenshot1.jpg"><img src="https://github.com/io-flux/smutscrape/raw/main/screenshots/screenshot1.jpg" alt="No Arguments Screenshot" width="300"></a> <a href="https://github.com/io-flux/smutscrape/raw/main/screenshots/screenshot2.jpg"><img src="https://github.com/io-flux/smutscrape/raw/main/screenshots/screenshot2.jpg" alt="Site Identifier Screenshot" width="300"></a> </div></div>
+<div style="display: flex; justify-content: center; align-items: center; gap: 20px; padding: 10px;"><a href="https://github.com/io-flux/smutscrape/raw/main/screenshots/screenshot1.jpg"><img src="https://github.com/io-flux/smutscrape/raw/main/screenshots/screenshot1.jpg" alt="No Arguments Screenshot" width="300" style="border: 2px solid #ff69b4; border-radius: 5px;"></a> <a href="https://github.com/io-flux/smutscrape/raw/main/screenshots/screenshot2.jpg"><img src="https://github.com/io-flux/smutscrape/raw/main/screenshots/screenshot2.jpg" alt="Site Identifier Screenshot" width="300" style="border: 2px solid #ff69b4; border-radius: 5px;"></a></div>
 
-### Full Command
+---
 
-Build commands with `scrape {code} {mode} {query}`, referring to the following table:
+### To start scraping, build commands following this basic syntax:
 
-#### Table of supported sites, modes, and metadata:
+```
+      scrape {code} {mode} {query}
+``` 
+
+### Use this table to fill in the code and the mode:
 
 | code   | site                          | modes                          | metadata                       |
 | ------ | ----------------------------- | ------------------------------ | ------------------------------ |
@@ -117,7 +121,27 @@ Build commands with `scrape {code} {mode} {query}`, referring to the following t
 
 ---
 
-#### Usage Examples 🙋
+### Command-Line Arguments [ > ]
+
+```bash
+scrape [args] [optional arguments]
+```
+
+| short | full argument           | parameter    | summary                                                                         |
+| ----- | ----------------------- | ------------ | --------------------------------------------------------------------------------|
+| `-p`  | `--page` &nbsp;&nbsp;   | `{pg.video}` | start scraping on chosen page and video (e.g., `12.9` for 9th video on pg. 12)  |
+| `-o`  | `--overwrite` &nbsp;    |              | download all videos, ignoring `.state` and overwriting when filenames collide ⚠ |
+| `-n`  | `--re_nfo` &nbsp;&nbsp; |              | refresh metadata and write new `.nfo` files, whether or not `--overwrite` set ⚠ |
+| `-a`  | `--applystate` &nbsp;   |              | retroactively add URLs to `.state` without re-downloading if filenames match    |
+| `-t`  | `--stable` &nbsp;&nbsp; | `{path}`     | generate markdown table of active site configs w/ modes, metadata, and examples |
+| `-d`  | `--debug` &nbsp;&nbsp;  |              | enable detailed debug logging                                                   |
+| `-h`  | `--help` &nbsp;&nbsp;   |              | show the help submenu                                                           |
+
+**⚠ Caution**: Using `--overwrite` or `--re_nfo` risks overwriting different videos or `.nfo` files with identical names—a growing concern as your collection expands and generic titles (e.g., "Hot Scene") collide. Mitigate this by adding `name_suffix: "{unique site identifier}"` in a site’s YAML config (e.g., `name_suffix: " - Motherless.com"` for Motherless, where duplicate titles are rampant).
+
+---
+
+### Usage Examples 🙋
 
 - **Pornhub: Massy Sweet’s Pornstar Page 👧**
 
@@ -158,31 +182,13 @@ Build commands with `scrape {code} {mode} {query}`, referring to the following t
 
 ---
 
-## Metadata Magic 🪄
+### Metadata Magic 🪄
 
 Metadata (e.g., titles, tags, actors) is scraped and saved in `.nfo` files for most sites, compatible with [Plex](https://plex.tv), [Jellyfin](https://github.com/jellyfin/jellyfin), or [Stash](https://github.com/stashapp) via the [nfoSceneParser](https://github.com/stashapp/CommunityScripts/tree/main/plugins/nfoSceneParser) plugin. Some sites (e.g., _FamilySex_, _XVideos_) currently offer only titles, with full metadata planned. Use `--re_nfo` to refresh `.nfo` files.
 
 ---
 
 ## Advanced Configuration ⚙️
-
-### Command-Line Arguments
-
-```bash
-scrape [args] [optional arguments]
-```
-
-- `-p, --page {page.video}` – Start scraping on the given page and video offset (e.g., `12.9` for page 12, ninth video).  
-- `-o, --overwrite` – Downloads every responsive video, ignoring `.state` and overwriting existing files with the same name. ⚠  
-- `-n, --re_nfo` – Operates independently of `--overwrite`, regenerating `.nfo` files with fresh metadata even for existing videos, overwriting any matching `.nfo` files. ⚠  
-- `-a, --applystate` – Retroactively adds URLs to `.state` when matching files exist at your destination, speeding up future runs by skipping known videos without re-downloading.  
-- `-t, --stable {path}` – Generates a Markdown-formatted table of current site configurations with supported modes, metadata, and example queries, matching the one below but dynamically built from `./sites/` configs. Outputs to the specified file path (e.g., `sites.md`).  
-- `-d, --debug` – Enables detailed debug logging.  
-- `-h, --help` – Shows the help submenu.  
-
-**⚠ Caution**: Using `--overwrite` or `--re_nfo` risks overwriting different videos or `.nfo` files with identical names—a growing concern as your collection expands and generic titles (e.g., "Hot Scene") collide. Mitigate this by adding `name_suffix: "{unique site identifier}"` in a site’s YAML config (e.g., `name_suffix: " - Motherless.com"` for Motherless, where duplicate titles are rampant).
-
----
 
 ### Download Destinations 📁
 

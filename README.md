@@ -6,7 +6,7 @@
 
 # _Securing smut to salty pervs over CLI_ 🍆💦
 
-A Python-based tool to scrape and download adult content from various websites straight to your preferred data store.
+A Python-based tool to scrape and download adult content from various websites straight to your preferred data store, alongside `.nfo` files that preserve the title, tags, actors, studios, and other metadata for a richer immediate watching experience in [Plex](https://plex.tv), [Jellyfin](https://github.com/jellyfin/jellyfin), or [Stash](https://github.com/stashapp).
 
 ---
 
@@ -127,15 +127,15 @@ Run `python scrape.py` (or `scrape` if symlinked) to download adult content and 
 scrape [args] [optional arguments]
 ```
 
-| short | full argument           | parameter    | summary                                                                         |
-| ----- | ----------------------- | ------------ | --------------------------------------------------------------------------------|
-| `-p`  | `--page` &nbsp;&nbsp;   | `{pg.video}` | start scraping on chosen page and video (e.g., `12.9` for 9th video on pg. 12)  |
-| `-o`  | `--overwrite` &nbsp;    |              | download all videos, ignoring `.state` and overwriting when filenames collide ⚠ |
-| `-n`  | `--re_nfo` &nbsp;&nbsp; |              | refresh metadata and write new `.nfo` files, whether or not `--overwrite` set ⚠ |
-| `-a`  | `--applystate` &nbsp;   |              | retroactively add URLs to `.state` without re-downloading if filenames match    |
-| `-t`  | `--stable` &nbsp;&nbsp; | `{path}`     | generate markdown table of active site configs w/ modes, metadata, and examples |
-| `-d`  | `--debug` &nbsp;&nbsp;  |              | enable detailed debug logging                                                   |
-| `-h`  | `--help` &nbsp;&nbsp;   |              | show the help submenu                                                           |
+| short | full argument           | parameter    | summary                                                                          |
+| ----- | ----------------------- | ------------ | -------------------------------------------------------------------------------- |
+| `-p`  | `--page` &nbsp;&nbsp;   | `{pg.video}` | start scraping on chosen page and video (e.g., `12.9` for page 12 video 9).      |
+| `-o`  | `--overwrite` &nbsp;    |              | download all videos, ignoring `.state` and overwriting when filenames collide. ⚠ |
+| `-n`  | `--re_nfo` &nbsp;&nbsp; |              | refresh metadata and write new `.nfo` files, whether or not `--overwrite` set. ⚠ |
+| `-a`  | `--applystate` &nbsp;   |              | retroactively add URLs to `.state` without re-downloading if filenames match.    |
+| `-t`  | `--stable` &nbsp;&nbsp; | `{path}`     | generate markdown table of active site configs w/ modes, metadata, and examples. |
+| `-d`  | `--debug` &nbsp;&nbsp;  |              | enable detailed debug logging.                                                   |
+| `-h`  | `--help` &nbsp;&nbsp;   |              | show the help submenu.                                                           |
 
 **⚠ Caution**: Using `--overwrite` or `--re_nfo` risks overwriting different videos or `.nfo` files with identical names—a growing concern as your collection expands and generic titles (e.g., "Hot Scene") collide. Mitigate this by adding `name_suffix: "{unique site identifier}"` in a site’s YAML config (e.g., `name_suffix: " - Motherless.com"` for Motherless, where duplicate titles are rampant).
 
@@ -179,12 +179,6 @@ scrape [args] [optional arguments]
   ```bash
   scrape https://motherless.com/2ABC9F3
   ```
-
----
-
-### Metadata Magic 🪄
-
-Metadata (e.g., titles, tags, actors) is scraped and saved in `.nfo` files for most sites, compatible with [Plex](https://plex.tv), [Jellyfin](https://github.com/jellyfin/jellyfin), or [Stash](https://github.com/stashapp) via the [nfoSceneParser](https://github.com/stashapp/CommunityScripts/tree/main/plugins/nfoSceneParser) plugin. Some sites (e.g., _FamilySex_, _XVideos_) currently offer only titles, with full metadata planned. Use `--re_nfo` to refresh `.nfo` files.
 
 ---
 

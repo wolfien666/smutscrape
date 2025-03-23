@@ -125,15 +125,15 @@ Run `python scrape.py` (or `scrape` if symlinked) to download adult content and 
 scrape [args] [optional arguments]
 ```
 
-| short | full argument           | parameter    | summary                                                                          |
-| ----- | ----------------------- | ------------ | -------------------------------------------------------------------------------- |
-| `-p`  | `--page` &nbsp;&nbsp;   | `{pg.video}` | start scraping on chosen page and video (e.g., `12.9` for page 12 video 9).      |
-| `-o`  | `--overwrite` &nbsp;    |              | download all videos, ignoring `.state` and overwriting when filenames collide. ⚠ |
-| `-n`  | `--re_nfo` &nbsp;&nbsp; |              | refresh metadata and write new `.nfo` files, whether or not `--overwrite` set. ⚠ |
-| `-a`  | `--applystate` &nbsp;   |              | retroactively add URLs to `.state` without re-downloading if filenames match.    |
-| `-t`  | `--stable` &nbsp;&nbsp; | `{path}`     | generate markdown table of active site configs w/ modes, metadata, and examples. |
-| `-d`  | `--debug` &nbsp;&nbsp;  |              | enable detailed debug logging.                                                   |
-| `-h`  | `--help` &nbsp;&nbsp;   |              | show the help submenu.                                                           |
+| argument            | summary                                                                                                |
+| --------------------| ------------------------------------------------------------------------------------------------------ |
+| `-p {page}.{video}` | start scraping on the specified page and video number (e.g., `12.9` for page 12 video 9).              |
+| `-o, --overwrite`   | download all videos, ignoring `.state` and overwriting existing media when filenames collide. ⚠        |
+| `-n, --re_nfo`      | refresh metadata and write new `.nfo` files, irrespective of whether `--overwrite` is set. ⚠           |
+| `-a, --applystate`  | retroactively add URLs to `.state` without re-downloading, if local file matches (`-o` has priority).  |
+| `-t, --stable`      | generate markdown table of active site configurations with modes, metadata, and examples.              |
+| `-d, --debug`       | enable detailed debug logging.                                                                         |
+| `-h, --help`        | show the help submenu.                                                                                 |
 
 **⚠ Caution**: Using `--overwrite` or `--re_nfo` risks overwriting different videos or `.nfo` files with identical names—a growing concern as your collection expands and generic titles (e.g., "Hot Scene") collide. Mitigate this by adding `name_suffix: "{unique site identifier}"` in a site’s YAML config (e.g., `name_suffix: " - Motherless.com"` for Motherless, where duplicate titles are rampant).
 
@@ -141,42 +141,35 @@ scrape [args] [optional arguments]
 
 ### Usage Examples 🙋
 
-- **Get all videos on Massy Sweet’s 'pornstar' page on PornHub that aren't already on media store, whie refreshing metadata for any earlier-saved videos that turn up:**
+1. **_All videos on Massy Sweet’s 'pornstar' page on PornHub that aren't saved locally, refreshing metadata for already saved videos we encounter again:_**
+     ```bash
+     scrape ph pornstar "Massy Sweet" -n
+     ```
 
-  ```bash
-  scrape ph pornstar "Massy Sweet" -n
-  ```
+2. **_All videos produced by MissaX from FamilyPornHD, overwriting existing copies:_**
+     ```bash
+     scrape fphd studio "MissaX" -o
+     ```
 
-- **Get all videos produced by MissaX from FamilyPornHD, overwriting any existing copies**
+3. **_Chloe Temple's videos involving brother-sister (BS) relations not yet saved locally, starting on page 4 of results with 6th video, recording URL for faster scraping when upon matching with local file:_**
+     ```bash
+     scrape if tag "Chloe Temple & BS" -a -p 4.6
+     ```
 
-  ```bash
-  scrape fphd studio "MissaX" -o
-  ```
+4. **_Down and dirty in debug logs for scraping that "real" incest stuff on Lonefun:_**
+     ```bash
+     scrape lf tag "real incest" -d
+     ```
 
-- **Get Chloe Temple's videos involving brother and sister (BS) relations that aren't already downloaded, starting at 6th video, page 4 of results, keep track of any that already are downloaded for faster scraping in future:**
+5. **_One particular vintage mother/daughter/son video on Motherless:_**
+     ```bash
+     scrape https://motherless.com/2ABC9F3
+     ```
 
-  ```bash
-  scrape if tag "Chloe Temple & BS" -a -p 4.6
-  ```
-
-- **Get down and dirty with debug logs as you scrape all that nasty "real" incest content from Lonefun:**
-
-  ```bash
-  scrape lf tag "real incest" -d
-  ```
-
-#### If you already have the URL for a specific video or other supported site mode, you can pass it straight to Smutscrape.
-- **Download a particular vintage mother/daughterson video from Motherless:**
-  
-  ```bash
-  scrape https://motherless.com/2ABC9F3
-  ```
-  
-- **Download all videos from Halle Von's pornstar page on XNXX:
-  
-  ```bash
-  scrape https://www.xnxx.com/pornstar/halle-von
-  ```
+6. **_All videos from Halle Von's pornstar page on XNXX:_**
+     ```bash
+     scrape https://www.xnxx.com/pornstar/halle-von
+     ```
 
 
 ---

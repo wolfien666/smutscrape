@@ -4,7 +4,7 @@
 ▒█▄▄▄█ ▀░░░▀ ░▀▀▀ ░░▀░░ ▀▀▀ ▀▀▀ ▀░▀▀ ▀░░▀ █▀▀▀ ▀▀▀ 
 ```
 
-# Smutscrape · _securing smut to salty pervs over CLI_ 🍆💦
+# _Securing smut to salty pervs over CLI_ 🍆💦
 
 A Python-based tool to scrape and download adult content from various websites straight to your preferred data store.
 

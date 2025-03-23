@@ -1909,7 +1909,7 @@ def display_options():
 	console.print("  [magenta]-n[/magenta], [magenta]--re_nfo[/magenta]           # replace metadata in existing .nfo files")
 	console.print("  [magenta]-a[/magenta], [magenta]--applystate[/magenta]       # add URLs to .state if file exists at destination without overwriting")
 	console.print("  [magenta]-p[/magenta], [magenta]--page[/magenta] [yellow]{ page }[/yellow]    # start scraping on given page of results")
-	console.print("  [magenta]-t[/magenta], [magenta]--stable[/magenta] [yellow]{ path }[/yellow]  # output table of current site configurations")
+	console.print("  [magenta]-t[/magenta], [magenta]--table[/magenta] [yellow]{ path }[/yellow]   # output table of current site configurations")
 	console.print("  [magenta]-d[/magenta], [magenta]--debug[/magenta]            # enable detailed debug logging")
 	console.print("  [magenta]-h[/magenta], [magenta]--help[/magenta]             # show help submenu")
 
@@ -2209,7 +2209,7 @@ def main():
 	parser.add_argument("-n", "--re_nfo", action="store_true", help="Regenerate .nfo files even if they exist.")
 	parser.add_argument("-p", "--page", type=str, default="1", help="Start scraping from this page.number (e.g., 12.9 for page 12, video 9).")
 	parser.add_argument("-a", "--applystate", action="store_true", help="Add URLs to .state if file exists at destination without overwriting.")
-	parser.add_argument("-t", "--stable", type=str, help="Output site table in Markdown and exit.")
+	parser.add_argument("-t", "--table", type=str, help="Output site table in Markdown and exit.")
 	args = parser.parse_args()
 	
 	term_width = get_terminal_width()
@@ -2245,9 +2245,9 @@ def main():
 	print()
 	render_ascii("Smutscrape", general_config, term_width)
 	
-	if args.stable:
-		generate_global_table(term_width, output_path=args.stable)
-		logger.info(f"Generated site table at '{args.stable}'")
+	if args.table:
+		generate_global_table(term_width, output_path=args.table)
+		logger.info(f"Generated site table at '{args.table}'")
 		sys.exit(0)
 	
 	if not args.args:

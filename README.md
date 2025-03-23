@@ -124,30 +124,15 @@ scrape [args] [options]
 ```
 
 **Optional Arguments:**
-- `-o, --overwrite` – Replace files with the same name at the download destination.
-- `-n, --re_nfo` – Replace metadata in existing `.nfo` files.
-- `-a, --applystate` – Add URLs to `.state` if files exist at the destination without overwriting.
-- `-p, --page {page.video}` – Start scraping on the given page and video offset (e.g., `12.9` for page 12, video 9).
-- `-t, --stable {path}` – Output a table of current site configurations to the specified file path.
-- `-d, --debug` – Enable detailed debug logging.
-- `-h, --help` – Show the help submenu.
+- `-p, --page {page.video}` – Start scraping on the given page and video offset (e.g., `12.9` for page 12, ninth video).  
+- `-o, --overwrite` – Downloads every responsive video, ignoring `.state` and overwriting existing files with the same name. ⚠  
+- `-n, --re_nfo` – Operates independently of `--overwrite`, regenerating `.nfo` files with fresh metadata even for existing videos, overwriting any matching `.nfo` files. ⚠  
+- `-a, --applystate` – Retroactively adds URLs to `.state` when matching files exist at your destination, speeding up future runs by skipping known videos without re-downloading.  
+- `-t, --stable {path}` – Generates a Markdown-formatted table of current site configurations with supported modes, metadata, and example queries, matching the one below but dynamically built from `./sites/` configs. Outputs to the specified file path (e.g., `sites.md`).  
+- `-d, --debug` – Enables detailed debug logging.  
+- `-h, --help` – Shows the help submenu.  
 
-### Argument Details
-
-#### Stateful Operation: `--overwrite`, `--re_nfo`, `--applystate`
-**_Smutscrape_** tracks every downloaded video’s URL in `./.state`, skipping videos already successfully placed in your chosen destination (local folder, SMB share, WebDAV).  
-- `--applystate`: Retroactively populates `.state` with URLs of existing files at your destination, speeding up future runs by skipping known videos without re-downloading.  
-- `--overwrite`: Downloads all responsive videos, ignoring `.state` and overwriting files with matching names. **Caution**: Risks overwriting distinct videos with identical titles (e.g., "Hot Scene"), especially as your collection grows and namespace collisions increase.  
-- `--re_nfo`: Regenerates `.nfo` files with fresh metadata, independent of `--overwrite`. **Note**: May overwrite `.nfo` files for different videos with the same name.  
-Mitigate risks by adding `name_suffix: "{unique site identifier}"` in a site’s YAML (e.g., `name_suffix: " - Motherless.com"` for Motherless’s rampant duplicates).
-
-#### Page and Video Offset: `--page`
-Use `--page {page.video}` (e.g., `13.5` for page 13, video 5) to start scraping at a specific page and video (1-based index), then continue through all subsequent videos and pages.
-
-#### Technical Options: `--stable`, `--debug`, `--help`
-- `--stable {path}`: Outputs a table of supported sites and modes, mirroring the one below but generated from `./sites/` configs, to the specified file (e.g., `sites.md`).  
-- `--debug`: Enables verbose logging for troubleshooting.  
-- `--help`: Shows detailed usage info.
+**⚠ Caution**: Using `--overwrite` or `--re_nfo` risks overwriting different videos or `.nfo` files with identical names—a growing concern as your collection expands and generic titles (e.g., "Hot Scene") collide. Mitigate this by adding `name_suffix: "{unique site identifier}"` in a site’s YAML config (e.g., `name_suffix: " - Motherless.com"` for Motherless, where duplicate titles are rampant).
 
 ---
 

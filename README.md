@@ -85,19 +85,22 @@ All Python dependencies are in `requirements.txt`.
 
 Run `python scrape.py` (or `scrape` if symlinked) to download adult content and save metadata in `.nfo` files.
 
-### No Arguments
-
-Get a detailed, aesthetic readout of all supported site modes on your system, dynamically generated from `./sites/` configurations:
-
-  ![Screenshot](https://github.com/io-flux/smutscrape/raw/main/screenshots/screenshot1.jpg)
-
-### Site Identifier Only
-
-Run `scrape {code}` (e.g., `scrape ml`) for detailed info about that site.
-
-Curated notes including tips, caveats, available metadata, special requirements, and usage examples will appear:
-
-  ![Screenshot](https://github.com/io-flux/smutscrape/raw/main/screenshots/screenshot2.jpg)
+<div style="display: flex; justify-content: space-around; align-items: center;">
+  <div style="text-align: center;">
+    <h3>No Arguments</h3>
+    <p>Get a detailed, aesthetic readout of all supported site modes on your system, dynamically generated from <code>./sites/</code> configurations.</p>
+    <a href="https://github.com/io-flux/smutscrape/raw/main/screenshots/screenshot1.jpg">
+      <img src="https://github.com/io-flux/smutscrape/raw/main/screenshots/screenshot1.jpg" alt="No Arguments Screenshot" width="300">
+    </a>
+  </div>
+  <div style="text-align: center;">
+    <h3>Site Identifier Only</h3>
+    <p>Run <code>scrape {code}</code> (e.g., <code>scrape ml</code>) for detailed info about that site—curated notes, tips, caveats, available metadata, special requirements, and usage examples.</p>
+    <a href="https://github.com/io-flux/smutscrape/raw/main/screenshots/screenshot2.jpg">
+      <img src="https://github.com/io-flux/smutscrape/raw/main/screenshots/screenshot2.jpg" alt="Site Identifier Screenshot" width="300">
+    </a>
+  </div>
+</div>
 
 ### Full Command
 

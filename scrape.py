@@ -80,15 +80,14 @@ def load_state():
 		logger.error(f"Failed to load state file '{STATE_FILE}': {e}")
 		return set()
 
-def save_state(state_set):
-	"""Save the state set to .state file, sorted alphabetically."""
+def save_state(url):
+	"""Append a single URL to the end of the .state file."""
 	try:
-		with open(STATE_FILE, 'w', encoding='utf-8') as f:
-			for url in sorted(state_set):
-				f.write(f"{url}\n")
-		logger.debug(f"Updated state file with {len(state_set)} entries")
+		with open(STATE_FILE, 'a', encoding='utf-8') as f:
+			f.write(f"{url}\n")
+		logger.debug(f"Appended URL to state: {url}")
 	except Exception as e:
-		logger.error(f"Failed to save state file '{STATE_FILE}': {e}")
+		logger.error(f"Failed to append to state file '{STATE_FILE}': {e}")
 
 def is_url_processed(url, state_set):
 	"""Check if a URL is in the state set."""
@@ -168,7 +167,7 @@ def construct_filename(title, site_config, general_config):
 	
 	return filename
 
-		
+	
 def construct_url(base_url, pattern, site_config, mode=None, **kwargs):
 	encoding_rules = (
 		site_config['modes'][mode]['url_encoding_rules']
@@ -177,7 +176,35 @@ def construct_url(base_url, pattern, site_config, mode=None, **kwargs):
 	)
 	encoded_kwargs = {}
 	logger.debug(f"Constructing URL with pattern '{pattern}' and mode '{mode}' using encoding rules: {encoding_rules}")
+	
+	# Handle arithmetic expressions like {page - 1}, {page + 2}, etc.
+	page_pattern = r'\{page\s*([+-])\s*(\d+)\}'  # Matches {page - 1}, {page + 2}, etc.
+	match = re.search(page_pattern, pattern)
+	if match and 'page' in kwargs:
+		operator, value = match.group(1), int(match.group(2))
+		page_value = kwargs.get('page')
+		if page_value is not None:
+			try:
+				page_num = int(page_value)
+				if operator == '+':
+					adjusted_page = page_num + value
+				elif operator == '-':
+					adjusted_page = page_num - value
+				# Replace the full expression (e.g., "{page - 1}") with the computed value
+				pattern = pattern.replace(match.group(0), str(adjusted_page))
+				logger.debug(f"Adjusted page {page_value} {operator} {value} = {adjusted_page}")
+			except (ValueError, TypeError):
+				logger.error(f"Invalid page value '{page_value}' for arithmetic adjustment")
+				pattern = pattern.replace(match.group(0), str(page_value))  # Fallback to original
+		else:
+			pattern = pattern.replace(match.group(0), '')  # Remove if page is None
+	elif 'page' in kwargs:
+		encoded_kwargs['page'] = kwargs['page']  # Regular page handling if no arithmetic
+	
+	# Encode remaining kwargs with rules
 	for k, v in kwargs.items():
+		if k == 'page' and match:  # Skip page if already handled by arithmetic
+			continue
 		if isinstance(v, str):
 			encoded_v = v
 			for original, replacement in encoding_rules.items():
@@ -185,7 +212,14 @@ def construct_url(base_url, pattern, site_config, mode=None, **kwargs):
 			encoded_kwargs[k] = encoded_v
 		else:
 			encoded_kwargs[k] = v
-	path = pattern.format(**encoded_kwargs)
+	
+	# Format the pattern with encoded kwargs, handling missing keys gracefully
+	try:
+		path = pattern.format(**encoded_kwargs)
+	except KeyError as e:
+		logger.error(f"Missing key in URL pattern '{pattern}': {e}")
+		return None
+	
 	full_url = urllib.parse.urljoin(base_url, path)
 	logger.debug(f"Constructed URL: {full_url}")
 	return full_url
@@ -262,22 +296,26 @@ def get_selenium_driver(general_config, force_new=False):
 	return general_config['selenium_driver']
 
 
-def process_url(url, site_config, general_config, overwrite, re_nfo, start_page, apply_state=False):
-	"""Process a URL, determining the appropriate mode and handling it."""
+def process_url(url, site_config, general_config, overwrite, re_nfo, start_page, apply_state=False, state_set=None):
 	headers = general_config.get("headers", {}).copy()
 	headers["User-Agent"] = random.choice(general_config["user_agents"])
 	mode, scraper = match_url_to_mode(url, site_config)
 	
+	# Split start_page into page_num and video_offset
+	page_parts = start_page.split('.')
+	page_num = int(page_parts[0])
+	video_offset = int(page_parts[1]) if len(page_parts) > 1 else 0
+	
 	if mode:
 		logger.info(f"Matched URL to mode '{mode}' with scraper '{scraper}'")
 		if mode == "video":
-			success = process_video_page(url, site_config, general_config, overwrite, headers, re_nfo, apply_state=apply_state)
+			success = process_video_page(url, site_config, general_config, overwrite, headers, re_nfo, apply_state=apply_state, state_set=state_set)
 		else:
 			identifier = url.split("/")[-1].split(".")[0]
-			current_page = start_page
+			current_page_num = page_num
+			current_video_offset = video_offset
 			mode_config = site_config["modes"][mode]
-			if current_page > 1 and mode_config.get("url_pattern_pages"):
-				page_num = int(current_page)
+			if page_num > 1 and mode_config.get("url_pattern_pages"):
 				url = construct_url(
 					site_config["base_url"],
 					mode_config["url_pattern_pages"],
@@ -285,16 +323,25 @@ def process_url(url, site_config, general_config, overwrite, re_nfo, start_page,
 					mode=mode,
 					**{mode: identifier, "page": page_num}
 				)
-				logger.info(f"Starting at custom page {current_page}: {url}")
+				logger.info(f"Starting at custom page {page_num}.{video_offset}: {url}")
+			elif page_num == 1:
+				url = construct_url(
+					site_config["base_url"],
+					mode_config["url_pattern"],
+					site_config,
+					mode=mode,
+					**{mode: identifier}
+				)
 			success = False
 			while url:
 				next_page, new_page_number, page_success = process_list_page(
-					url, site_config, general_config, current_page,
-					mode, identifier, overwrite, headers, re_nfo, apply_state=apply_state
+					url, site_config, general_config, current_page_num, current_video_offset,
+					mode, identifier, overwrite, headers, re_nfo, apply_state=apply_state, state_set=state_set
 				)
 				success = success or page_success
 				url = next_page
-				current_page = new_page_number
+				current_page_num = new_page_number
+				current_video_offset = 0  # Reset after first page
 				time.sleep(general_config["sleep"]["between_pages"])
 	else:
 		logger.warning("URL didn't match any specific mode; attempting all configured modes.")
@@ -303,42 +350,36 @@ def process_url(url, site_config, general_config, overwrite, re_nfo, start_page,
 		for mode_name in available_modes:
 			if mode_name == "video":
 				logger.info("Trying 'video' mode...")
-				success = process_video_page(url, site_config, general_config, overwrite, headers, re_nfo, apply_state=apply_state)
+				success = process_video_page(url, site_config, general_config, overwrite, headers, re_nfo, apply_state=apply_state, state_set=state_set)
 				if success:
 					logger.info("Video mode succeeded.")
 					break
 			else:
 				logger.info(f"Attempting mode '{mode_name}'...")
 				identifier = url.split("/")[-1].split(".")[0]
-				current_page = start_page
+				current_page_num = page_num
+				current_video_offset = video_offset
 				mode_config = site_config["modes"][mode_name]
 				if mode_config.get("url_pattern"):
 					try:
 						constructed_url = construct_url(
 							site_config["base_url"],
-							mode_config["url_pattern"],
+							mode_config["url_pattern"] if current_page_num == 1 else mode_config.get("url_pattern_pages", mode_config["url_pattern"]),
 							site_config,
 							mode=mode_name,
-							**{mode_name: identifier}
+							**{mode_name: identifier, "page": current_page_num if current_page_num > 1 else None}
 						)
-						if current_page > 1 and mode_config.get("url_pattern_pages"):
-							constructed_url = construct_url(
-								site_config["base_url"],
-								mode_config["url_pattern_pages"],
-								site_config,
-								mode=mode_name,
-								**{mode_name: identifier, "page": int(current_page)}
-							)
-							logger.info(f"Starting at custom page {current_page}: {constructed_url}")
+						logger.info(f"Starting at custom page {current_page_num}.{current_video_offset}: {constructed_url}")
 						success = False
 						while constructed_url:
 							next_page, new_page_number, page_success = process_list_page(
-								constructed_url, site_config, general_config, current_page,
-								mode_name, identifier, overwrite, headers, re_nfo, apply_state=apply_state
+								constructed_url, site_config, general_config, current_page_num, current_video_offset,
+								mode_name, identifier, overwrite, headers, re_nfo, apply_state=apply_state, state_set=state_set
 							)
 							success = success or page_success
 							constructed_url = next_page
-							current_page = new_page_number
+							current_page_num = new_page_number
+							current_video_offset = 0  # Reset after first page
 							time.sleep(general_config["sleep"]["between_pages"])
 						if success:
 							logger.info(f"Mode '{mode_name}' succeeded.")
@@ -349,14 +390,10 @@ def process_url(url, site_config, general_config, overwrite, re_nfo, start_page,
 		if not success:
 			logger.error(f"Failed to process URL '{url}' with any mode.")
 			process_fallback_download(url, general_config, overwrite)
-	return success 
+	return success
 		
 
-def process_list_page(url, site_config, general_config, current_page=1.0, mode=None, identifier=None, overwrite=False, headers=None, new_nfo=False, do_not_ignore=False, apply_state=False):
-	# Split page into page number and video offset
-	page_num = int(current_page)
-	video_offset = int((current_page - page_num) * 10) if current_page > page_num else 0
-	
+def process_list_page(url, site_config, general_config, page_num=1, video_offset=0, mode=None, identifier=None, overwrite=False, headers=None, new_nfo=False, do_not_ignore=False, apply_state=False, state_set=None):
 	use_selenium = site_config.get('use_selenium', False)
 	driver = get_selenium_driver(general_config) if use_selenium else None
 	soup = fetch_page(url, general_config['user_agents'], headers if headers else {}, use_selenium, driver)
@@ -394,9 +431,6 @@ def process_list_page(url, site_config, general_config, current_page=1.0, mode=N
 		logger.debug(f"No videos found on page {page_num} with selector '{item_selector}'")
 		return None, None, False
 	
-	# Load state from disk once per page
-	state_set = load_state()
-	
 	term_width = get_terminal_width()
 	print()
 	print()
@@ -406,7 +440,7 @@ def process_list_page(url, site_config, general_config, current_page=1.0, mode=N
 	
 	success = False
 	for i, video_element in enumerate(video_elements, 1):
-		if i <= video_offset:
+		if video_offset > 0 and i < video_offset:  # Start at video_offset, 1-based
 			continue
 		
 		video_data = extract_data(video_element, list_scraper['video_item']['fields'], driver, site_config)
@@ -426,23 +460,18 @@ def process_list_page(url, site_config, general_config, current_page=1.0, mode=N
 		counter_line = f"┈┈┈ {counter} ┈ {video_url} ".ljust(term_width, "┈")
 		print(colored(counter_line, "magenta"))
 		
-		# Check if already processed
 		if is_url_processed(video_url, state_set) and not (overwrite or new_nfo):
 			logger.info(f"Skipping already processed video: {video_url}")
 			success = True
 			continue
 		
-		# Process the video
-		video_success = process_video_page(video_url, site_config, general_config, overwrite, headers, new_nfo, do_not_ignore, apply_state=apply_state)
+		video_success = process_video_page(video_url, site_config, general_config, overwrite, headers, new_nfo, do_not_ignore, apply_state=apply_state, state_set=state_set)
 		if video_success:
 			success = True
-			state_set.add(video_url)  # Add to state after successful processing
-			save_state(state_set)
 	
 	if driver:
 		driver.quit()
 	
-	# Pagination logic
 	if mode not in site_config['modes']:
 		logger.warning(f"No pagination for mode '{mode}' as it’s not defined in site_config['modes']")
 		return None, None, success
@@ -466,6 +495,7 @@ def process_list_page(url, site_config, general_config, current_page=1.0, mode=N
 			**{mode: identifier, 'page': page_num + 1}
 		)
 		logger.debug(f"Generated next page URL (pattern-based): {next_url}")
+		
 	elif scraper_pagination:
 		if 'next_page' in scraper_pagination:
 			next_page_config = scraper_pagination['next_page']
@@ -484,7 +514,7 @@ def process_list_page(url, site_config, general_config, current_page=1.0, mode=N
 	return None, None, success
 	
 
-def process_video_page(url, site_config, general_config, overwrite=False, headers=None, new_nfo=False, do_not_ignore=False, apply_state=False):
+def process_video_page(url, site_config, general_config, overwrite=False, headers=None, new_nfo=False, do_not_ignore=False, apply_state=False, state_set=None):
 	global last_vpn_action_time
 	vpn_config = general_config.get('vpn', {})
 	if vpn_config.get('enabled', False):
@@ -497,7 +527,6 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
 	driver = get_selenium_driver(general_config) if use_selenium else None
 	original_url = url
 	
-	# Fetch and extract raw metadata
 	iframe_url = None
 	video_url = None
 	raw_data = {'title': original_url.split('/')[-2]}
@@ -556,20 +585,16 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
 	file_name = construct_filename(final_metadata['title'], site_config, general_config)
 	destination_config = general_config['download_destinations'][0]
 	
-	# Check SMB existence early for SMB destinations
 	state_updated = False
 	if destination_config['type'] == 'smb':
 		smb_path = os.path.join(destination_config['path'], file_name)
 		if not overwrite and file_exists_on_smb(destination_config, smb_path):
 			logger.info(f"File '{smb_path}' exists on SMB share. Skipping download.")
-			if apply_state:
-				state_set = load_state()
-				if not is_url_processed(original_url, state_set):
-					state_set.add(original_url)
-					save_state(state_set)
-					logger.debug(f"Retroactively added {original_url} to state due to existing file and --applystate")
-					state_updated = True
-			# Optionally check NFO if required
+			if apply_state and not is_url_processed(original_url, state_set):
+				state_set.add(original_url)
+				save_state(original_url)
+				logger.debug(f"Retroactively added {original_url} to state due to existing file and --applystate")
+				state_updated = True
 			if general_config.get('make_nfo', False) and has_metadata_selectors(site_config):
 				smb_nfo_path = os.path.join(destination_config['path'], f"{file_name.rsplit('.', 1)[0]}.nfo")
 				if not (new_nfo or file_exists_on_smb(destination_config, smb_nfo_path)):
@@ -582,32 +607,36 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
 				driver.quit()
 			return True
 	
-	# Determine temporary or final path
 	if destination_config['type'] == 'smb':
 		temp_dir = destination_config.get('temporary_storage', os.path.join(tempfile.gettempdir(), 'smutscrape'))
 		os.makedirs(temp_dir, exist_ok=True)
-		destination_path = os.path.join(temp_dir, file_name)
+		final_destination_path = os.path.join(temp_dir, file_name)
+		temp_destination_path = f"{final_destination_path}.part"
 	else:
-		destination_path = os.path.join(destination_config['path'], file_name)
-		if not overwrite and os.path.exists(destination_path):
-			logger.info(f"File '{destination_path}' exists locally. Skipping download.")
-			if apply_state:
-				state_set = load_state()
-				if not is_url_processed(original_url, state_set):
-					state_set.add(original_url)
-					save_state(state_set)
-					logger.debug(f"Retroactively added {original_url} to state due to existing file and --applystate")
-					state_updated = True
-			if driver:
-				driver.quit()
-			return True
+		final_destination_path = os.path.join(destination_config['path'], file_name)
+		temp_destination_path = final_destination_path  # No .part for local
 	
-	# Execute steps
-	success = download_video(video_url, destination_path, site_config, general_config, headers, final_metadata, overwrite)
+	# Check for existing complete file in temp dir
+	if destination_config['type'] == 'smb' and not overwrite and os.path.exists(final_destination_path):
+		video_info = get_video_metadata(final_destination_path)
+		if video_info:
+			logger.info(f"Valid complete file '{final_destination_path}' exists in temp dir. Skipping download.")
+			success = True
+		else:
+			logger.warning(f"Invalid file '{final_destination_path}' in temp dir. Redownloading.")
+			os.remove(final_destination_path)
+			success = download_video(video_url, final_destination_path, site_config, general_config, headers, final_metadata, overwrite)
+	else:
+		success = download_video(video_url, final_destination_path, site_config, general_config, headers, final_metadata, overwrite)
+	
 	if success and general_config.get('make_nfo', False) and has_metadata_selectors(site_config):
-		generate_nfo(destination_path, final_metadata, overwrite or new_nfo)
+		generate_nfo(final_destination_path, final_metadata, overwrite or new_nfo)
 	if success and destination_config['type'] == 'smb':
-		manage_file(destination_path, destination_config, overwrite, video_url=original_url)
+		manage_file(final_destination_path, destination_config, overwrite, video_url=original_url, state_set=state_set)
+	
+	if success and not is_url_processed(original_url, state_set):
+		state_set.add(original_url)
+		save_state(original_url)
 	
 	if driver:
 		driver.quit()
@@ -924,7 +953,7 @@ def upload_to_smb(local_path, smb_path, destination_config, overwrite=False):
 
 
 def get_video_metadata(file_path):
-	"""Extract video duration, resolution, and bitrate using ffprobe."""
+	"""Extract video duration, resolution, and bitrate using ffprobe, with sanity check."""
 	command = [
 		"ffprobe",
 		"-v", "error",
@@ -950,6 +979,11 @@ def get_video_metadata(file_path):
 		
 		# Bitrate in kbps
 		bitrate = int(metadata.get('format', {}).get('bit_rate', 0)) // 1000 if metadata.get('format', {}).get('bit_rate') else 0
+		
+		# Sanity check: reject if file is too small for claimed duration (e.g., < 10KB/s)
+		if duration > 0 and file_size / duration < 10240:  # ~10KB/s minimum, adjustable
+			logger.warning(f"File {file_path} too small ({file_size} bytes) for duration {duration}s")
+			return None
 		
 		return {
 			'size': file_size,
@@ -978,33 +1012,43 @@ def download_file(url, destination_path, method, general_config, site_config, he
 	success = False
 	
 	desc = f"Downloading {os.path.basename(destination_path)}"
+	temp_path = f"{destination_path}.part" 
 	
 	try:
 		if method == "requests":
-			success = download_with_requests(url, destination_path, headers, general_config, site_config, desc)
+			success = download_with_requests(url, temp_path, headers, general_config, site_config, desc)
 		elif method == 'curl':
-			success = download_with_curl(url, destination_path, headers, general_config, site_config, desc)
+			success = download_with_curl(url, temp_path, headers, general_config, site_config, desc)
 		elif method == 'wget':
-			success = download_with_wget(url, destination_path, headers, general_config, site_config, desc)
+			success = download_with_wget(url, temp_path, headers, general_config, site_config, desc)
 		elif method == 'yt-dlp':
-			success = download_with_ytdlp(url, destination_path, headers, general_config, metadata, desc, overwrite=overwrite)
+			success = download_with_ytdlp(url, temp_path, headers, general_config, metadata, desc, overwrite=overwrite)
 		elif method == 'ffmpeg':
-			success = download_with_ffmpeg(url, destination_path, general_config, headers, desc, origin=origin)
+			success = download_with_ffmpeg(url, temp_path, general_config, headers, desc, origin=origin)
 	except Exception as e:
 		logger.error(f"Download method '{method}' failed: {e}")
+		if os.path.exists(temp_path):
+			os.remove(temp_path)
 		return False
 	
-	if success and os.path.exists(destination_path):
-		video_info = get_video_metadata(destination_path)
+	if success and os.path.exists(temp_path):
+		video_info = get_video_metadata(temp_path)
 		if video_info:
+			os.rename(temp_path, destination_path)  # Rename only if valid
 			logger.success(f"Download completed: {os.path.basename(destination_path)}")
 			logger.info(f"Size: {video_info['size_str']} · Duration: {video_info['duration']} · Resolution: {video_info['resolution']}")
+			return True
 		else:
-			logger.warning(f"Download completed: {os.path.basename(destination_path)} (Metadata extraction failed)")
+			logger.warning(f"Download completed but metadata invalid for {temp_path}. Removing.")
+			os.remove(temp_path)
+			return False
 	elif not success:
-		logger.error(f"Download failed for {destination_path}")
+		logger.error(f"Download failed for {temp_path}")
+		if os.path.exists(temp_path):
+			os.remove(temp_path)
+		return False
 	
-	return success
+	return False
 
 	
 def download_with_requests(url, destination_path, headers, general_config, site_config, desc):
@@ -1566,9 +1610,8 @@ def download_video(video_url, destination_path, site_config, general_config, hea
 	return success
 
 
-def manage_file(destination_path, destination_config, overwrite=False, video_url=None):
-	"""Move or upload the video (and NFO) to the final destination, updating state on success."""
-	state_set = load_state()
+def manage_file(destination_path, destination_config, overwrite=False, video_url=None, state_set=None):
+	"""Move or upload the video (and NFO) to the final destination."""
 	success = False
 	
 	if destination_config['type'] == 'smb':
@@ -1597,13 +1640,7 @@ def manage_file(destination_path, destination_config, overwrite=False, video_url
 			apply_permissions(final_path, destination_config)
 			logger.success(f"Moved to local destination: {final_path}")
 			success = True
-	
-	if success and video_url and not is_url_processed(video_url, state_set):
-		state_set.add(video_url)
-		save_state(state_set)
-	
 	return success
-
 
 
 def cleanup(general_config):
@@ -2079,8 +2116,7 @@ def display_usage(term_width):
 	display_options()
 	
 
-def handle_single_arg(arg, general_config, args, term_width):
-	"""Handle a single argument: either a site identifier or a URL."""
+def handle_single_arg(arg, general_config, args, term_width, state_set):
 	if arg.startswith(("http://", "https://")):
 		site_config = None
 		for config_file in os.listdir(SITE_DIR):
@@ -2098,7 +2134,7 @@ def handle_single_arg(arg, general_config, args, term_width):
 			console.print()
 			render_ascii(site_config.get("domain", "unknown"), general_config, term_width)
 			console.print()
-			process_url(arg, site_config, general_config, args.overwrite, args.re_nfo, args.page, apply_state=args.applystate)
+			process_url(arg, site_config, general_config, args.overwrite, args.re_nfo, args.page, apply_state=args.applystate, state_set=state_set)
 		else:
 			logger.warning(f"No site config matched for URL '{arg}'. Falling back to yt-dlp.")
 			process_fallback_download(arg, general_config, args.overwrite)
@@ -2112,11 +2148,8 @@ def handle_single_arg(arg, general_config, args, term_width):
 			
 			display_site_details(site_config, term_width)
 		sys.exit(0 if site_config else 1)
-		
 
-
-def handle_multi_arg(args, general_config, args_obj):
-	"""Handle multiple arguments: site, mode, and query."""
+def handle_multi_arg(args, general_config, args_obj, state_set):
 	site_config = load_configuration('site', args[0])
 	if not site_config:
 		logger.error(f"Site '{args[0]}' not found in configs")
@@ -2133,11 +2166,14 @@ def handle_multi_arg(args, general_config, args_obj):
 		sys.exit(1)
 	
 	mode_config = site_config['modes'][mode]
-	current_page = args_obj.page
+	page_num = args_obj.page_num
+	video_offset = args_obj.video_offset
 	url = construct_url(
 		site_config['base_url'],
-		mode_config.get('url_pattern_pages', mode_config['url_pattern']) if current_page > 1 else mode_config['url_pattern'],
-		site_config, mode=mode, **{mode: identifier, 'page': int(current_page) if current_page > 1 else 1}
+		mode_config['url_pattern'] if page_num == 1 else mode_config.get('url_pattern_pages', mode_config['url_pattern']),
+		site_config,
+		mode=mode,
+		**{mode: identifier, 'page': page_num if page_num > 1 else None}
 	)
 	
 	term_width = get_terminal_width()
@@ -2148,15 +2184,18 @@ def handle_multi_arg(args, general_config, args_obj):
 	
 	handle_vpn(general_config, 'start')
 	if mode == 'video':
-		process_video_page(url, site_config, general_config, args_obj.overwrite, general_config.get('headers', {}), args_obj.re_nfo, apply_state=args_obj.applystate)
+		process_video_page(url, site_config, general_config, args_obj.overwrite, general_config.get('headers', {}), args_obj.re_nfo, apply_state=args_obj.applystate, state_set=state_set)
 	else:
+		current_page_num = page_num
 		while url:
 			next_page, new_page_number, _ = process_list_page(
-				url, site_config, general_config, current_page, mode, identifier,
-				args_obj.overwrite, general_config.get('headers', {}), args_obj.re_nfo, apply_state=args_obj.applystate
+				url, site_config, general_config, current_page_num, video_offset, mode, identifier,
+				args_obj.overwrite, general_config.get('headers', {}), args_obj.re_nfo, apply_state=args_obj.applystate, state_set=state_set
 			)
 			url = next_page
-			current_page = new_page_number
+			current_page_num = new_page_number
+			video_offset = 0  # Reset offset after first page
+			state_set = load_state()
 			time.sleep(general_config['sleep']['between_pages'])
 
 
@@ -2168,7 +2207,7 @@ def main():
 	parser.add_argument("-d", "--debug", action="store_true", help="Enable detailed debug logging.")
 	parser.add_argument("-o", "--overwrite", action="store_true", help="Overwrite existing video files.")
 	parser.add_argument("-n", "--re_nfo", action="store_true", help="Regenerate .nfo files even if they exist.")
-	parser.add_argument("-p", "--page", type=float, default=1.0, help="Start scraping from this page number (e.g., 12 or 12.9 for page 12, video 9).")
+	parser.add_argument("-p", "--page", type=str, default="1", help="Start scraping from this page.number (e.g., 12.9 for page 12, video 9).")
 	parser.add_argument("-a", "--applystate", action="store_true", help="Add URLs to .state if file exists at destination without overwriting.")
 	parser.add_argument("-t", "--stable", type=str, help="Output site table in Markdown and exit.")
 	args = parser.parse_args()
@@ -2199,6 +2238,10 @@ def main():
 		logger.error("Failed to load general configuration. Please check 'config/general.yml'.")
 		sys.exit(1)
 	
+	# Load state once at startup
+	state_set = load_state()
+	logger.info(f"Loaded {len(state_set)} URLs from state file")
+	
 	print()
 	render_ascii("Smutscrape", general_config, term_width)
 	
@@ -2212,11 +2255,16 @@ def main():
 		display_usage(term_width)
 		sys.exit(0)
 	
+	# Split --page into page_num and video_offset
+	page_parts = args.page.split('.')
+	args.page_num = int(page_parts[0])
+	args.video_offset = int(page_parts[1]) if len(page_parts) > 1 else 0
+	
 	try:
 		if len(args.args) == 1:
-			handle_single_arg(args.args[0], general_config, args, term_width)
+			handle_single_arg(args.args[0], general_config, args, term_width, state_set)
 		elif len(args.args) >= 3:
-			handle_multi_arg(args.args, general_config, args)
+			handle_multi_arg(args.args, general_config, args, state_set)
 		else:
 			logger.error("Invalid arguments. Use: scrape {site} {mode} {query} or scrape {url}")
 			display_usage(term_width)
@@ -2224,13 +2272,13 @@ def main():
 	except KeyboardInterrupt:
 		logger.warning("Interrupted by user. Cleaning up...")
 		cleanup(general_config)
-		sys.exit(130)  # Standard exit code for Ctrl+C
+		sys.exit(130)
 	except Exception as e:
 		logger.error(f"Unexpected error occurred: {e}", exc_info=args.debug)
 		cleanup(general_config)
 		sys.exit(1)
 	finally:
-		handle_vpn(general_config, 'stop')  # Ensure VPN is stopped if enabled
+		handle_vpn(general_config, 'stop')
 		cleanup(general_config)
 		logger.info("Scraping session completed.")
 

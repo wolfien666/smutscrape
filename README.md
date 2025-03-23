@@ -1,8 +1,14 @@
-# Smutscrape · _just a scraper for smut, folks!_ 🍆💦
+░██████╗███╗░░░███╗██╗░░░██╗████████╗░██████╗░█████╗░██████╗░░█████╗░██████╗░███████╗
+██╔════╝████╗░████║██║░░░██║╚══██╔══╝██╔════╝██╔══██╗██╔══██╗██╔══██╗██╔══██╗██╔════╝
+╚█████╗░██╔████╔██║██║░░░██║░░░██║░░░╚█████╗░██║░░╚═╝██████╔╝███████║██████╔╝█████╗░░
+░╚═══██╗██║╚██╔╝██║██║░░░██║░░░██║░░░░╚═══██╗██║░░██╗██╔══██╗██╔══██║██╔═══╝░██╔══╝░░
+██████╔╝██║░╚═╝░██║╚██████╔╝░░░██║░░░██████╔╝╚█████╔╝██║░░██║██║░░██║██║░░░░░███████╗
+╚═════╝░╚═╝░░░░░╚═╝░╚═════╝░░░░╚═╝░░░╚═════╝░░╚════╝░╚═╝░░╚═╝╚═╝░░╚═╝╚═╝░░░░░╚══════╝
 
-A Python-based tool to scrape and download adult content from various websites straight to your preferred data store. Whether it’s videos, tags, or search results, **_smutscrape_**`has you covered—discreetly and efficiently. Supports multiple download methods, advanced scraping with Selenium for tricky sites, and metadata extraction stored in`.nfo` files for media management. 😈
 
-![Screenshot](https://github.com/io-flux/smutscrape/raw/main/screenshots/screenshot1.jpg)
+# Smutscrape · _securing smut to salty pervs over CLI_ 🍆💦
+
+A Python-based tool to scrape and download adult content from various websites straight to your preferred data store.
 
 ---
 
@@ -11,7 +17,7 @@ A Python-based tool to scrape and download adult content from various websites s
 - Python 3.10+ 🐍
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) for video downloads
 - Either [wget](https://www.gnu.org/software/wget/) or [curl](https://curl.se/) for alternative downloads
-- [ffmpeg](https://ffmpeg.org/) for M3U8 stream downloads
+- [ffmpeg](https://ffmpeg.org/) for M3U8 stream downloads and metadata validation
 - Recommended: [Conda](https://github.com/conda/conda) or [Mamba](https://github.com/mamba-org/mamba) for environment management 🐼🐍
 - Only for some sites: [Selenium](https://pypi.org/project/selenium/) + [Chromedriver](https://chromedriver.chromium.org/) for JS-heavy sites, and [webdriver-manager](https://pypi.org/project/webdriver-manager/) for foolproof ChromeDriver management.
 
@@ -36,7 +42,7 @@ All Python dependencies are in `requirements.txt`.
    conda activate smutscrape
    pip install -r requirements.txt
 
-   # With pip:**
+   # With pip:
    pip3 install -r requirements.txt
    ```
 
@@ -52,7 +58,7 @@ All Python dependencies are in `requirements.txt`.
    For Selenium (not required for all sites):
 
    ```bash
-   # webdriver-manager will be the best solution for most people:
+   # webdriver-manager is the best solution for most people:
    pip install webdriver-manager
    # ... but a manual chromedriver installation may be necessary for some setups:
    brew install chromedriver
@@ -65,9 +71,10 @@ All Python dependencies are in `requirements.txt`.
    nano config.yaml
    ```
 
-   Dial in your `download_destinations`, `ignored` terms, `selenium` paths, and optional `vpn` integration for more secure and anonymous scraping.
+   Set up `download_destinations`, `ignored` terms, `selenium` paths, and optional `vpn` integration for secure, anonymous scraping.
 
 4. **Make Executable ⚡️**
+
    ```bash
    chmod +x scrape.py
    # Optional: add a symlink for easy use from anywhere
@@ -78,9 +85,17 @@ All Python dependencies are in `requirements.txt`.
 
 ## Usage 🚀
 
-Run `python scrape.py` (or `scrape` if symlinked) to download adult content and save metadata in .nfo files.
+Run `python scrape.py` (or `scrape` if symlinked) to download adult content and save metadata in `.nfo` files.
 
-Build commands with `scrape {code} {mode} {query}` using the table below.
+- **No Arguments**: Get a detailed, aesthetic readout of all supported site modes on your system, dynamically generated from `./sites/` configurations. See `screenshot1.jpg` below.
+
+  ![Screenshot](https://github.com/io-flux/smutscrape/raw/main/screenshots/screenshot1.jpg)
+
+- **Site Identifier Only**: Run `scrape {code}` (e.g., `scrape ml`) for detailed info about that site—curated notes (where available), script limitations, available metadata, special requirements, and usage examples for each mode. See `screenshot2.jpg` below.
+
+  ![Screenshot](https://github.com/io-flux/smutscrape/raw/main/screenshots/screenshot2.jpg)
+
+- **Full Command**: Build commands with `scrape {code} {mode} {query}` or use a direct URL. See the table and examples below.
 
 ### Supported Sites & Modes 🌐
 
@@ -101,8 +116,42 @@ Build commands with `scrape {code} {mode} {query}` using the table below.
 | `xn`   | **_XNXX_** †                  | search · model · tag · studio  | actors · date · description · image · studios · tags |
 | `xv`   | **_XVideos_**                 | search · studio · model · tag · playlist | actors · studios · tags        |
 
-† _Selenium required._
+† _Selenium required._  
 ‡ _Combine terms with "&"._
+
+### Command-Line Arguments
+
+```bash
+scrape [args] [options]
+```
+
+**Optional Arguments:**
+- `-o, --overwrite` – Replace files with the same name at the download destination.
+- `-n, --re_nfo` – Replace metadata in existing `.nfo` files.
+- `-a, --applystate` – Add URLs to `.state` if files exist at the destination without overwriting.
+- `-p, --page {page.video}` – Start scraping on the given page and video offset (e.g., `12.9` for page 12, video 9).
+- `-t, --stable {path}` – Output a table of current site configurations to the specified file path.
+- `-d, --debug` – Enable detailed debug logging.
+- `-h, --help` – Show the help submenu.
+
+### Argument Details
+
+#### Stateful Operation: `--overwrite`, `--re_nfo`, `--applystate`
+**_Smutscrape_** tracks every downloaded video’s URL in `./.state`, skipping videos already successfully placed in your chosen destination (local folder, SMB share, WebDAV).  
+- `--applystate`: Retroactively populates `.state` with URLs of existing files at your destination, speeding up future runs by skipping known videos without re-downloading.  
+- `--overwrite`: Downloads all responsive videos, ignoring `.state` and overwriting files with matching names. **Caution**: Risks overwriting distinct videos with identical titles (e.g., "Hot Scene"), especially as your collection grows and namespace collisions increase.  
+- `--re_nfo`: Regenerates `.nfo` files with fresh metadata, independent of `--overwrite`. **Note**: May overwrite `.nfo` files for different videos with the same name.  
+Mitigate risks by adding `name_suffix: "{unique site identifier}"` in a site’s YAML (e.g., `name_suffix: " - Motherless.com"` for Motherless’s rampant duplicates).
+
+#### Page and Video Offset: `--page`
+Use `--page {page.video}` (e.g., `13.5` for page 13, video 5) to start scraping at a specific page and video (1-based index), then continue through all subsequent videos and pages.
+
+#### Technical Options: `--stable`, `--debug`, `--help`
+- `--stable {path}`: Outputs a table of supported sites and modes, mirroring the one below but generated from `./sites/` configs, to the specified file (e.g., `sites.md`).  
+- `--debug`: Enables verbose logging for troubleshooting.  
+- `--help`: Shows detailed usage info.
+
+---
 
 ### Examples 🙋
 
@@ -147,60 +196,81 @@ Build commands with `scrape {code} {mode} {query}` using the table below.
 
 ## Metadata Magic 🪄
 
-Metadata (e.g., titles, tags, actors) is scraped and saved in `.nfo` files for most sites, ready for use in [Plex](https://plex.tv), [Jellyfin](https://github.com/jellyfin/jellyfin) or [Stash](https://github.com/stashapp) with the [nfoSceneParser](https://github.com/stashapp/CommunityScripts/tree/main/plugins/nfoSceneParser) plugin. Note: _FamilySexVideos_, _TopRealIncestVideos_, and _XVideos_ only provide titles presently, but I hope to add full metadata support on all supported sites soon. Use `--force_new_nfo` to overwrite existing `.nfo` files with fresh metadata.
+Metadata (e.g., titles, tags, actors) is scraped and saved in `.nfo` files for most sites, compatible with [Plex](https://plex.tv), [Jellyfin](https://github.com/jellyfin/jellyfin), or [Stash](https://github.com/stashapp) via the [nfoSceneParser](https://github.com/stashapp/CommunityScripts/tree/main/plugins/nfoSceneParser) plugin. Some sites (e.g., _FamilySex_, _XVideos_) currently offer only titles, with full metadata planned. Use `--re_nfo` to refresh `.nfo` files.
 
 ---
 
 ## Advanced Configuration ⚙️
 
-![Screenshot](https://github.com/io-flux/smutscrape/raw/main/screenshots/screenshot2.jpg)
-
-### Selenium & Chromedriver 🕵️‍♂️
-
-For JS-heavy sites or M3U8 streams:
-
-- Ensure `use_selenium: true` in site config.
-- Used for iframe piercing or M3U8 URL extraction (`m3u8_mode: true`).
-- In `config.yaml`, set `selenium.chromedriver_path` or rely on `webdriver-manager`.
-
 ### Download Destinations 📁
 
-Pick your desired destination for scraped videos and .nfo files in `config.yaml`. Note that the first listed destination will be used, and any others serve as a fallback, e.g. if your network share goes down.
+Define destinations in `config.yaml`. The first is primary, others are fallbacks:
 
 ```yaml
 download_destinations:
   - type: smb
-    server: "192.168.1.69"
-    share: "Media"
-    path: "XXX"
-    username: "user"
-    password: "pass"
-    permissions: # optional
-      uid: 1000
-      gid: 3000
-      mode: "750"
+  server: "192.168.1.69"
+  share: "Media"
+  path: "XXX"
+  username: "user"
+  password: "pass"
+  temporary_storage: "/tmp/smutscrape"  # Optional: local temp dir for SMB uploads
+  permissions:  # Optional
+    uid: 1000
+    gid: 3000
+    mode: "750"
   - type: local
-    path: "~/.xxx"
+  path: "~/.xxx"
 ```
 
-### Overwriting Files
-
-- Use `--overwrite_files` or set `no_overwrite: false` in site config to overwrite videos.
-- Use `--force_new_nfo` to regenerate `.nfo` files regardless of existing ones.
+Videos download to a `.part` file, validated with `ffmpeg` for completeness, then renamed and moved to the destination, preventing partial uploads.
 
 ### Filtering Content 🚫
 
-Skip terms with the ignored field in `config.yaml`:
+Skip unwanted terms in `config.yaml`:
 
 ```yaml
 ignored:
   - "JOI"
   - "Age Play"
+  - "Psycho Thrillers"
+  - "Virtual Sex"
 ```
+
+### Selenium & Chromedriver 🕵️‍♂️
+
+For JS-heavy sites or HLS streams (marked with †), Selenium with ChromeDriver is required to emulate a browser session. By default, the script uses `webdriver-manager` for seamless setup. For manual configuration (e.g., macOS):
+
+1. **Install Chrome Binary**:
+
+  ```bash
+  wget https://storage.googleapis.com/chrome-for-testing-public/134.0.6998.88/mac-arm64/chrome-mac-arm64.zip
+  unzip chrome-mac-arm64.zip
+  chmod +x "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+  sudo mv "chrome-mac-arm64/Google Chrome for Testing.app" /Applications/
+  ```
+
+2. **Install Chromedriver**:
+
+  ```bash
+  wget https://storage.googleapis.com/chrome-for-testing-public/134.0.6998.88/mac-arm64/chromedriver-mac-arm64.zip
+  unzip chromedriver-mac-arm64.zip
+  chmod +x chromedriver-mac-arm64/chromedriver
+  sudo mv chromedriver-mac-arm64/chromedriver /usr/local/bin/chromedriver
+  ```
+
+3. **Update `config.yaml`**:
+
+  ```yaml
+  selenium:
+    mode: "local"
+    chromedriver_path: "/usr/local/bin/chromedriver"
+    chrome_binary: "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+  ```
 
 ### VPN Support 🔒
 
-Enable in `config.yaml` and configure the start_cmd and new_node_cmd commands to match your VPN of choice:
+**_Smutscrape_** can be set to automatically rotate VPN exit-nodes, using most existing VPN apps that have CLI tools. In `config.yaml`, enable and configure:
 
 ```yaml
 vpn:
@@ -208,8 +278,16 @@ vpn:
   vpn_bin: "/usr/bin/protonvpn"
   start_cmd: "{vpn_bin} connect -f"
   new_node_cmd: "{vpn_bin} connect -r"
-  new_node_time: 1200 # refresh IP/geolocation every 20 minutes
+  new_node_time: 1200  # Refresh IP every 20 minutes
 ```
+
+---
+
+## Contributing 🤝
+
+**_Smutscrape_** welcomes contributions! Its current 2200-line monolithic design isn’t collaboration-friendly, so refactoring into a modular, Pythonic app is a priority. Meanwhile, adding site configurations—YAML files with URL schemes and CSS selectors—is a simple, valuable contribution.
+
+Inspired by [Stash CommunityScrapers](https://github.com/stashapp/CommunityScrapers), **_Smutscrape_**’s YAML configs adapt its structure. We use CSS selectors instead of XPath (though conversion is straightforward), and metadata fields port easily. The challenge is video downloading—some sites use iframes or countermeasures—but the yt-dlp fallback often simplifies this. Adapting a CommunityScrapers site for **_Smutscrape_** is a great way to contribute. Pick a site, tweak the config, and submit a pull request!
 
 ---
 

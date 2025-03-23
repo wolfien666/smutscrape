@@ -23,7 +23,7 @@ modes:
   search:
     scraper: list_scraper
     url_pattern: "/search/{search}"
-    url_pattern_pages: "/search/{search}/{page}"
+    url_pattern_pages: "/search/{search}/{page - 1}" # setback needed
     url_encoding_rules:
       " ": "+"
       "%20": "+"
@@ -35,7 +35,7 @@ modes:
   model:
     scraper: list_scraper
     url_pattern: "/pornstar/{model}"
-    url_pattern_pages: "/pornstar/{model}/{page}"
+    url_pattern_pages: "/pornstar/{model}#_videos,page-{page}"
     tip: "Download videos featuring model"
     examples:
       - "Ohana Petite"
@@ -45,7 +45,7 @@ modes:
   tag:
     scraper: list_scraper
     url_pattern: "/tags/{tag}"
-    url_pattern_pages: "/tags/{tag}/{page}"
+    url_pattern_pages: "/tags/{tag}/{page - 1}" # setback needed
     tip: "Download videos with tag"
     examples:
       - "Teen pigtails"

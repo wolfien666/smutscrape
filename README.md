@@ -125,15 +125,15 @@ Run `python scrape.py` (or `scrape` if symlinked) to download adult content and 
 scrape [args] [optional arguments]
 ```
 
-| argument           | summary                                                                                              |
-| -------------------| ---------------------------------------------------------------------------------------------------- |
-| `-p {p}.{video}`   | start scraping on a given page and video (e.g., `-p 12.9` to start at video 9 on page 12.            |
-| `-o, --overwrite`  | download all videos, ignoring `.state` and overwriting existing media when filenames collide. ⚠      |
-| `-n, --re_nfo`     | refresh metadata and write new `.nfo` files, irrespective of whether `--overwrite` is set. ⚠         |
-| `-a, --applystate` | retroactively add URL to `.state` without re-downloading if local file matches (`-o` has priority).  |
-| `-t, --stable`     | generate markdown table of active site configurations with modes, metadata, and examples.            |
-| `-d, --debug`      | enable detailed debug logging.                                                                       |
-| `-h, --help`       | show the help submenu.                                                                               |
+| argument             | summary                                                                                              |
+| ---------------------| ---------------------------------------------------------------------------------------------------- |
+| `-p {p}.{video}`     | start scraping on a given page and video (e.g., `-p 12.9` to start at video 9 on page 12.            |
+| `-o, --overwrite`    | download all videos, ignoring `.state` and overwriting existing media when filenames collide. ⚠      |
+| `-n, --re_nfo`       | refresh metadata and write new `.nfo` files, irrespective of whether `--overwrite` is set. ⚠         |
+| `-a, --applystate`   | retroactively add URL to `.state` without re-downloading if local file matches (`-o` has priority).  |
+| `-t, --table {path}` | generate markdown table of active site configurations with modes, metadata, and examples.            |
+| `-d, --debug`        | enable detailed debug logging.                                                                       |
+| `-h, --help`         | show the help submenu.                                                                               |
 
 **⚠ Caution**: Using `--overwrite` or `--re_nfo` risks overwriting different videos or `.nfo` files with identical names—a growing concern as your collection expands and generic titles (e.g., "Hot Scene") collide. Mitigate this by adding `name_suffix: "{unique site identifier}"` in a site’s YAML config (e.g., `name_suffix: " - Motherless.com"` for Motherless, where duplicate titles are rampant).
 

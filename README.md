@@ -85,17 +85,23 @@ All Python dependencies are in `requirements.txt`.
 
 Run `python scrape.py` (or `scrape` if symlinked) to download adult content and save metadata in `.nfo` files.
 
-- **No Arguments**: Get a detailed, aesthetic readout of all supported site modes on your system, dynamically generated from `./sites/` configurations. See `screenshot1.jpg` below.
+### No Arguments
+
+Get a detailed, aesthetic readout of all supported site modes on your system, dynamically generated from `./sites/` configurations:
 
   ![Screenshot](https://github.com/io-flux/smutscrape/raw/main/screenshots/screenshot1.jpg)
 
-- **Site Identifier Only**: Run `scrape {code}` (e.g., `scrape ml`) for detailed info about that site—curated notes (where available), script limitations, available metadata, special requirements, and usage examples for each mode. See `screenshot2.jpg` below.
+### Site Identifier Only
+
+Run `scrape {code}` (e.g., `scrape ml`) for detailed info about that site.
+
+Curated notes including tips, caveats, available metadata, special requirements, and usage examples will appear:
 
   ![Screenshot](https://github.com/io-flux/smutscrape/raw/main/screenshots/screenshot2.jpg)
 
-- **Full Command**: Build commands with `scrape {code} {mode} {query}` or use a direct URL. See the table and examples below.
+### Full Command
 
-### Supported Sites & Modes 🌐
+Build commands with `scrape {code} {mode} {query}`, referring to the table of codes, sites, modes, and metadata:
 
 | code   | site                          | modes                          | metadata                       |
 | ------ | ----------------------------- | ------------------------------ | ------------------------------ |
@@ -120,10 +126,9 @@ Run `python scrape.py` (or `scrape` if symlinked) to download adult content and 
 ### Command-Line Arguments
 
 ```bash
-scrape [args] [options]
+scrape [args] [optional arguments]
 ```
 
-**Optional Arguments:**
 - `-p, --page {page.video}` – Start scraping on the given page and video offset (e.g., `12.9` for page 12, ninth video).  
 - `-o, --overwrite` – Downloads every responsive video, ignoring `.state` and overwriting existing files with the same name. ⚠  
 - `-n, --re_nfo` – Operates independently of `--overwrite`, regenerating `.nfo` files with fresh metadata even for existing videos, overwriting any matching `.nfo` files. ⚠  

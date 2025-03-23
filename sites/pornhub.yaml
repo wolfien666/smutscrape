@@ -22,7 +22,7 @@ modes:
       - "ph632c32fa34220"
   model:
     url_pattern: "/model/{model}/videos"
-    url_pattern: "/model/{model}/videos?page={page}"
+    url_pattern_pages: "/model/{model}/videos?page={page}"
     scraper: list_scraper
     tip: "Download videos featuring model"
     note: "Models are typically less established than pornstars"
@@ -33,8 +33,8 @@ modes:
       - "Solazola"
       - "MariMoore"
   category:
-    url_pattern: "/categories/{tag}"
-    url_pattern_pages: "/categories/{tag}?page={page}" 
+    url_pattern: "/categories/{category}"
+    url_pattern_pages: "/categories/{category}?page={page}" 
     scraper: list_scraper
     tip: "Download videos under category"
     note: "Most categories are not accessible this way and only accessible using the seperate tag mode"
@@ -64,6 +64,7 @@ modes:
       - "Pure Taboo"
   search:
     url_pattern: "/video/search?search={search}"
+    url_pattern_pages: "/video/search?search={search}&page={page}"
     scraper: list_scraper
     tip: "Download videos from search results"
     examples:
@@ -73,7 +74,8 @@ modes:
       - "18 Years Old"
       - "Hard Rough Sex"
   pornstar:
-    url_pattern: "/pornstar/{pornstar}"
+    url_pattern: "/pornstar/{pornstar}/videos/upload"
+    url_pattern_pages: "/pornstar/{pornstar}/videos/upload?page={page}"
     scraper: list_scraper
     tip: "Download videos featuring pornstar"
     url_encoding_rules:
@@ -141,7 +143,3 @@ scrapers:
         url:
           selector: "a.linkVideoThumb"
           attribute: "href"
-    pagination:
-      next_page:
-        selector: "li.page_next a"
-        attribute: "href"

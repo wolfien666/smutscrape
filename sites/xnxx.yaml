@@ -44,8 +44,11 @@ modes:
       - "Kirsten Lee"
   tag:
     scraper: list_scraper
-    url_pattern: "/tags/{tag}"
-    url_pattern_pages: "/tags/{tag}/{page - 1}" # setback needed
+    url_pattern: "/search/{tag}"
+    url_pattern_pages: "/search/{tag}/{page - 1}" # setback needed
+    url_encoding_rules:
+      " ": "+"
+      "%20": "+"
     tip: "Download videos with tag"
     examples:
       - "Teen pigtails"
@@ -108,7 +111,3 @@ scrapers:
           attribute: "href"
         title:
           attribute: "title"
-    pagination:
-      next_page:
-        selector: "div.pagination a.next"
-        attribute: "href"

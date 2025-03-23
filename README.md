@@ -1,8 +1,8 @@
-   ```
+<pre style="color: #246;">
    ▒█▀▀▀█ █▀▄▀█ █░░█ ▀▀█▀▀ █▀▀ █▀▀ █▀▀█ █▀▀█ █▀▀█ █▀▀ 
    ░▀▀▀▄▄ █░▀░█ █░░█ ░░█░░ ▀▀█ █░░ █▄▄▀ █▄▄█ █░░█ █▀▀ 
    ▒█▄▄▄█ ▀░░░▀ ░▀▀▀ ░░▀░░ ▀▀▀ ▀▀▀ ▀░▀▀ ▀░░▀ █▀▀▀ ▀▀▀ 
-   ```
+</pre>
 
 # _Securing smut to salty pervs over CLI_ 🍆💦
 
@@ -114,10 +114,8 @@ Run `python scrape.py` (or `scrape` if symlinked) to download adult content and 
 | `xn`   | **_XNXX_** †                  | search · model · tag · studio  | actors · date · description · image · studios · tags |
 | `xv`   | **_XVideos_**                 | search · studio · model · tag · playlist | actors · studios · tags        |
 
----
-
-† _Selenium required._  
-‡ _Combine terms with "&"._
+ † _**[Selenium](https://github.com/SeleniumHQ/selenium)** with **chromedriver** required._         
+ ‡ _Combine terms with "&"._     
 
 ---
 
@@ -143,42 +141,43 @@ scrape [args] [optional arguments]
 
 ### Usage Examples 🙋
 
-- **Pornhub: Massy Sweet’s Pornstar Page 👧**
+- **Get all videos on Massy Sweet’s 'pornstar' page on PornHub that aren't already on media store, whie refreshing metadata for any earlier-saved videos that turn up:**
 
   ```bash
-  scrape ph pornstar "Massy Sweet"
-  # OR
-  scrape https://www.pornhub.com/pornstar/massy-sweet
+  scrape ph pornstar "Massy Sweet" -n
   ```
 
-- **FamilyPornHD: MissaX Videos 👒**
+- **Get all videos produced by MissaX from FamilyPornHD, overwriting any existing copies**
 
   ```bash
-  scrape fphd studio "MissaX"
-  # OR
-  scrape https://familypornhd.com/category/missax/
+  scrape fphd studio "MissaX" -o
   ```
 
-- **Incestflix: Chloe Temple in Brother-Sister Videos, Page 4 👧👦🏼**
+- **Get Chloe Temple's videos involving brother and sister (BS) relations that aren't already downloaded, starting at 6th video, page 4 of results, keep track of any that already are downloaded for faster scraping in future:**
 
   ```bash
-  scrape if search "Chloe Temple & BS" --start_on_page 4
-  # OR
-  scrape http://www.incestflix.com/tag/Chloe-Temple/and/BS/page/4
+  scrape if tag "Chloe Temple & BS" -a -p 4.6
   ```
 
-- **Lonefun: "Real Incest" Tagged Videos 🧬**
+- **Get down and dirty with debug logs as you scrape all that nasty "real" incest content from Lonefun:**
 
   ```bash
-  scrape lf tag "real incest"
-  # OR
-  scrape https://lonefun.com/@real+incest
+  scrape lf tag "real incest" -d
   ```
 
-- **Motherless: One Video In Particular... (Vintage Mother/Daughter/Son) 🙊🙈**
+#### If you already have the URL for a specific video or other supported site mode, you can pass it straight to Smutscrape.
+- **Download a particular vintage mother/daughterson video from Motherless:**
+  
   ```bash
   scrape https://motherless.com/2ABC9F3
   ```
+  
+- **Download all videos from Halle Von's pornstar page on XNXX:
+  
+  ```bash
+  scrape https://www.xnxx.com/pornstar/halle-von
+  ```
+
 
 ---
 
@@ -186,30 +185,30 @@ scrape [args] [optional arguments]
 
 ### Download Destinations 📁
 
-Define destinations in `config.yaml`. The first is primary, others are fallbacks:
+Define destinations in `config.yaml`. The first is primary, any others are fallbacks.
 
 ```yaml
 download_destinations:
   - type: smb
-  server: "192.168.1.69"
-  share: "Media"
-  path: "XXX"
-  username: "user"
-  password: "pass"
-  temporary_storage: "/tmp/smutscrape"  # Optional: local temp dir for SMB uploads
-  permissions:  # Optional
-    uid: 1000
-    gid: 3000
-    mode: "750"
+    server: "192.168.69.69"
+    share: "media"
+    path: "xxx"
+    username: "ioflux"
+    password: "th3P3rv3rtsGu1d3"
+    permissions:
+      uid: 1000
+      gid: 3003
+      mode: "750"
+    temporary_storage: "/Users/ioflux/.private/incomplete"
   - type: local
-  path: "~/.xxx"
+    path: "/Users/ioflux/.private/xxx"
 ```
 
-Videos download to a `.part` file, validated with `ffmpeg` for completeness, then renamed and moved to the destination, preventing partial uploads.
+*Smutscrape was built with SMB in mind, and it's the recommended mode when it fits.*
 
 ### Filtering Content 🚫
 
-Skip unwanted terms in `config.yaml`:
+Add any content you want Smutscrape to avoid altogether to the `ignored` terms list in your `config.yaml`:
 
 ```yaml
 ignored:
@@ -219,9 +218,11 @@ ignored:
   - "Virtual Sex"
 ```
 
+All metadata fields are checked against the `ignored` list, so you can include specific genres, sex acts, performers, studios, etc. that you do not want content of.
+
 ### Selenium & Chromedriver 🕵️‍♂️
 
-For JS-heavy sites or HLS streams (marked with †), Selenium with ChromeDriver is required to emulate a browser session. By default, the script uses `webdriver-manager` for seamless setup. For manual configuration (e.g., macOS):
+For Javascript-heavy sites (marked on the table with †), **selenium** with **chromedriver** is required. By default, the script uses `webdriver-manager` for seamless setup. Some setups require a manual installation, including macOS typically. This worked for me:
 
 1. **Install Chrome Binary**:
 
@@ -272,7 +273,5 @@ vpn:
 Inspired by [Stash CommunityScrapers](https://github.com/stashapp/CommunityScrapers), **_Smutscrape_**’s YAML configs adapt its structure. We use CSS selectors instead of XPath (though conversion is straightforward), and metadata fields port easily. The challenge is video downloading—some sites use iframes or countermeasures—but the yt-dlp fallback often simplifies this. Adapting a CommunityScrapers site for **_Smutscrape_** is a great way to contribute. Pick a site, tweak the config, and submit a pull request!
 
 ---
-
-## Disclaimer ⚠️
 
 Scrape responsibly! You’re on your own. 🧠💭

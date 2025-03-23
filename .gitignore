@@ -17,6 +17,7 @@ venv/
 .env/
 
 # Log files
+.state
 *.log
 logs/*
 wget-log

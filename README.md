@@ -95,7 +95,9 @@ Run `python scrape.py` (or `scrape` if symlinked) to download adult content and 
       scrape {code} {mode} {query}
 ``` 
 
-### Use site table to fill in code and mode — or `scrape` without arguments for dynamically generated table:
+### Supported sites and modes:
+
+Refer to this table of supported sites with available modes and metadata, or see the current configuration with latest updates by simply running `scrape` without arguments.
 
 | code   | site                          | modes                          | metadata                       |
 | ------ | ----------------------------- | ------------------------------ | ------------------------------ |

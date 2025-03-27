@@ -15,7 +15,7 @@ url_encoding_rules:
 
 modes:
   video:
-    url_pattern: "/{video}/video/{title}"
+    url_pattern: "/{video}"
     scraper: video_scraper
     tip: "Download video with identifier"
     examples:
@@ -56,7 +56,7 @@ modes:
 scrapers:
   video_scraper:
     title:
-      selector: "head title"
+      selector: "h1.main_content_title"
     download_url:
       selector: "meta[property='og:video']"
       attribute: "content"

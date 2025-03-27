@@ -85,7 +85,7 @@ def save_state(url):
 	try:
 		with open(STATE_FILE, 'a', encoding='utf-8') as f:
 			f.write(f"{url}\n")
-		logger.debug(f"Appended URL to state: {url}")
+		logger.info(f"Appended URL to state: {url}")
 	except Exception as e:
 		logger.error(f"Failed to append to state file '{STATE_FILE}': {e}")
 
@@ -221,7 +221,7 @@ def construct_url(base_url, pattern, site_config, mode=None, **kwargs):
 		return None
 	
 	full_url = urllib.parse.urljoin(base_url, path)
-	logger.debug(f"Constructed URL: {full_url}")
+	logger.info(f"Constructed URL: {full_url}")
 	return full_url
 
 
@@ -385,7 +385,7 @@ def process_url(url, site_config, general_config, overwrite, re_nfo, start_page,
 							logger.info(f"Mode '{mode_name}' succeeded.")
 							break
 					except Exception as e:
-						logger.debug(f"Mode '{mode_name}' failed: {e}")
+						logger.warning(f"Mode '{mode_name}' failed: {e}")
 						continue
 		if not success:
 			logger.error(f"Failed to process URL '{url}' with any mode.")
@@ -494,7 +494,7 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
 			mode=mode,
 			**{mode: identifier, 'page': page_num + 1}
 		)
-		logger.debug(f"Generated next page URL (pattern-based): {next_url}")
+		logger.info(f"Generated next page URL (pattern-based): {next_url}")
 		
 	elif scraper_pagination:
 		if 'next_page' in scraper_pagination:
@@ -504,7 +504,7 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
 				next_url = next_page.get(next_page_config.get('attribute', 'href'))
 				if next_url and not next_url.startswith(('http://', 'https://')):
 					next_url = urllib.parse.urljoin(base_url, next_url)
-				logger.debug(f"Found next page URL (selector-based): {next_url}")
+				logger.info(f"Found next page URL (selector-based): {next_url}")
 			else:
 				logger.warning(f"No 'next' element found with selector '{next_page_config.get('selector')}'")
 	
@@ -522,7 +522,7 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
 		if current_time - last_vpn_action_time > vpn_config.get('new_node_time', 300):
 			handle_vpn(general_config, 'new_node')
 	
-	logger.debug(f"Processing video page: {url}")
+	logger.info(f"Processing video page: {url}")
 	use_selenium = site_config.get('use_selenium', False)
 	driver = get_selenium_driver(general_config) if use_selenium else None
 	original_url = url
@@ -593,7 +593,7 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
 			if apply_state and not is_url_processed(original_url, state_set):
 				state_set.add(original_url)
 				save_state(original_url)
-				logger.debug(f"Retroactively added {original_url} to state due to existing file and --applystate")
+				logger.info(f"Retroactively added {original_url} to state due to existing file and --applystate")
 				state_updated = True
 			if general_config.get('make_nfo', False) and has_metadata_selectors(site_config):
 				smb_nfo_path = os.path.join(destination_config['path'], f"{file_name.rsplit('.', 1)[0]}.nfo")
@@ -1844,16 +1844,15 @@ def render_ascii(input_text, general_config, term_width, font=None):
 			# logger.debug(f"Qualifying fonts (width <= {max_width}): {qualifying_fonts}")
 			
 			if not qualifying_fonts:
+				# If no qualifying fonts, use the narrowest available
 				qualifying_fonts = sorted(font_widths.items(), key=lambda x: x[1])
 				selected_font, art_width = qualifying_fonts[0]
 				logger.debug(f"No fonts fit within {max_width} characters. Using narrowest available: '{selected_font}' with width {art_width}")
 			else:
-				# Sort by width descending and take top 3
+				# Simply take the largest qualifying font
 				sorted_fonts = sorted(qualifying_fonts, key=lambda x: x[1], reverse=True)
-				top_fonts = sorted_fonts[:min(3, len(sorted_fonts))]
-				# logger.debug(f"Top qualifying fonts: {top_fonts}")
-				selected_font, art_width = random.choice(top_fonts)
-				logger.debug(f"Selected font: '{selected_font}' with width {art_width}")
+				selected_font, art_width = sorted_fonts[0]
+				logger.debug(f"Selected largest qualifying font: '{selected_font}' with width {art_width}")
 
 	# Render final art with the selected font
 	try:

@@ -6,7 +6,7 @@ domain: xHamster.com
 base_url: "https://xhamster.com"
 selector_style: css
 no_overwrite: true
-use_selenium: false
+use_selenium: true
 download:
   method: "yt-dlp"
 url_encoding_rules:
@@ -23,7 +23,7 @@ modes:
       - "family-12900151"
       - "daddy-daughter-compilation-2-14879275"
   model:
-    url_pattern: "/pornstars/{model}/recommended"
+    url_pattern: "/pornstars/{model}"
     url_pattern_pages: "/pornstars/{model}/{page}"
     scraper: list_scraper
     max_pages: 999

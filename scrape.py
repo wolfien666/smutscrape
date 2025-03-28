@@ -5,31 +5,30 @@ import yaml
 import art
 import requests
 import cloudscraper
-from bs4 import BeautifulSoup
 import os
 import tempfile
 import subprocess
 import time
 import re
 import sys
-import urllib.parse
-from urllib.parse import urlparse
-from smb.SMBConnection import SMBConnection
-from datetime import datetime
 import random
 import io
-import shlex
+import string
+import textwrap
 import json
 import pwd
 import grp
 import shutil
 import shlex
-import json
 import uuid
+import urllib.parse
+from urllib.parse import urlparse
+from bs4 import BeautifulSoup
+from smb.SMBConnection import SMBConnection
+from datetime import datetime
 from loguru import logger
 from tqdm import tqdm
 from termcolor import colored
-import textwrap
 from rich.console import Console
 from rich.table import Table
 from rich.style import Style
@@ -138,11 +137,18 @@ def construct_filename(title, site_config, general_config):
 	invalid_chars = general_config['file_naming']['invalid_chars']
 	max_chars = general_config['file_naming'].get('max_chars', 255)  # Default to 255 if not specified
 	
+	# Get unique name settings - use boolean values to handle YAML's various ways of representing true/false
+	unique_name = bool(site_config.get("unique_name", False))
+	make_unique = bool(general_config['file_naming'].get('make_unique', False))
+	
 	# Process title by removing invalid characters
 	processed_title = process_title(title, invalid_chars)
 	
-	# Calculate available length for the title
-	fixed_length = len(prefix) + len(suffix) + len(extension)
+	# Generate a unique ID if needed (6 random characters)
+	unique_id = '_' + ''.join(random.choices(string.ascii_lowercase + string.ascii_uppercase + string.digits, k=6)) if unique_name or make_unique else ''
+	
+	# Calculate available length for the title, accounting for the unique ID if present
+	fixed_length = len(prefix) + len(suffix) + len(extension) + len(unique_id)
 	max_title_chars = min(max_chars, 255) - fixed_length  # Hard cap at 255 chars total
 	
 	if max_title_chars <= 0:
@@ -154,19 +160,27 @@ def construct_filename(title, site_config, general_config):
 		processed_title = processed_title[:max_title_chars].rstrip()
 		logger.debug(f"Truncated title to {max_title_chars} chars: {processed_title}")
 	
-	# Construct final filename
-	filename = f"{prefix}{processed_title}{suffix}{extension}"
+	# Construct final filename with unique ID before extension
+	if unique_id:
+		filename = f"{prefix}{processed_title}{suffix}{unique_id}{extension}"
+	else:
+		filename = f"{prefix}{processed_title}{suffix}{extension}"
 	
 	# Double-check byte length (Linux limit is 255 bytes, not chars)
 	while len(filename.encode('utf-8')) > 255:
 		excess = len(filename.encode('utf-8')) - 255
 		trim_chars = excess // 4 + 1  # Rough estimate for UTF-8; adjust conservatively
 		processed_title = processed_title[:-trim_chars].rstrip()
-		filename = f"{prefix}{processed_title}{suffix}{extension}"
+		
+		# Reconstruct the filename with the trimmed title
+		if unique_id:
+			filename = f"{prefix}{processed_title}{suffix}{unique_id}{extension}"
+		else:
+			filename = f"{prefix}{processed_title}{suffix}{extension}"
+			
 		logger.debug(f"Filename exceeded 255 bytes; trimmed to: {filename}")
 	
 	return filename
-
 	
 def construct_url(base_url, pattern, site_config, mode=None, **kwargs):
 	encoding_rules = (
@@ -221,7 +235,6 @@ def construct_url(base_url, pattern, site_config, mode=None, **kwargs):
 		return None
 	
 	full_url = urllib.parse.urljoin(base_url, path)
-	logger.info(f"Constructed URL: {full_url}")
 	return full_url
 
 
@@ -611,10 +624,10 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
 		temp_dir = destination_config.get('temporary_storage', os.path.join(tempfile.gettempdir(), 'smutscrape'))
 		os.makedirs(temp_dir, exist_ok=True)
 		final_destination_path = os.path.join(temp_dir, file_name)
-		temp_destination_path = f"{final_destination_path}.part"
+		temp_destination_path = os.path.join(temp_dir, f".{file_name}")  # Changed from .part suffix to . prefix
 	else:
 		final_destination_path = os.path.join(destination_config['path'], file_name)
-		temp_destination_path = final_destination_path  # No .part for local
+		temp_destination_path = final_destination_path  # No prefix for local
 	
 	# Check for existing complete file in temp dir
 	if destination_config['type'] == 'smb' and not overwrite and os.path.exists(final_destination_path):
@@ -1000,6 +1013,7 @@ def get_video_metadata(file_path):
 		return None
 
 
+
 def download_file(url, destination_path, method, general_config, site_config, headers=None, metadata=None, origin=None, overwrite=False):
 	if not url:
 		logger.error("Invalid or empty URL")
@@ -1012,7 +1026,7 @@ def download_file(url, destination_path, method, general_config, site_config, he
 	success = False
 	
 	desc = f"Downloading {os.path.basename(destination_path)}"
-	temp_path = f"{destination_path}.part" 
+	temp_path = os.path.join(os.path.dirname(destination_path), f".{os.path.basename(destination_path)}")  # Changed from .part suffix to . prefix
 	
 	try:
 		if method == "requests":
@@ -1050,7 +1064,6 @@ def download_file(url, destination_path, method, general_config, site_config, he
 	
 	return False
 
-	
 def download_with_requests(url, destination_path, headers, general_config, site_config, desc):
 	ua = headers.get('User-Agent', random.choice(general_config['user_agents']))
 	headers["User-Agent"] = ua
@@ -1452,11 +1465,11 @@ def get_available_modes(site_config):
 
 def has_metadata_selectors(site_config, return_fields=False):
 	"""
-	Check if the site config has selectors for metadata fields beyond title and download_url.
+	Check if the site config has selectors for metadata fields beyond title, download_url, and image.
 	If return_fields=True, return the list of fields instead of a boolean.
 	"""
 	video_scraper = site_config.get('scrapers', {}).get('video_scraper', {})
-	excluded = {'title', 'download_url'}
+	excluded = {'title', 'download_url', 'image'}
 	metadata_fields = [field for field in video_scraper.keys() if field not in excluded]
 	
 	if return_fields:
@@ -1961,6 +1974,7 @@ def display_site_details(site_config, term_width):
     download_method = site_config.get("download", {}).get("method", "N/A")
     use_selenium = site_config.get("use_selenium", False)
     name_suffix = site_config.get("name_suffix", None)
+    unique_name = bool(site_config.get("unique_name", False))
     metadata = has_metadata_selectors(site_config, return_fields=True)
     site_note = site_config.get("note", None)
     
@@ -1982,6 +1996,8 @@ def display_site_details(site_config, term_width):
         console.print(f"{'note:':>{label_width}} {site_note}")
     if name_suffix:
         console.print(f"{'note:':>{label_width}} Filenames are appended with [bold]\"{name_suffix}\"[/bold].")
+    if unique_name is True:
+        console.print(f"{'note:':>{label_width}} Filenames are appended with a UID to avoid filename collisions, at the risk of downloading multiple duplicates.")
     if use_selenium:
         console.print(f"{'note:':>{label_width}} [yellow][bold]selenium[/bold][/yellow] and [yellow][bold]chromedriver[/bold][/yellow] are required to scrape this site.")
         console.print(f"{'':>{label_width}} See: https://github.com/io-flux/smutscrape#selenium--chromedriver-%EF%B8%8F%EF%B8%8F")
@@ -2164,6 +2180,12 @@ def handle_multi_arg(args, general_config, args_obj, state_set):
 		console.print(f"Please install the necessary Selenium libraries to use this site.")
 		sys.exit(1)
 	
+	term_width = get_terminal_width()
+	console.print("═" * term_width, style=Style(color="yellow"))
+	console.print()
+	render_ascii(site_config.get("domain", "unknown"), general_config, term_width)
+	console.print()
+	
 	mode_config = site_config['modes'][mode]
 	page_num = args_obj.page_num
 	video_offset = args_obj.video_offset
@@ -2174,12 +2196,6 @@ def handle_multi_arg(args, general_config, args_obj, state_set):
 		mode=mode,
 		**{mode: identifier, 'page': page_num if page_num > 1 else None}
 	)
-	
-	term_width = get_terminal_width()
-	console.print("═" * term_width, style=Style(color="yellow"))
-	console.print()
-	render_ascii(site_config.get("domain", "unknown"), general_config, term_width)
-	console.print()
 	
 	handle_vpn(general_config, 'start')
 	if mode == 'video':

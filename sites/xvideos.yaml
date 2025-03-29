@@ -16,8 +16,9 @@ url_encoding_rules:
 
 modes:
   video:
-    url_pattern: "/video.{video}"
+    url_pattern: "/video.{any}/{video}"
     scraper: video_scraper
+    example: "cheating_college_girlfriend_fucked_on_snapchat_to_pay_debt_-_cucked_and_cummed_on"
     
   search:
     url_pattern: "/?k={search}"
@@ -59,12 +60,12 @@ modes:
       - "Reverse Cowgirl"
       - "Tiny Tits Porn"
   playlist:
-    url_pattern: "/favorite/{playlist}"
+    url_pattern: "/favorite/{any}/{playlist}"
     url_pattern_page: "/favorite/{playlist}/{page}"
     scraper: list_scraper
     tip: "Download videos from playlist"
     examples:
-      - "17003925/step"
+      - "step"
 
 scrapers:
   video_scraper:

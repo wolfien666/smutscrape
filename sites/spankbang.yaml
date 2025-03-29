@@ -15,11 +15,11 @@ url_encoding_rules:
 
 modes:
   video:
-    url_pattern: "/{video}"
+    url_pattern: "/{any}/video/{video}"
     scraper: video_scraper
     tip: "Download video with identifier"
     examples:
-      - "2ei5s/video/taboo+mom+son+bath"
+      - "taboo+mom+son+bath"
   model:
     url_pattern: "/pornstar/{model}/"
     url_pattern_pages: "/pornstar/{model}/{page}/"

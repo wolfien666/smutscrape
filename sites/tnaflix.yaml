@@ -16,7 +16,7 @@ note: "TNAflix occasionally has rare videos you won't find elsewhere, and on tho
 
 modes:
   video:
-    url_pattern: "/{name}/video{video}"
+    url_pattern: "/{any}/video{video}"
     scraper: video_scraper
   search:
     url_pattern: "/search?what={search}"

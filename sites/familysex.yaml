@@ -2,7 +2,7 @@
 
 name: "Family Sex"
 shortcode: fs
-domain: Family-Sex.me
+domain: "Family-Sex.me"
 base_url: "https://family-sex.me"
 selector_style: css
 no_overwrite: true

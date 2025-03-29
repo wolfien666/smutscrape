@@ -87,13 +87,19 @@ def save_state(url):
 		logger.info(f"Appended URL to state: {url}")
 	except Exception as e:
 		logger.error(f"Failed to append to state file '{STATE_FILE}': {e}")
+		
+def is_url(string):
+	"""Check if a string is a URL by parsing it with urlparse."""
+	parsed = urlparse(string)
+	# A string is considered a URL if it has a netloc (domain) or a scheme
+	return bool(parsed.netloc) or bool(parsed.scheme)
 
 def is_url_processed(url, state_set):
 	"""Check if a URL is in the state set."""
 	return url in state_set
 
 def load_configuration(config_type='general', identifier=None):
-	"""Load general or site-specific configuration."""
+	"""Load general or site-specific configuration based on identifier type."""
 	if config_type == 'general':
 		config_path = os.path.join(SCRIPT_DIR, 'config.yaml')
 		try:
@@ -106,24 +112,40 @@ def load_configuration(config_type='general', identifier=None):
 	elif config_type == 'site':
 		if not identifier:
 			raise ValueError("Site identifier required for site config loading")
+		
 		identifier_lower = identifier.lower()
+		is_url_flag = is_url(identifier)
+		parsed_netloc = urlparse(identifier).netloc.lower().replace('www.', '') if is_url_flag else None
+		
 		for config_file in os.listdir(SITE_DIR):
 			if config_file.endswith('.yaml'):
 				config_path = os.path.join(SITE_DIR, config_file)
 				try:
 					with open(config_path, 'r') as f:
 						config = yaml.safe_load(f)
-					if any(config.get(key, '').lower() == identifier_lower 
-						   for key in ['shortcode', 'name', 'domain']):
-						logger.debug(f"Loaded site config for '{identifier}' from '{config_file}'")
-						return config
+					if not config:
+						continue
+					
+					# Match based on identifier type
+					if is_url_flag:
+						if parsed_netloc == config.get('domain', '').lower():
+							logger.debug(f"Matched URL '{identifier}' to config '{config_file}' by domain '{config.get('domain')}'")
+							return config
+					else:
+						# Check shortcode, name, or domain for non-URL identifiers
+						if any(identifier_lower == config.get(key, '').lower()
+							   for key in ['shortcode', 'name', 'domain']):
+							logger.debug(f"Matched identifier '{identifier}' to config '{config_file}' by shortcode, name, or domain")
+							return config
 				except Exception as e:
 					logger.warning(f"Failed to load config '{config_file}': {e}")
-		logger.error(f"No site config found for '{identifier}'")
+					continue
+		
+		logger.debug(f"No site config matched for identifier '{identifier}'")
 		return None
 	
 	raise ValueError(f"Unknown config type: {config_type}")
-
+	
 def process_title(title, invalid_chars):
 	logger.debug(f"Processing {title} for invalid chars...")
 	for char in invalid_chars:
@@ -319,40 +341,55 @@ def process_url(url, site_config, general_config, overwrite, re_nfo, start_page,
 	page_num = int(page_parts[0])
 	video_offset = int(page_parts[1]) if len(page_parts) > 1 else 0
 	
+	# Check if the input is a full URL using is_url
+	is_full_url = is_url(url)
+	
 	if mode:
 		logger.info(f"Matched URL to mode '{mode}' with scraper '{scraper}'")
 		if mode == "video":
-			success = process_video_page(url, site_config, general_config, overwrite, headers, re_nfo, apply_state=apply_state, state_set=state_set)
+			success = process_video_page(
+				url, site_config, general_config, overwrite, headers, re_nfo,
+				apply_state=apply_state, state_set=state_set
+			)
 		else:
-			identifier = url.split("/")[-1].split(".")[0]
+			# Extract identifier only if not a full URL
+			identifier = url.split("/")[-1].split(".")[0] if not is_full_url else None
 			current_page_num = page_num
 			current_video_offset = video_offset
 			mode_config = site_config["modes"][mode]
-			if page_num > 1 and mode_config.get("url_pattern_pages"):
-				url = construct_url(
-					site_config["base_url"],
-					mode_config["url_pattern_pages"],
-					site_config,
-					mode=mode,
-					**{mode: identifier, "page": page_num}
-				)
-				logger.info(f"Starting at custom page {page_num}.{video_offset}: {url}")
-			elif page_num == 1:
-				url = construct_url(
-					site_config["base_url"],
-					mode_config["url_pattern"],
-					site_config,
-					mode=mode,
-					**{mode: identifier}
-				)
+			
+			# Use the original URL if provided, otherwise construct it
+			if is_full_url:
+				effective_url = url
+				logger.info(f"Using provided URL: {effective_url}")
+			else:
+				if page_num > 1 and mode_config.get("url_pattern_pages"):
+					effective_url = construct_url(
+						site_config["base_url"],
+						mode_config["url_pattern_pages"],
+						site_config,
+						mode=mode,
+						**{mode: identifier, "page": page_num}
+					)
+					logger.info(f"Starting at custom page {page_num}.{video_offset}: {effective_url}")
+				else:
+					effective_url = construct_url(
+						site_config["base_url"],
+						mode_config["url_pattern"],
+						site_config,
+						mode=mode,
+						**{mode: identifier}
+					)
+					logger.info(f"Constructed URL: {effective_url}")
+			
 			success = False
-			while url:
+			while effective_url:
 				next_page, new_page_number, page_success = process_list_page(
-					url, site_config, general_config, current_page_num, current_video_offset,
+					effective_url, site_config, general_config, current_page_num, current_video_offset,
 					mode, identifier, overwrite, headers, re_nfo, apply_state=apply_state, state_set=state_set
 				)
 				success = success or page_success
-				url = next_page
+				effective_url = next_page
 				current_page_num = new_page_number
 				current_video_offset = 0  # Reset after first page
 				time.sleep(general_config["sleep"]["between_pages"])
@@ -363,17 +400,25 @@ def process_url(url, site_config, general_config, overwrite, re_nfo, start_page,
 		for mode_name in available_modes:
 			if mode_name == "video":
 				logger.info("Trying 'video' mode...")
-				success = process_video_page(url, site_config, general_config, overwrite, headers, re_nfo, apply_state=apply_state, state_set=state_set)
+				success = process_video_page(
+					url, site_config, general_config, overwrite, headers, re_nfo,
+					apply_state=apply_state, state_set=state_set
+				)
 				if success:
 					logger.info("Video mode succeeded.")
 					break
 			else:
 				logger.info(f"Attempting mode '{mode_name}'...")
-				identifier = url.split("/")[-1].split(".")[0]
+				identifier = url.split("/")[-1].split(".")[0] if not is_full_url else None
 				current_page_num = page_num
 				current_video_offset = video_offset
 				mode_config = site_config["modes"][mode_name]
-				if mode_config.get("url_pattern"):
+				
+				# Use the original URL if provided, otherwise construct it
+				if is_full_url:
+					constructed_url = url
+					logger.info(f"Using provided URL for mode '{mode_name}': {constructed_url}")
+				else:
 					try:
 						constructed_url = construct_url(
 							site_config["base_url"],
@@ -383,26 +428,29 @@ def process_url(url, site_config, general_config, overwrite, re_nfo, start_page,
 							**{mode_name: identifier, "page": current_page_num if current_page_num > 1 else None}
 						)
 						logger.info(f"Starting at custom page {current_page_num}.{current_video_offset}: {constructed_url}")
-						success = False
-						while constructed_url:
-							next_page, new_page_number, page_success = process_list_page(
-								constructed_url, site_config, general_config, current_page_num, current_video_offset,
-								mode_name, identifier, overwrite, headers, re_nfo, apply_state=apply_state, state_set=state_set
-							)
-							success = success or page_success
-							constructed_url = next_page
-							current_page_num = new_page_number
-							current_video_offset = 0  # Reset after first page
-							time.sleep(general_config["sleep"]["between_pages"])
-						if success:
-							logger.info(f"Mode '{mode_name}' succeeded.")
-							break
 					except Exception as e:
-						logger.warning(f"Mode '{mode_name}' failed: {e}")
+						logger.warning(f"Mode '{mode_name}' failed to construct URL: {e}")
 						continue
+				
+				success = False
+				while constructed_url:
+					next_page, new_page_number, page_success = process_list_page(
+						constructed_url, site_config, general_config, current_page_num, current_video_offset,
+						mode_name, identifier, overwrite, headers, re_nfo, apply_state=apply_state, state_set=state_set
+					)
+					success = success or page_success
+					constructed_url = next_page
+					current_page_num = new_page_number
+					current_video_offset = 0  # Reset after first page
+					time.sleep(general_config["sleep"]["between_pages"])
+				if success:
+					logger.info(f"Mode '{mode_name}' succeeded.")
+					break
+		
 		if not success:
 			logger.error(f"Failed to process URL '{url}' with any mode.")
 			process_fallback_download(url, general_config, overwrite)
+	
 	return success
 		
 
@@ -1392,72 +1440,137 @@ def download_with_ytdlp_fallback(url, temp_dir, general_config):
 		downloaded_files = os.listdir(temp_dir)
 	return success and downloaded_files, downloaded_files
 
+
+def parse_url_pattern(pattern):
+	components = []
+	current_segment = ""
+	
+	i = 0
+	while i < len(pattern):
+		if pattern[i] == "{":
+			if current_segment:
+				components.append({"type": "static", "value": current_segment})
+				current_segment = ""
+			j = i + 1
+			while j < len(pattern) and pattern[j] != "}":
+				j += 1
+			if j < len(pattern):
+				placeholder = pattern[i+1:j]
+				components.append({"type": "wildcard", "name": placeholder, "numeric": placeholder == "page"})
+				i = j + 1
+			else:
+				raise ValueError(f"Unclosed placeholder in pattern: {pattern}")
+		else:
+			current_segment += pattern[i]
+			i += 1
+	
+	if current_segment:
+		components.append({"type": "static", "value": current_segment})
+	
+	logger.debug(f"Parsed pattern '{pattern}' into components: {components}")
+	return components
+
+
+def pattern_to_regex(pattern):
+	regex = ""
+	static_count = 0
+	static_length = 0
+	in_wildcard = False
+	current_static = ""
+	numeric_wildcards = {"page"}
+	
+	for char in pattern.rstrip("/"):
+		if char == "{":
+			if current_static:
+				regex += re.escape(current_static)
+				static_count += 1
+				static_length += len(current_static)
+				current_static = ""
+			in_wildcard = True
+			wildcard_name = ""
+		elif char == "}":
+			if in_wildcard:
+				if wildcard_name in numeric_wildcards:
+					regex += f"(?P<{wildcard_name}>\\d+)"
+				else:
+					regex += f"(?P<{wildcard_name}>[^/?&#]+)"
+				in_wildcard = False
+			else:
+				current_static += char
+		elif in_wildcard:
+			wildcard_name += char
+		else:
+			current_static += char
+	
+	if current_static:
+		regex += re.escape(current_static)
+		static_count += 1
+		static_length += len(current_static)
+	
+	if "?" not in pattern and "&" not in pattern:
+		regex = f"^{regex}$"
+	else:
+		regex = f"^{regex}(?:$|&.*)"
+	
+	# logger.debug(f"Converted pattern '{pattern}' to regex: '{regex}', static_count={static_count}, static_length={static_length}")
+	return re.compile(regex, re.IGNORECASE), static_count, static_length  # Add IGNORECASE
+
 def match_url_to_mode(url, site_config):
-	# Normalize the input URL
 	parsed_url = urlparse(url)
-	scheme = parsed_url.scheme.lower()  # e.g., 'http' or 'https'
-	netloc = parsed_url.netloc.lower()  # e.g., 'www.incestflix.com' or 'incestflix.com'
-	path = parsed_url.path.rstrip('/').lower()  # e.g., '/watch/video123' or '/tag/sometag'
+	netloc = parsed_url.netloc.lower().replace("www.", "", 1)
+	full_path = parsed_url.path.rstrip("/").lower() + ("?" + parsed_url.query.lower() if parsed_url.query else "")
 	
-	# Remove 'www.' prefix if present
-	if netloc.startswith('www.'):
-		netloc = netloc[4:]
-	
-	# Normalize the base_url from site_config
-	base_url = site_config['base_url'].rstrip('/')
-	parsed_base = urlparse(base_url)
-	base_netloc = parsed_base.netloc.lower()  # e.g., 'incestflix.com'
-	base_path = parsed_base.path.rstrip('/').lower()  # Usually empty for base_url
-	
-	# Remove 'www.' prefix from base_netloc if present
-	if base_netloc.startswith('www.'):
-		base_netloc = base_netloc[4:]
-	
-	# Check if the normalized netloc matches the base_netloc
+	base_netloc = urlparse(site_config["base_url"]).netloc.lower().replace("www.", "", 1)
 	if netloc != base_netloc:
-		logger.debug(f"No match: netloc '{netloc}' does not match base_netloc '{base_netloc}'")
+		# logger.debug(f"No match: netloc '{netloc}' != base_netloc '{base_netloc}'")
 		return None, None
 	
-	# Combine base_path and path for matching (if base_url has a path component)
-	effective_path = path
+	modes = site_config.get("modes", {})
+	non_video_modes = {k: v for k, v in modes.items() if k != "video"}
+	video_mode = modes.get("video")
 	
-	# Iterate over modes to find a match
-	for mode, config in site_config['modes'].items():
-		pattern = config['url_pattern'].rstrip('/')
-		pattern_segments = pattern.lstrip('/').split('/')
-		path_segments = effective_path.lstrip('/').split('/')
-		
-		# Skip if path is too short to match pattern (accounting for placeholders)
-		if len(path_segments) < len(pattern_segments) - pattern.count('{'):
-			continue
-		
-		regex_parts = []
-		placeholder_found = False
-		for i, segment in enumerate(pattern_segments):
-			if '{' in segment and '}' in segment:
-				placeholder_found = True
-				regex_parts.append(r'([^/]+)')
-			else:
-				regex_parts.append(re.escape(segment.lower()))  # Normalize case
-		
-		if not placeholder_found:
-			if effective_path == pattern.lstrip('/').lower():
-				logger.info(f"Matched URL '{url}' to mode '{mode}' with exact pattern '{pattern}'")
-				return mode, config['scraper']
-			continue
-		
-		regex_pattern = '^/' + '/'.join(regex_parts)
-		if placeholder_found and len(path_segments) > len(pattern_segments):
-			regex_pattern += r'(?:/.*)?'
-		regex_pattern += '$'
-		
-		if re.match(regex_pattern, effective_path):
-			logger.debug(f"Matched URL '{url}' to mode '{mode}' with pattern '{pattern}'")
-			return mode, config['scraper']
+	best_match = None
+	best_static_count = -1
+	best_static_length = -1
 	
-	logger.debug(f"No mode matched for URL: {url}")
-	return None, None
-
+	for mode, config in non_video_modes.items():
+		# logger.debug(f"Checking mode: '{mode}'")
+		for pattern_key in ["url_pattern", "url_pattern_pages"]:
+			if pattern_key not in config:
+				continue
+			pattern = config[pattern_key]
+			regex, static_count, static_length = pattern_to_regex(pattern)
+			# logger.debug(f"Testing pattern '{pattern}' -> regex '{regex.pattern}'")
+			match = regex.match(full_path)
+			if match:
+				extracted = match.groupdict()
+				# logger.debug(f"Match found: extracted={extracted}")
+				if (static_count > best_static_count) or (static_count == best_static_count and static_length > best_static_length):
+					best_match = (mode, config["scraper"])
+					best_static_count = static_count
+					best_static_length = static_length
+				# logger.debug(f"Matched URL '{url}' to mode '{mode}' with {pattern_key} (static_count={static_count}, static_length={static_length})")
+			#else:
+				# logger.debug(f"No match for '{pattern}'")
+	
+	if best_match:
+		logger.debug(f"Best match selected: {best_match} (static_count={best_static_count}, static_length={best_static_length})")
+		return best_match
+	
+	if video_mode and "url_pattern" in video_mode:
+		pattern = video_mode["url_pattern"]
+		regex, static_count, static_length = pattern_to_regex(pattern)
+		logger.debug(f"Testing video pattern '{pattern}' -> regex '{regex.pattern}'")
+		match = regex.match(full_path)
+		if match:
+			extracted = match.groupdict()
+			logger.debug(f"Matched URL '{url}' to mode 'video' with pattern '{pattern}' (static_count={static_count}, static_length={static_length})")
+			return "video", video_mode["scraper"]
+		else:
+			logger.debug(f"No match for video mode with pattern '{pattern}'")
+	
+	logger.debug(f"No mode matched for URL: '{url}'")
+	return None, None	
 
 def get_available_modes(site_config):
 	"""Return a list of available scrape modes for a site config, excluding 'video'."""
@@ -1917,13 +2030,13 @@ def render_ascii(input_text, general_config, term_width, font=None):
 def display_options():
 
 	console.print("[bold][yellow]optional arguments:[/yellow][/bold]")
-	console.print("  [magenta]-o[/magenta], [magenta]--overwrite[/magenta]        # replace files with same name at download destination")
-	console.print("  [magenta]-n[/magenta], [magenta]--re_nfo[/magenta]           # replace metadata in existing .nfo files")
-	console.print("  [magenta]-a[/magenta], [magenta]--applystate[/magenta]       # add URLs to .state if file exists at destination without overwriting")
-	console.print("  [magenta]-p[/magenta], [magenta]--page[/magenta] [yellow]{ page }[/yellow]    # start scraping on given page of results")
-	console.print("  [magenta]-t[/magenta], [magenta]--table[/magenta] [yellow]{ path }[/yellow]   # output table of current site configurations")
-	console.print("  [magenta]-d[/magenta], [magenta]--debug[/magenta]            # enable detailed debug logging")
-	console.print("  [magenta]-h[/magenta], [magenta]--help[/magenta]             # show help submenu")
+	console.print("  [magenta]-o[/magenta], [magenta]--overwrite[/magenta]                    replace files with same name at download destination")
+	console.print("  [magenta]-n[/magenta], [magenta]--re_nfo[/magenta]                       replace metadata in existing .nfo files")
+	console.print("  [magenta]-a[/magenta], [magenta]--applystate[/magenta]                   add URLs to .state if file exists at destination without overwriting")
+	console.print("  [magenta]-p[/magenta], [magenta]--page[/magenta] [yellow]{ page # }.{ video # }[/yellow]  start scraping on given page of results")
+	console.print("  [magenta]-t[/magenta], [magenta]--table[/magenta] [yellow]{ path }[/yellow]               output table of current site configurations")
+	console.print("  [magenta]-d[/magenta], [magenta]--debug[/magenta]                        enable detailed debug logging")
+	console.print("  [magenta]-h[/magenta], [magenta]--help[/magenta]                         show help submenu")
 
 def display_global_examples():
 	console.print("[yellow][bold]examples[/bold] (generated from ./sites/):[/yellow]")
@@ -1963,81 +2076,19 @@ def display_global_examples():
 	console.print()
 
 
-	
-def display_site_details(site_config, term_width):
-    """Display a detailed readout for a specific site config with domain-based ASCII art."""
-    site_name = site_config.get("name", "Unknown")
-    shortcode = site_config.get("shortcode", "??")
-    domain = site_config.get("domain", "n/a")
-    base_url = site_config.get("base_url", "https://example.com")
-    video_uri = site_config.get("modes", {}).get("video", {}).get("url_pattern", "/watch/0123456.html")
-    download_method = site_config.get("download", {}).get("method", "N/A")
-    use_selenium = site_config.get("use_selenium", False)
-    name_suffix = site_config.get("name_suffix", None)
-    unique_name = bool(site_config.get("unique_name", False))
-    metadata = has_metadata_selectors(site_config, return_fields=True)
-    site_note = site_config.get("note", None)
-    
-    general_config = load_configuration('general')
-    console.print()
-    render_ascii(domain, general_config, term_width)
-    console.print()
-    
-    console.print()
-    
-    label_width = 12
-    
-    console.print(f"{'name:':>{label_width}} [bold]{site_name}[/bold] ({shortcode})")
-    console.print(f"{'homepage:':>{label_width}} [bold]{base_url}[/bold]")
-    console.print(f"{'downloader:':>{label_width}} [bold]{download_method}[/bold]")
-    console.print(f"{'metadata:':>{label_width}} {', '.join(metadata)}") 
-    
-    if site_note:
-        console.print(f"{'note:':>{label_width}} {site_note}")
-    if name_suffix:
-        console.print(f"{'note:':>{label_width}} Filenames are appended with [bold]\"{name_suffix}\"[/bold].")
-    if unique_name is True:
-        console.print(f"{'note:':>{label_width}} Filenames are appended with a UID to avoid filename collisions, at the risk of downloading multiple duplicates.")
-    if use_selenium:
-        console.print(f"{'note:':>{label_width}} [yellow][bold]selenium[/bold][/yellow] and [yellow][bold]chromedriver[/bold][/yellow] are required to scrape this site.")
-        console.print(f"{'':>{label_width}} See: https://github.com/io-flux/smutscrape#selenium--chromedriver-%EF%B8%8F%EF%B8%8F")
-    
-    console.print()
-    console.print(f"{'usage:':>{label_width}} [magenta]scrape {shortcode} {{mode}} {{query}}[/magenta]")
-    console.print(f"{'':>{label_width}} [magenta]scrape {base_url}{video_uri}[/magenta]")
-    console.print()
-    
-    modes = site_config.get("modes", {})
-    if modes:
-        console.print("[yellow][bold]supported modes:[/bold][/yellow]")
-        mode_table = Table(show_edge=True, expand=True, width=term_width)
-        mode_table.add_column("[bold]mode[/bold]", width=15)
-        mode_table.add_column("[bold]function[/bold]", width=(term_width//10)*4)
-        mode_table.add_column("[bold]example[/bold]", width=term_width//2)
-        
-        for mode, config in modes.items():
-            tip = config.get("tip", "No description available")
-            examples = config.get("examples", ["N/A"])
-            example = random.choice(examples)
-            example_cmd = f"[magenta]scrape {shortcode} {mode} \"{example}\"[/magenta]"
-            mode_table.add_row(mode, tip, example_cmd)
-        console.print(mode_table)
-        console.print()
-    console.print()
-    display_options()
 
 def generate_global_table(term_width, output_path=None):
 	"""Generate the global sites table, optionally saving as Markdown to output_path."""
-	# Build the table with original style plus separate code column
 	table = Table(show_edge=True, expand=True, width=term_width)
 	table.add_column("[bold][magenta]code[/magenta][/bold]", width=6, justify="left")
-	table.add_column("[bold][magenta]site[/magenta][/bold]", width=12, justify="left") # (term_width-8)//4)
+	table.add_column("[bold][magenta]site[/magenta][/bold]", width=12, justify="left")
 	table.add_column("[bold][yellow]modes[/yellow][/bold]", width=(term_width-8)//3)
 	table.add_column("[bold][green]metadata[/green][/bold]", width=(term_width-8)//3)
 	
 	supported_sites = []
 	selenium_sites = set()
 	encoding_rule_sites = set()
+	pagination_modes = set()
 	
 	for site_config_file in os.listdir(SITE_DIR):
 		if site_config_file.endswith(".yaml"):
@@ -2048,30 +2099,36 @@ def generate_global_table(term_width, output_path=None):
 				site_code = site_config.get("shortcode", "??")
 				use_selenium = site_config.get("use_selenium", False)
 				
-				# Check for Selenium
 				if use_selenium:
 					selenium_sites.add(site_code)
 				
-				# Check for special URL encoding rules
-				url_rules = site_config.get("url_encoding_rules", {})
-				has_special_encoding = " & " in url_rules or "&" in url_rules
-				if has_special_encoding:
-					encoding_rule_sites.add(site_code)
+				modes = site_config.get("modes", {})
+				modes_display_list = []
+				for mode, config in modes.items():
+					supports_pagination = "url_pattern_pages" in config
+					mode_url_rules = config.get("url_encoding_rules", {})
+					has_special_encoding = " & " in mode_url_rules or "&" in mode_url_rules
+					footnotes = []
+					if supports_pagination:
+						footnotes.append("⸸")
+						pagination_modes.add(mode)
+					if has_special_encoding:
+						footnotes.append("‡")
+						if site_code not in encoding_rule_sites:
+							encoding_rule_sites.add(site_code)
+					mode_display = f"[yellow][bold]{mode}[/bold][/yellow]" + (f"{''.join(footnotes)}" if footnotes else "")
+					modes_display_list.append(mode_display)
 				
-				modes = get_available_modes(site_config)
 				metadata = has_metadata_selectors(site_config, return_fields=True)
-				supported_sites.append((site_code, site_name, modes, metadata, use_selenium, has_special_encoding))
+				supported_sites.append((site_code, site_name, modes_display_list, metadata, use_selenium))
 			except Exception as e:
 				logger.warning(f"Failed to load config '{site_config_file}': {e}")
 	
 	if supported_sites:
-		for site_code, site_name, modes, metadata, use_selenium, has_special_encoding in sorted(supported_sites, key=lambda x: x[0]):
+		for site_code, site_name, modes_display_list, metadata, use_selenium in sorted(supported_sites, key=lambda x: x[0]):
 			code_display = f"[magenta][bold]{site_code}[/bold][/magenta]"
 			site_display = f"[magenta]{site_name}[/magenta]" + (" †" if use_selenium else "")
-			modes_display = " · ".join(
-				f"[yellow][bold]{mode}[/bold][/yellow]" + (" ‡" if has_special_encoding else "")
-				for mode in modes
-			) if modes else "[gray]None[/gray]"
+			modes_display = " · ".join(modes_display_list) if modes_display_list else "[gray]None[/gray]"
 			metadata_display = " · ".join(f"[green][bold]{field}[/bold][/green]" for field in metadata) if metadata else "None"
 			table.add_row(code_display, site_display, modes_display, metadata_display)
 	else:
@@ -2084,18 +2141,19 @@ def generate_global_table(term_width, output_path=None):
 		footnotes.append("[italic]† [yellow][bold]selenium[/bold][/yellow] and [yellow][bold]chromedriver[/bold][/yellow] required.[/italic]")
 	if encoding_rule_sites:
 		footnotes.append("[italic]‡ combine terms with \'&\' to search them together.[/italic]")
+	if pagination_modes:
+		footnotes.append("[italic]⸸ supports [bold][green]pagination[/green][/bold]; see [bold][yellow]optional arguments[/yellow][/bold] below.[/italic]")
 	
 	if output_path:
-		# Generate Markdown (unchanged from your last working version)
 		md_lines = [
 			"| code   | site                          | modes                          | metadata                       |\n",
 			"| ------ | ----------------------------- | ------------------------------ | ------------------------------ |\n"
 		]
 		
-		for site_code, site_name, modes, metadata, use_selenium, has_special_encoding in sorted(supported_sites, key=lambda x: x[0]):
+		for site_code, site_name, modes_display_list, metadata, use_selenium in sorted(supported_sites, key=lambda x: x[0]):
 			code_str = f"`{site_code}`"
 			site_str = f"**_{site_name}_**" + (" †" if use_selenium else "")
-			modes_str = " · ".join(mode + (" ‡" if has_special_encoding else "") for mode in modes) if modes else "None"
+			modes_str = " · ".join(mode.strip("[yellow][bold]").strip("[/bold][/yellow]") for mode in modes_display_list) if modes_display_list else "None"
 			metadata_str = " · ".join(metadata) if metadata else "None"
 			md_lines.append(f"| {code_str:<6} | {site_str:<29} | {modes_str:<30} | {metadata_str:<30} |\n")
 		
@@ -2103,6 +2161,8 @@ def generate_global_table(term_width, output_path=None):
 			md_lines.append("\n† _Selenium required._\n")
 		if encoding_rule_sites:
 			md_lines.append("‡ _Combine terms with \"&\"._\n")
+		if pagination_modes:
+			md_lines.append("⸸ _Supports pagination; see optional arguments below._\n")
 		
 		try:
 			with open(output_path, 'w', encoding='utf-8') as f:
@@ -2112,9 +2172,96 @@ def generate_global_table(term_width, output_path=None):
 			logger.error(f"Failed to write Markdown table to '{output_path}': {e}")
 		return None
 	
-	# Return table and footnotes as a Group for display below the table
 	from rich.console import Group
 	return Group(table, *footnotes) if footnotes else table
+
+
+def display_site_details(site_config, term_width):
+	"""Display a detailed readout for a specific site config with domain-based ASCII art."""
+	site_name = site_config.get("name", "Unknown")
+	shortcode = site_config.get("shortcode", "??")
+	domain = site_config.get("domain", "n/a")
+	base_url = site_config.get("base_url", "https://example.com")
+	video_uri = site_config.get("modes", {}).get("video", {}).get("url_pattern", "/watch/0123456.html")
+	download_method = site_config.get("download", {}).get("method", "N/A")
+	use_selenium = site_config.get("use_selenium", False)
+	name_suffix = site_config.get("name_suffix", None)
+	unique_name = bool(site_config.get("unique_name", False))
+	metadata = has_metadata_selectors(site_config, return_fields=True)
+	site_note = site_config.get("note", None)
+	
+	general_config = load_configuration('general')
+	console.print()
+	render_ascii(domain, general_config, term_width)
+	console.print()
+	
+	console.print()
+	
+	label_width = 12
+	
+	console.print(f"{'name:':>{label_width}} [bold]{site_name}[/bold] ({shortcode})")
+	console.print(f"{'homepage:':>{label_width}} [bold]{base_url}[/bold]")
+	console.print(f"{'downloader:':>{label_width}} [bold]{download_method}[/bold]")
+	console.print(f"{'metadata:':>{label_width}} {', '.join(metadata)}") 
+	
+	if site_note:
+		console.print(f"{'note:':>{label_width}} {site_note}")
+	if name_suffix:
+		console.print(f"{'note:':>{label_width}} Filenames are appended with [bold]\"{name_suffix}\"[/bold].")
+	if unique_name is True:
+		console.print(f"{'note:':>{label_width}} Filenames are appended with a UID to avoid filename collisions, at the risk of downloading multiple duplicates.")
+	if use_selenium:
+		console.print(f"{'note:':>{label_width}} [yellow][bold]selenium[/bold][/yellow] and [yellow][bold]chromedriver[/bold][/yellow] are required to scrape this site.")
+		console.print(f"{'':>{label_width}} See: https://github.com/io-flux/smutscrape#selenium--chromedriver-%EF%B8%8F%EF%B8%8F")
+	
+	console.print()
+	console.print(f"{'usage:':>{label_width}} [magenta]scrape {shortcode} {{mode}} {{query}}[/magenta]")
+	console.print(f"{'':>{label_width}} [magenta]scrape {base_url}{video_uri}[/magenta]")
+	console.print()
+	
+	modes = site_config.get("modes", {})
+	if modes:
+		console.print("[yellow][bold]supported modes:[/bold][/yellow]")
+		mode_table = Table(show_edge=True, expand=True, width=term_width)
+		mode_table.add_column("[bold]mode[/bold]", width=15)
+		mode_table.add_column("[bold]function[/bold]", width=(term_width//10)*4)
+		mode_table.add_column("[bold]example[/bold]", width=term_width//2)
+		
+		has_pagination_footnote = False
+		has_encoding_footnote = False
+		for mode, config in modes.items():
+			tip = config.get("tip", "No description available")
+			examples = config.get("examples", ["N/A"])
+			example = random.choice(examples)
+			example_cmd = f"[magenta]scrape {shortcode} {mode} \"{example}\"[/magenta]"
+			# Check for footnotes per mode
+			supports_pagination = "url_pattern_pages" in config
+			mode_url_rules = config.get("url_encoding_rules", {})
+			has_special_encoding = " & " in mode_url_rules or "&" in mode_url_rules
+			footnotes = []
+			if supports_pagination:
+				footnotes.append("⸸")
+				has_pagination_footnote = True
+			if has_special_encoding:
+				footnotes.append("‡")
+				has_encoding_footnote = True
+			mode_display = f"[yellow][bold]{mode}[/bold][/yellow]" + (f"{''.join(footnotes)}" if footnotes else "")
+			mode_table.add_row(mode_display, tip, example_cmd)
+		
+		# Add all applicable footnotes
+		footnotes = []
+		if use_selenium:
+			footnotes.append("[italic]† [yellow][bold]selenium[/bold][/yellow] and [yellow][bold]chromedriver[/bold][/yellow] required.[/italic]")
+		if has_encoding_footnote:
+			footnotes.append("[italic]‡ combine terms with \'&\' to search them together.[/italic]")
+		if has_pagination_footnote:
+			footnotes.append("[italic]⸸ supports [bold][green]pagination[/green][/bold]; see [bold][yellow]optional arguments[/yellow][/bold] below.[/italic]")
+		
+		from rich.console import Group
+		console.print(Group(mode_table, *footnotes) if footnotes else mode_table)
+		console.print()
+	console.print()
+	display_options()
 
 
 def display_usage(term_width):
@@ -2132,38 +2279,32 @@ def display_usage(term_width):
 	
 
 def handle_single_arg(arg, general_config, args, term_width, state_set):
-	if arg.startswith(("http://", "https://")):
-		site_config = None
-		for config_file in os.listdir(SITE_DIR):
-			config = load_configuration('site', os.path.splitext(config_file)[0])
-			if config and urlparse(arg).netloc.lower().replace("www.", "") == config.get('domain', '').lower():
-				site_config = config
-				break
-		if site_config:
-			if site_config.get('use_selenium', False) and not SELENIUM_AVAILABLE:
+	is_url_flag = is_url(arg)
+	config = load_configuration('site', arg)
+	if config:
+		# Configuration loaded successfully
+		if is_url_flag:
+			if config.get('use_selenium', False) and not SELENIUM_AVAILABLE:
 				console.print(f"[yellow]Sorry, but this site requires Selenium, which is not available on your system.[/yellow]")
 				console.print(f"Please install the necessary Selenium libraries to use this site.")
 				sys.exit(1)
-			
-			console.print("═" * term_width, style=Style(color="yellow"))
-			console.print()
-			render_ascii(site_config.get("domain", "unknown"), general_config, term_width)
-			console.print()
-			process_url(arg, site_config, general_config, args.overwrite, args.re_nfo, args.page, apply_state=args.applystate, state_set=state_set)
+			else:
+				console.print("═" * term_width, style=Style(color="yellow"))
+				console.print()
+				render_ascii(config.get("domain", "unknown"), general_config, term_width)
+				console.print()
+				process_url(arg, config, general_config, args.overwrite, args.re_nfo, args.page, apply_state=args.applystate, state_set=state_set)
 		else:
+			display_site_details(config, term_width)
+			sys.exit(0)
+	else:
+		if is_url_flag:
 			logger.warning(f"No site config matched for URL '{arg}'. Falling back to yt-dlp.")
 			process_fallback_download(arg, general_config, args.overwrite)
-	else:
-		site_config = load_configuration('site', arg)
-		if site_config:
-			if site_config.get('use_selenium', False) and not SELENIUM_AVAILABLE:
-				console.print(f"[yellow]Sorry, but this site requires Selenium, which is not available on your system.[/yellow]")
-				console.print(f"Please install the necessary Selenium libraries to use this site.")
-				sys.exit(1)
+		else:
+			logger.error(f"Could not match the provided argument '{arg}' to a site configuration.")
+			sys.exit(1)
 			
-			display_site_details(site_config, term_width)
-		sys.exit(0 if site_config else 1)
-
 def handle_multi_arg(args, general_config, args_obj, state_set):
 	site_config = load_configuration('site', args[0])
 	if not site_config:

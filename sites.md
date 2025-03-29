@@ -1,19 +1,20 @@
 | code   | site                          | modes                          | metadata                       |
 | ------ | ----------------------------- | ------------------------------ | ------------------------------ |
-| `9v`   | **_9Vids_** †                 | search · tag                   | tags                           |
-| `fphd` | **_FamilyPornHD_** †          | tag · model · search · studio  | actors · description · studios · tags |
-| `fptv` | **_FamilyPorn_** †            | model · tag · search · studio  | actors · description · studios · tags |
-| `fs`   | **_Family Sex_** †            | tag · search · model           | actors · description · image · studios · tags |
-| `if`   | **_IncestFlix_**              | tag ‡                          | actors · image · studios · tags |
-| `ig`   | **_IncestGuru_**              | tag ‡                          | actors · image · studios · tags |
-| `lf`   | **_LoneFun_**                 | search                         | description · tags             |
-| `ml`   | **_Motherless_** †            | search · tag · user · group · group_code | tags                           |
-| `ph`   | **_PornHub_** †               | model · category · tag · studio · search · pornstar | actors · code · date · image · studios · tags |
-| `sb`   | **_SpankBang_**               | model · search · tag           | actors · description · tags    |
-| `tna`  | **_TNAflix_**                 | search                         | actors · date · description · studios · tags |
-| `xh`   | **_xHamster_** †              | model · studio · search · tag  | actors · studios · tags        |
-| `xn`   | **_XNXX_** †                  | search · model · tag · studio  | actors · date · description · image · studios · tags |
-| `xv`   | **_XVideos_**                 | search · studio · model · tag · playlist | actors · studios · tags        |
+| `9v`   | **_9Vids_** †                 | vi · search · tag              | tags                           |
+| `fphd` | **_FamilyPornHD_** †          | vi · tag[/bold][/yellow]⸸ · model[/bold][/yellow]⸸ · search[/bold][/yellow]⸸ · studio[/bold][/yellow]⸸ | actors · description · studios · tags |
+| `fptv` | **_FamilyPorn_** †            | vi · m · tag · search · studi  | actors · description · studios · tags |
+| `fs`   | **_Family Sex_** †            | vi · tag[/bold][/yellow]⸸ · search · model[/bold][/yellow]⸸ | actors · description · studios · tags |
+| `if`   | **_IncestFlix_**              | vi · tag[/bold][/yellow]⸸‡     | actors · studios · tags        |
+| `ig`   | **_IncestGuru_**              | vi · tag[/bold][/yellow]⸸      | actors · studios · tags        |
+| `lf`   | **_LoneFun_**                 | vi · search[/bold][/yellow]⸸   | description · tags             |
+| `ml`   | **_Motherless_** †            | vi · search[/bold][/yellow]⸸ · tag[/bold][/yellow]⸸ · user[/bold][/yellow]⸸ · group[/bold][/yellow]⸸ · group_code[/bold][/yellow]⸸ | tags                           |
+| `ph`   | **_PornHub_** †               | vi · model[/bold][/yellow]⸸ · category[/bold][/yellow]⸸ · tag[/bold][/yellow]⸸ · studio[/bold][/yellow]⸸ · search[/bold][/yellow]⸸ · pornstar[/bold][/yellow]⸸ | actors · code · date · studios · tags |
+| `sb`   | **_SpankBang_**               | vi · model[/bold][/yellow]⸸ · search[/bold][/yellow]⸸ · tag[/bold][/yellow]⸸ | actors · description · tags    |
+| `tna`  | **_TNAflix_**                 | vi · search[/bold][/yellow]⸸   | actors · date · description · studios · tags |
+| `xh`   | **_xHamster_** †              | vi · model[/bold][/yellow]⸸ · studio[/bold][/yellow]⸸ · search[/bold][/yellow]⸸ · tag[/bold][/yellow]⸸ | actors · studios · tags        |
+| `xn`   | **_XNXX_** †                  | vi · search[/bold][/yellow]⸸ · model[/bold][/yellow]⸸ · tag[/bold][/yellow]⸸ · studio[/bold][/yellow]⸸ | actors · date · description · studios · tags |
+| `xv`   | **_XVideos_**                 | vi · search[/bold][/yellow]⸸ · studio[/bold][/yellow]⸸ · model[/bold][/yellow]⸸ · tag[/bold][/yellow]⸸ · playlist | actors · studios · tags        |
 
 † _Selenium required._
 ‡ _Combine terms with "&"._
+⸸ _Supports pagination; see optional arguments below._

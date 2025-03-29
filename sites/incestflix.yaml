@@ -9,8 +9,6 @@ no_overwrite: true
 download:
   method: "requests"
 url_encoding_rules:
-  " & ": "/and/"
-  "&": "/and/"
   " ": "-"
   "%20": "-"
 note: "If you can deal with omnipresent watermarks and IncestFlix-branded opening and closing title slates on every single video, this is a great site. Recently content from certain studios has disappeared from the site, but it remains a treasure for full studip productions and indie/amateur self-produced content alike. It has its quirks. Beyond the aforementioned watermarks and title slates, videos are often broken up into multiple parts, and the tags can seem obtuse until you comprehend how committed this site is to taboo. What is \"FDAA\", you may wonder? Videos featuring a father, daughter, and two aunts. OBVIOUSLY. \"GMMS\"? Grandmother/Mother/Son videos, of course. In short, Rule 34 as applied to incest."
@@ -44,6 +42,9 @@ modes:
       - "Sweet Nymph & Bondage"
       - "Creampie & Mother"
       - "Reluctant & MSD"
+    url_encoding_rules:
+      " & ": "/and/"
+      "&": "/and/"
 
 scrapers:
   video_scraper:

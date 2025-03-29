@@ -2030,13 +2030,13 @@ def render_ascii(input_text, general_config, term_width, font=None):
 def display_options():
 
 	console.print("[bold][yellow]optional arguments:[/yellow][/bold]")
-	console.print("  [magenta]-o[/magenta], [magenta]--overwrite[/magenta]                    replace files with same name at download destination")
-	console.print("  [magenta]-n[/magenta], [magenta]--re_nfo[/magenta]                       replace metadata in existing .nfo files")
-	console.print("  [magenta]-a[/magenta], [magenta]--applystate[/magenta]                   add URLs to .state if file exists at destination without overwriting")
-	console.print("  [magenta]-p[/magenta], [magenta]--page[/magenta] [yellow]{ page # }.{ video # }[/yellow]  start scraping on given page of results")
-	console.print("  [magenta]-t[/magenta], [magenta]--table[/magenta] [yellow]{ path }[/yellow]               output table of current site configurations")
-	console.print("  [magenta]-d[/magenta], [magenta]--debug[/magenta]                        enable detailed debug logging")
-	console.print("  [magenta]-h[/magenta], [magenta]--help[/magenta]                         show help submenu")
+	console.print("  [magenta]-o[/magenta], [magenta]--overwrite[/magenta]               replace files with same name at download destination")
+	console.print("  [magenta]-n[/magenta], [magenta]--re_nfo[/magenta]                  replace metadata in existing .nfo files")
+	console.print("  [magenta]-a[/magenta], [magenta]--applystate[/magenta]              add URLs to .state if file already present")
+	console.print("  [magenta]-p[/magenta], [magenta]--page[/magenta] [yellow]{ pg. }.{ vid. }[/yellow]   start scraping on given page of results")
+	console.print("  [magenta]-t[/magenta], [magenta]--table[/magenta] [yellow]{ path }[/yellow]          output table of current site configurations")
+	console.print("  [magenta]-d[/magenta], [magenta]--debug[/magenta]                   enable detailed debug logging")
+	console.print("  [magenta]-h[/magenta], [magenta]--help[/magenta]                    show help submenu")
 
 def display_global_examples():
 	console.print("[yellow][bold]examples[/bold] (generated from ./sites/):[/yellow]")
@@ -2074,106 +2074,6 @@ def display_global_examples():
 	
 	console.print(table)
 	console.print()
-
-
-
-def generate_global_table(term_width, output_path=None):
-	"""Generate the global sites table, optionally saving as Markdown to output_path."""
-	table = Table(show_edge=True, expand=True, width=term_width)
-	table.add_column("[bold][magenta]code[/magenta][/bold]", width=6, justify="left")
-	table.add_column("[bold][magenta]site[/magenta][/bold]", width=12, justify="left")
-	table.add_column("[bold][yellow]modes[/yellow][/bold]", width=(term_width-8)//3)
-	table.add_column("[bold][green]metadata[/green][/bold]", width=(term_width-8)//3)
-	
-	supported_sites = []
-	selenium_sites = set()
-	encoding_rule_sites = set()
-	pagination_modes = set()
-	
-	for site_config_file in os.listdir(SITE_DIR):
-		if site_config_file.endswith(".yaml"):
-			try:
-				with open(os.path.join(SITE_DIR, site_config_file), 'r') as f:
-					site_config = yaml.safe_load(f)
-				site_name = site_config.get("name", "Unknown")
-				site_code = site_config.get("shortcode", "??")
-				use_selenium = site_config.get("use_selenium", False)
-				
-				if use_selenium:
-					selenium_sites.add(site_code)
-				
-				modes = site_config.get("modes", {})
-				modes_display_list = []
-				for mode, config in modes.items():
-					supports_pagination = "url_pattern_pages" in config
-					mode_url_rules = config.get("url_encoding_rules", {})
-					has_special_encoding = " & " in mode_url_rules or "&" in mode_url_rules
-					footnotes = []
-					if supports_pagination:
-						footnotes.append("⸸")
-						pagination_modes.add(mode)
-					if has_special_encoding:
-						footnotes.append("‡")
-						if site_code not in encoding_rule_sites:
-							encoding_rule_sites.add(site_code)
-					mode_display = f"[yellow][bold]{mode}[/bold][/yellow]" + (f"{''.join(footnotes)}" if footnotes else "")
-					modes_display_list.append(mode_display)
-				
-				metadata = has_metadata_selectors(site_config, return_fields=True)
-				supported_sites.append((site_code, site_name, modes_display_list, metadata, use_selenium))
-			except Exception as e:
-				logger.warning(f"Failed to load config '{site_config_file}': {e}")
-	
-	if supported_sites:
-		for site_code, site_name, modes_display_list, metadata, use_selenium in sorted(supported_sites, key=lambda x: x[0]):
-			code_display = f"[magenta][bold]{site_code}[/bold][/magenta]"
-			site_display = f"[magenta]{site_name}[/magenta]" + (" †" if use_selenium else "")
-			modes_display = " · ".join(modes_display_list) if modes_display_list else "[gray]None[/gray]"
-			metadata_display = " · ".join(f"[green][bold]{field}[/bold][/green]" for field in metadata) if metadata else "None"
-			table.add_row(code_display, site_display, modes_display, metadata_display)
-	else:
-		logger.warning("No valid site configs found in 'configs' folder.")
-		table.add_row("[magenta][bold]??[/bold][/magenta]", "[magenta]No sites loaded[/magenta]", "[gray]None[/gray]", "None")
-	
-	# Prepare footnotes
-	footnotes = []
-	if selenium_sites:
-		footnotes.append("[italic]† [yellow][bold]selenium[/bold][/yellow] and [yellow][bold]chromedriver[/bold][/yellow] required.[/italic]")
-	if encoding_rule_sites:
-		footnotes.append("[italic]‡ combine terms with \'&\' to search them together.[/italic]")
-	if pagination_modes:
-		footnotes.append("[italic]⸸ supports [bold][green]pagination[/green][/bold]; see [bold][yellow]optional arguments[/yellow][/bold] below.[/italic]")
-	
-	if output_path:
-		md_lines = [
-			"| code   | site                          | modes                          | metadata                       |\n",
-			"| ------ | ----------------------------- | ------------------------------ | ------------------------------ |\n"
-		]
-		
-		for site_code, site_name, modes_display_list, metadata, use_selenium in sorted(supported_sites, key=lambda x: x[0]):
-			code_str = f"`{site_code}`"
-			site_str = f"**_{site_name}_**" + (" †" if use_selenium else "")
-			modes_str = " · ".join(mode.strip("[yellow][bold]").strip("[/bold][/yellow]") for mode in modes_display_list) if modes_display_list else "None"
-			metadata_str = " · ".join(metadata) if metadata else "None"
-			md_lines.append(f"| {code_str:<6} | {site_str:<29} | {modes_str:<30} | {metadata_str:<30} |\n")
-		
-		if selenium_sites:
-			md_lines.append("\n† _Selenium required._\n")
-		if encoding_rule_sites:
-			md_lines.append("‡ _Combine terms with \"&\"._\n")
-		if pagination_modes:
-			md_lines.append("⸸ _Supports pagination; see optional arguments below._\n")
-		
-		try:
-			with open(output_path, 'w', encoding='utf-8') as f:
-				f.writelines(md_lines)
-			logger.info(f"Saved site table to '{output_path}' in Markdown format.")
-		except Exception as e:
-			logger.error(f"Failed to write Markdown table to '{output_path}': {e}")
-		return None
-	
-	from rich.console import Group
-	return Group(table, *footnotes) if footnotes else table
 
 
 def display_site_details(site_config, term_width):
@@ -2245,7 +2145,7 @@ def display_site_details(site_config, term_width):
 			if has_special_encoding:
 				footnotes.append("‡")
 				has_encoding_footnote = True
-			mode_display = f"[yellow][bold]{mode}[/bold][/yellow]" + (f"{''.join(footnotes)}" if footnotes else "")
+			mode_display = f"[yellow][bold]{mode}[/bold][/yellow]" + (f" {''.join(footnotes)}" if footnotes else "")
 			mode_table.add_row(mode_display, tip, example_cmd)
 		
 		# Add all applicable footnotes
@@ -2262,6 +2162,109 @@ def display_site_details(site_config, term_width):
 		console.print()
 	console.print()
 	display_options()
+	
+
+def generate_global_table(term_width, output_path=None):
+	"""Generate the global sites table, optionally saving as Markdown to output_path."""
+	table = Table(show_edge=True, expand=True, width=term_width)
+	table.add_column("[bold][magenta]code[/magenta][/bold]", width=6, justify="left")
+	table.add_column("[bold][magenta]site[/magenta][/bold]", width=12, justify="left")
+	table.add_column("[bold][yellow]modes[/yellow][/bold]", width=(term_width-8)//3)
+	table.add_column("[bold][green]metadata[/green][/bold]", width=(term_width-8)//3)
+	
+	supported_sites = []
+	selenium_sites = set()
+	encoding_rule_sites = set()
+	pagination_modes = set()
+	
+	for site_config_file in os.listdir(SITE_DIR):
+		if site_config_file.endswith(".yaml"):
+			try:
+				with open(os.path.join(SITE_DIR, site_config_file), 'r') as f:
+					site_config = yaml.safe_load(f)
+				site_name = site_config.get("name", "Unknown")
+				site_code = site_config.get("shortcode", "??")
+				use_selenium = site_config.get("use_selenium", False)
+				
+				if use_selenium:
+					selenium_sites.add(site_code)
+				
+				modes = site_config.get("modes", {})
+				modes_display_list = []
+				for mode, config in modes.items():
+					supports_pagination = "url_pattern_pages" in config
+					mode_url_rules = config.get("url_encoding_rules", {})
+					has_special_encoding = " & " in mode_url_rules or "&" in mode_url_rules
+					footnotes = []
+					if supports_pagination:
+						footnotes.append("⸸")
+						pagination_modes.add(mode)
+					if has_special_encoding:
+						footnotes.append("‡")
+						if site_code not in encoding_rule_sites:
+							encoding_rule_sites.add(site_code)
+					mode_display = f"[yellow][bold]{mode}[/bold][/yellow]" + (f" {''.join(footnotes)}" if footnotes else "")
+					modes_display_list.append(mode_display)
+				
+				metadata = has_metadata_selectors(site_config, return_fields=True)
+				supported_sites.append((site_code, site_name, modes_display_list, metadata, use_selenium))
+			except Exception as e:
+				logger.warning(f"Failed to load config '{site_config_file}': {e}")
+	
+	if supported_sites:
+		for site_code, site_name, modes_display_list, metadata, use_selenium in sorted(supported_sites, key=lambda x: x[0]):
+			code_display = f"[magenta][bold]{site_code}[/bold][/magenta]"
+			site_display = f"[magenta]{site_name}[/magenta]" + (f" †" if use_selenium else "")
+			modes_display = " · ".join(modes_display_list) if modes_display_list else "[gray]None[/gray]"
+			metadata_display = " · ".join(f"[green][bold]{field}[/bold][/green]" for field in metadata) if metadata else "None"
+			table.add_row(code_display, site_display, modes_display, metadata_display)
+	else:
+		logger.warning("No valid site configs found in 'configs' folder.")
+		table.add_row("[magenta][bold]??[/bold][/magenta]", "[magenta]No sites loaded[/magenta]", "[gray]None[/gray]", "None")
+	
+	# Prepare footnotes
+	footnotes = []
+	if selenium_sites:
+		footnotes.append("[italic]† [yellow][bold]selenium[/bold][/yellow] and [yellow][bold]chromedriver[/bold][/yellow] required.[/italic]")
+	if encoding_rule_sites:
+		footnotes.append("[italic]‡ combine terms with \'&\' to search them together.[/italic]")
+	if pagination_modes:
+		footnotes.append("[italic]⸸ supports [bold][green]pagination[/green][/bold]; see [bold][yellow]optional arguments[/yellow][/bold] below.[/italic]")
+	
+	if output_path:
+		md_lines = [
+			"| code   | site                          | modes                          | metadata                       |\n",
+			"| ------ | ----------------------------- | ------------------------------ | ------------------------------ |\n"
+		]
+		
+		for site_code, site_name, modes_display_list, metadata, use_selenium in sorted(supported_sites, key=lambda x: x[0]):
+			code_str = f"`{site_code}`"
+			site_str = f"**_{site_name}_**" + (f" †" if use_selenium else "")
+			# Strip Rich formatting and keep only mode name + footnotes
+			modes_str = " · ".join(
+				mode.replace("[yellow][bold]", "").replace("[/bold][/yellow]", "") 
+				for mode in modes_display_list
+			) if modes_display_list else "None"
+			metadata_str = " · ".join(metadata) if metadata else "None"
+			md_lines.append(f"| {code_str:<6} | {site_str:<29} | {modes_str:<30} | {metadata_str:<30} |\n")
+		
+		if selenium_sites:
+			md_lines.append("\n† _Selenium required._\n")
+		if encoding_rule_sites:
+			md_lines.append("‡ _Combine terms with \"&\"._\n")
+		if pagination_modes:
+			md_lines.append("⸸ _Supports pagination; see optional arguments below._\n")
+		
+		try:
+			with open(output_path, 'w', encoding='utf-8') as f:
+				f.writelines(md_lines)
+			logger.info(f"Saved site table to '{output_path}' in Markdown format.")
+		except Exception as e:
+			logger.error(f"Failed to write Markdown table to '{output_path}': {e}")
+		return None
+	
+	from rich.console import Group
+	return Group(table, *footnotes) if footnotes else table
 
 
 def display_usage(term_width):

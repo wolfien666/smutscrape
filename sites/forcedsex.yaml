@@ -20,7 +20,7 @@ modes:
       - "some-video-slug"
   page:
     url_pattern: ""
-    url_pattern_pages: "/{page}"
+    url_pattern_pages: "/{page}/"
     scraper: list_scraper
     max_pages: 999
     tip: "Download videos starting from a page number (1 is root)"

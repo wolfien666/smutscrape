@@ -1,0 +1,68 @@
+name: ForcedSex
+shortcode: fsx  # Unique shortcode
+domain: forcedsex.org
+base_url: "https://forcedsex.org"
+selector_style: css
+no_overwrite: true
+use_selenium: false  # Matches your script; no JS rendering needed
+unique_name: true
+
+url_encoding_rules:
+  " ": "-"
+  "%20": "-"
+
+modes:
+  video:
+    url_pattern: "/{video}"  # Matches "/video-slug" style URLs
+    scraper: video_scraper
+    tip: "Download a specific video by its slug"
+    examples:
+      - "some-video-slug"
+  page:
+    url_pattern: ""
+    url_pattern_pages: "/{page}"
+    scraper: list_scraper
+    max_pages: 999
+    tip: "Download videos starting from a page number (1 is root)"
+    examples:
+      - "1"
+      - "5"
+
+download:
+  method: "curl"  # Consistent with your script
+
+scrapers:
+  list_scraper:
+    video_container:
+      selector:
+        - "div.thumbs"  # From your script: soup.select('div.thumbs a')
+    video_item:
+      selector: "a"  # Links within div.thumbs
+      fields:
+        url:
+          attribute: "href"
+        title:  # No title in list; falls back to video page
+          selector: "img"  # Assuming thumbnails might have alt text
+          attribute: "alt"
+          default: "Untitled Video {random.randint(10000, 99999)}"  # Fallback per script
+
+  video_scraper:
+    title:
+      selector: "head title"
+      postProcess:
+        - replace:  # Clean up " - ForcedSex" from title if present
+            - regex: "\\s*-\\s*ForcedSex\\s*"
+              with: ""
+      default: "Video {random.randint(10000, 99999)}"  # Matches script fallback
+    download_url:
+      selector: "div.playerArea video"
+      attribute: "src"
+      postProcess:
+        - replace:  # Handle relative URLs (if any)
+            - regex: "^(?!https?:)"
+              with: "https://forcedsex.org/"
+        - replace:  # Direct swap per your working script
+            - regex: "https://media\\.forcedsex\\.org/"
+              with: "https://v1.rfsstaic.com/forcedsex.org/"
+
+name_suffix: " - ForcedSex"  # Matches script’s title formatting

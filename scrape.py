@@ -151,6 +151,7 @@ def process_title(title, invalid_chars):
 	logger.debug(f"Processing {title} for invalid chars...")
 	for char in invalid_chars:
 		title = title.replace(char, "")
+	logger.debug(f"Processed title: {title}")
 	return title
 
 def construct_filename(title, site_config, general_config):
@@ -202,7 +203,7 @@ def construct_filename(title, site_config, general_config):
 			filename = f"{prefix}{processed_title}{suffix}{extension}"
 			
 		logger.debug(f"Filename exceeded 255 bytes; trimmed to: {filename}")
-	
+
 	return filename
 	
 def construct_url(base_url, pattern, site_config, mode=None, **kwargs):
@@ -760,12 +761,13 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
 			if driver:
 				driver.quit()
 			return True
-	
 	if destination_config['type'] == 'smb':
 		temp_dir = destination_config.get('temporary_storage', os.path.join(tempfile.gettempdir(), 'smutscrape'))
 		os.makedirs(temp_dir, exist_ok=True)
 		final_destination_path = os.path.join(temp_dir, file_name)
+		logger.debug(f"Final SMB destination path: {final_destination_path}")
 		temp_destination_path = os.path.join(temp_dir, f".{file_name}")  # Changed from .part suffix to . prefix
+		logger.debug(f"Temporary intermediate path: {temp_destination_path}")
 	else:
 		final_destination_path = os.path.join(destination_config['path'], file_name)
 		temp_destination_path = final_destination_path  # No prefix for local
@@ -782,13 +784,15 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
 			success = download_video(video_url, final_destination_path, site_config, general_config, headers, final_metadata, overwrite)
 	else:
 		success = download_video(video_url, final_destination_path, site_config, general_config, headers, final_metadata, overwrite)
-	
 	if success and general_config.get('make_nfo', False) and has_metadata_selectors(site_config):
+		logger.debug(f"Successful video download, now generating nfo.")
 		generate_nfo(final_destination_path, final_metadata, overwrite or new_nfo)
 	if success and destination_config['type'] == 'smb':
+		logger.debug(f"Successful video download, now managing file.")
 		manage_file(final_destination_path, destination_config, overwrite, video_url=original_url, state_set=state_set)
 	
 	if success and not is_url_processed(original_url, state_set):
+		logger.debug(f"Adding {original_url} to state")
 		state_set.add(original_url)
 		save_state(original_url)
 	

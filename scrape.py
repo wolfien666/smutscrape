@@ -21,6 +21,7 @@ import grp
 import shutil
 import shlex
 import uuid
+import feedparser
 import urllib.parse
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
@@ -351,6 +352,11 @@ def process_url(url, site_config, general_config, overwrite, re_nfo, start_page,
 				url, site_config, general_config, overwrite, headers, re_nfo,
 				apply_state=apply_state, state_set=state_set
 			)
+		elif mode == "rss":
+			success = process_rss_feed(
+				url, site_config, general_config, overwrite, headers, re_nfo,
+				apply_state=apply_state, state_set=state_set
+			)
 		else:
 			# Extract identifier only if not a full URL
 			identifier = url.split("/")[-1].split(".")[0] if not is_full_url else None
@@ -406,6 +412,15 @@ def process_url(url, site_config, general_config, overwrite, re_nfo, start_page,
 				)
 				if success:
 					logger.info("Video mode succeeded.")
+					break
+			elif mode_name == "rss":
+				logger.info("Trying 'rss' mode...")
+				success = process_rss_feed(
+					url, site_config, general_config, overwrite, headers, re_nfo,
+					apply_state=apply_state, state_set=state_set
+				)
+				if success:
+					logger.info("RSS mode succeeded.")
 					break
 			else:
 				logger.info(f"Attempting mode '{mode_name}'...")
@@ -574,6 +589,84 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
 	logger.warning("No next page URL generated; stopping pagination")
 	return None, None, success
 	
+	
+def process_rss_feed(url, site_config, general_config, overwrite=False, headers=None, re_nfo=False, apply_state=False, state_set=None):
+	"""Process an RSS feed, downloading videos from oldest to newest."""
+	logger.info(f"Fetching RSS feed: {url}")
+	
+	# Fetch the RSS feed
+	feed = feedparser.parse(url)
+	if feed.bozo:
+		logger.error(f"Failed to parse RSS feed at {url}: {feed.bozo_exception}")
+		return False
+	
+	entries = feed.entries
+	if not entries:
+		logger.warning(f"No entries found in RSS feed at {url}")
+		return False
+	
+	# Reverse entries to process from oldest to newest
+	entries = list(reversed(entries))
+	logger.info(f"Found {len(entries)} entries in RSS feed; processing from oldest to newest")
+	
+	term_width = get_terminal_width()
+	print()
+	print()
+	feed_info = f" RSS feed for {site_config['name']} "
+	feed_line = feed_info.center(term_width, "═")
+	print(colored(feed_line, "yellow"))
+	
+	success = False
+	rss_scraper = site_config['scrapers']['rss_scraper']
+	
+	for i, entry in enumerate(entries, 1):
+		# Extract video URL from the <link> element
+		video_url = entry.get('link', '')
+		if not video_url or not is_url(video_url):
+			logger.warning(f"Entry {i} has no valid URL; skipping")
+			continue
+		
+		# Convert feedparser entry to XML string for BeautifulSoup
+		entry_xml = '<item>'
+		entry_xml += f'<title><![CDATA[{entry.get("title", "")}]]></title>'
+		entry_xml += f'<link><![CDATA[{entry.get("link", "")}]]></link>'
+		entry_xml += f'<description><![CDATA[{entry.get("description", "")}]]></description>'
+		if 'content' in entry and entry.content:
+			entry_xml += f'<content:encoded><![CDATA[{entry.content[0].value}]]></content:encoded>'
+		for category in entry.get('categories', []):
+			entry_xml += f'<category><![CDATA[{category[0]}]]></category>'
+		entry_xml += '</item>'
+		
+		# Parse the entry with BeautifulSoup using lxml parser
+		entry_soup = BeautifulSoup(entry_xml, 'lxml-xml')  # Use lxml-xml for proper XML parsing
+		
+		# Extract data using the scraper configuration
+		video_data = extract_data(entry_soup, rss_scraper['video_item']['fields'], None, site_config)
+		
+		# Fallback to RSS fields if not found in content
+		video_title = video_data.get('title', '').strip() or entry.get('title', 'Untitled').strip()
+		video_data['title'] = video_title
+		video_data['URL'] = video_url
+		
+		print()
+		counter = f"{i} of {len(entries)}"
+		counter_line = f"┈┈┈ {counter} ┈ {video_url} ".ljust(term_width, "┈")
+		print(colored(counter_line, "magenta"))
+		
+		if is_url_processed(video_url, state_set) and not (overwrite or re_nfo):
+			logger.info(f"Skipping already processed video: {video_url}")
+			success = True
+			continue
+		
+		# Process the video page
+		video_success = process_video_page(
+			video_url, site_config, general_config, overwrite, headers, re_nfo,
+			apply_state=apply_state, state_set=state_set
+		)
+		if video_success:
+			success = True
+	
+	return success
 
 def process_video_page(url, site_config, general_config, overwrite=False, headers=None, new_nfo=False, do_not_ignore=False, apply_state=False, state_set=None):
 	global last_vpn_action_time
@@ -852,7 +945,12 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 						if elements:
 							break
 				else:
-					elements = soup.select(selector)
+					# Handle namespace in selector (e.g., "content|encoded")
+					if '|' in selector:
+						namespace, tag = selector.split('|', 1)
+						elements = soup.find_all(f"{namespace}:{tag}")
+					else:
+						elements = soup.select(selector)
 			elif 'attribute' in config:
 				elements = [soup]
 			else:
@@ -868,7 +966,6 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 		if isinstance(config, dict) and 'attribute' in config:
 			# Handle attribute-based extraction (e.g., href, src)
 			values = [element.get(config['attribute']) for element in elements if element.get(config['attribute'])]
-			# If only one value, use it directly; otherwise, keep as list for post-processing
 			value = values[0] if len(values) == 1 else values if values else ''
 			if value is None:
 				logger.debug(f"Attribute '{config['attribute']}' for '{field}' is None; defaulting to empty string")
@@ -887,64 +984,61 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 			seen = set()
 			value = [v for v in value if not (v.lower() in seen or seen.add(v.lower()))]
 		
-		# Apply post-processing if present, or default to first value for lists without postProcess
-		if isinstance(config, dict):
-			if 'postProcess' in config:
-				for step in config['postProcess']:
-					if 'replace' in step:
-						for pair in step['replace']:
-							regex, replacement = pair['regex'], pair['with']
-							try:
-								if isinstance(value, list):
-									value = [re.sub(regex, replacement, v, flags=re.DOTALL) if v else '' for v in value]
-								else:
-									old_value = value
-									value = re.sub(regex, replacement, value, flags=re.DOTALL) if value else ''
-									if value != old_value:
-										logger.debug(f"Applied regex '{regex}' -> '{replacement}' for '{field}': {value}")
-							except re.error as e:
-								logger.error(f"Regex error for '{field}': regex={regex}, error={e}")
-								value = ''
-					elif 'max_attribute' in step:
-						if not isinstance(value, list):
-							logger.debug(f"Skipping max_attribute for '{field}' as value is not a list: {value}")
-							continue
-						attr_name = step.get('attribute')
-						attr_type = step.get('type', 'str')
-						if not attr_name:
-							logger.error(f"max_attribute for '{field}' missing 'attribute' key")
-							continue
+		# Apply post-processing if present
+		if isinstance(config, dict) and 'postProcess' in config:
+			for step in config['postProcess']:
+				if 'replace' in step:
+					for pair in step['replace']:
+						regex, replacement = pair['regex'], pair['with']
 						try:
-							attr_values = [(val, elements[i].get(attr_name)) for i, val in enumerate(value) if elements[i].get(attr_name) is not None]
-							if not attr_values:
-								logger.debug(f"No valid '{attr_name}' attributes found for '{field}'; using first value")
-								value = value[0] if value else ''
+							if isinstance(value, list):
+								value = [re.sub(regex, replacement, v, flags=re.DOTALL) if v else '' for v in value]
 							else:
-								if attr_type == 'int':
-									converted_attrs = [(val, int(attr)) for val, attr in attr_values]
-								elif attr_type == 'float':
-									converted_attrs = [(val, float(attr)) for val, attr in attr_values]
-								else:
-									converted_attrs = [(val, str(attr)) for val, attr in attr_values]
-								value = max(converted_attrs, key=lambda x: x[1])[0]
-								logger.debug(f"Applied max_attribute '{attr_name}' (type: {attr_type}) for '{field}': selected {value}")
-						except (ValueError, TypeError) as e:
-							logger.error(f"Failed to convert '{attr_name}' to {attr_type} for '{field}': {e}")
+								old_value = value
+								value = re.sub(regex, replacement, value, flags=re.DOTALL) if value else ''
+								if value != old_value:
+									logger.debug(f"Applied regex '{regex}' -> '{replacement}' for '{field}': {value}")
+						except re.error as e:
+							logger.error(f"Regex error for '{field}': regex={regex}, error={e}")
+							value = ''
+				elif 'max_attribute' in step:
+					if not isinstance(value, list):
+						logger.debug(f"Skipping max_attribute for '{field}' as value is not a list: {value}")
+						continue
+					attr_name = step.get('attribute')
+					attr_type = step.get('type', 'str')
+					if not attr_name:
+						logger.error(f"max_attribute for '{field}' missing 'attribute' key")
+						continue
+					try:
+						attr_values = [(val, elements[i].get(attr_name)) for i, val in enumerate(value) if elements[i].get(attr_name) is not None]
+						if not attr_values:
+							logger.debug(f"No valid '{attr_name}' attributes found for '{field}'; using first value")
 							value = value[0] if value else ''
-					elif 'first' in step and step['first'] and isinstance(value, list):
+						else:
+							if attr_type == 'int':
+								converted_attrs = [(val, int(attr)) for val, attr in attr_values]
+							elif attr_type == 'float':
+								converted_attrs = [(val, float(attr)) for val, attr in attr_values]
+							else:
+								converted_attrs = [(val, str(attr)) for val, attr in attr_values]
+							value = max(converted_attrs, key=lambda x: x[1])[0]
+							logger.debug(f"Applied max_attribute '{attr_name}' (type: {attr_type}) for '{field}': selected {value}")
+					except (ValueError, TypeError) as e:
+						logger.error(f"Failed to convert '{attr_name}' to {attr_type} for '{field}': {e}")
 						value = value[0] if value else ''
-			elif isinstance(value, list) and field not in ['tags', 'actors', 'studios']:
-				# Default to first value for lists without postProcess, except multi-value fields
-				value = value[0] if value else ''
-				logger.debug(f"No postProcess for '{field}' with multiple values; defaulted to first: {value}")
+				elif 'first' in step and step['first'] and isinstance(value, list):
+					value = value[0] if value else ''
+		
+		# Default to first value for lists without postProcess, except multi-value fields
+		if isinstance(config, dict) and 'postProcess' not in config and isinstance(value, list) and field not in ['tags', 'actors', 'studios']:
+			value = value[0] if value else ''
+			logger.debug(f"No postProcess for '{field}' with multiple values; defaulted to first: {value}")
 		
 		data[field] = value if value or isinstance(value, list) else ''
 		logger.debug(f"Final value for '{field}': {data[field]}")
 	
 	return data
-
-		
-
 
 
 	
@@ -2314,7 +2408,8 @@ def handle_multi_arg(args, general_config, args_obj, state_set):
 		logger.error(f"Site '{args[0]}' not found in configs")
 		sys.exit(1)
 	
-	mode, identifier = args[1], " ".join(args[2:])
+	mode = args[1]
+	identifier = " ".join(args[2:]) if len(args) > 2 else ""
 	if mode not in site_config['modes']:
 		logger.error(f"Unsupported mode '{mode}' for site '{args[0]}'")
 		sys.exit(1)
@@ -2333,17 +2428,29 @@ def handle_multi_arg(args, general_config, args_obj, state_set):
 	mode_config = site_config['modes'][mode]
 	page_num = args_obj.page_num
 	video_offset = args_obj.video_offset
-	url = construct_url(
-		site_config['base_url'],
-		mode_config['url_pattern'] if page_num == 1 else mode_config.get('url_pattern_pages', mode_config['url_pattern']),
-		site_config,
-		mode=mode,
-		**{mode: identifier, 'page': page_num if page_num > 1 else None}
-	)
+	
+	# For RSS mode, ignore identifier since it's hardcoded
+	if mode == 'rss':
+		url = construct_url(
+			site_config['base_url'],
+			mode_config['url_pattern'],
+			site_config,
+			mode=mode
+		)
+	else:
+		url = construct_url(
+			site_config['base_url'],
+			mode_config['url_pattern'] if page_num == 1 else mode_config.get('url_pattern_pages', mode_config['url_pattern']),
+			site_config,
+			mode=mode,
+			**{mode: identifier, 'page': page_num if page_num > 1 else None}
+		)
 	
 	handle_vpn(general_config, 'start')
 	if mode == 'video':
 		process_video_page(url, site_config, general_config, args_obj.overwrite, general_config.get('headers', {}), args_obj.re_nfo, apply_state=args_obj.applystate, state_set=state_set)
+	elif mode == 'rss':
+		process_rss_feed(url, site_config, general_config, args_obj.overwrite, general_config.get('headers', {}), args_obj.re_nfo, apply_state=args_obj.applystate, state_set=state_set)
 	else:
 		current_page_num = page_num
 		while url:
@@ -2422,7 +2529,7 @@ def main():
 	try:
 		if len(args.args) == 1:
 			handle_single_arg(args.args[0], general_config, args, term_width, state_set)
-		elif len(args.args) >= 3:
+		elif len(args.args) >= 2:
 			handle_multi_arg(args.args, general_config, args, state_set)
 		else:
 			logger.error("Invalid arguments. Use: scrape {site} {mode} {query} or scrape {url}")

@@ -63,6 +63,12 @@ modes:
     examples:
       - "Perv Therapy"
       - "PrincessCum"
+  rss:
+    url_pattern: "/feed/"
+    scraper: rss_scraper
+    tip: "Download all videos from the site-wide RSS feed, starting with the oldest"
+    examples:
+      - ""  # No query needed for site-wide feed
 
 scrapers:
   video_scraper:
@@ -89,3 +95,26 @@ scrapers:
         url:
           attribute: "href"
         title: {}
+
+  rss_scraper:
+    video_container:
+      selector: "item"
+    video_item:
+      selector: "item"  # Each <item> is a video entry
+      fields:
+        url:
+          selector: "link"  # Direct <link> tag for video URL
+        title:
+          selector: "title"  # Direct <title> tag
+        description:
+          selector: "description"  # Direct <description> tag
+        actors:
+          selector: "content|encoded"  # Use '|' for namespace prefix
+          postProcess:
+            - replace:
+                - regex: ".*Pornstar: <strong><a href=\"/tag/[^\"]+\">([^<]+)</a></strong>.*"
+                  with: "$1"
+        studios:
+          selector: "category"
+        tags:
+          selector: "category"

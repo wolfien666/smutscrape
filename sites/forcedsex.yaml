@@ -1,10 +1,10 @@
 name: ForcedSex
-shortcode: fsx  # Unique shortcode
+shortcode: fsx
 domain: forcedsex.org
 base_url: "https://forcedsex.org"
 selector_style: css
 no_overwrite: true
-use_selenium: true
+# use_selenium: true
 # unique_name: true
 
 url_encoding_rules:
@@ -13,13 +13,13 @@ url_encoding_rules:
 
 modes:
   video:
-    url_pattern: "/{video}"  # Matches "/video-slug" style URLs
+    url_pattern: "/{any}-{video}.html"
     scraper: video_scraper
-    tip: "Download a specific video by its slug"
+    tip: ""
     examples:
       - "some-video-slug"
   page:
-    url_pattern: ""
+    url_pattern: "/"
     url_pattern_pages: "/{page}/"
     scraper: list_scraper
     max_pages: 999
@@ -35,16 +35,12 @@ scrapers:
   list_scraper:
     video_container:
       selector:
-        - "div.thumbs"  # From your script: soup.select('div.thumbs a')
+        - "div.thumbs"
     video_item:
-      selector: "a"  # Links within div.thumbs
+      selector: "a"
       fields:
         url:
           attribute: "href"
-        title:  # No title in list; falls back to video page
-          selector: "img"  # Assuming thumbnails might have alt text
-          attribute: "alt"
-          default: "Untitled Video {random.randint(10000, 99999)}"  # Fallback per script
 
   video_scraper:
     title:
@@ -54,9 +50,9 @@ scrapers:
             - regex: "\\s*-\\s*ForcedSex\\s*"
               with: ""
       default: "Video {random.randint(10000, 99999)}"  # Matches script fallback
-    download_url:
-      selector: "div.playerArea video"
-      attribute: "src"
+    # download_url:
+      # selector: "div.playerArea video"
+      # attribute: "src"
 #      postProcess:
 #        - replace:  # Handle relative URLs (if any)
 #            - regex: "^(?!https?:)"

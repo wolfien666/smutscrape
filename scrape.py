@@ -125,6 +125,7 @@ def load_configuration(config_type='general', identifier=None):
 					with open(config_path, 'r') as f:
 						config = yaml.safe_load(f)
 					if not config:
+						# logger.warning("Didn't know what to do")
 						continue
 					
 					# Match based on identifier type
@@ -132,16 +133,17 @@ def load_configuration(config_type='general', identifier=None):
 						if parsed_netloc == config.get('domain', '').lower():
 							logger.debug(f"Matched URL '{identifier}' to config '{config_file}' by domain '{config.get('domain')}'")
 							return config
+				
+					elif any(identifier_lower == config.get(key, '').lower() for key in ['shortcode', 'name', 'domain']):
+						logger.debug(f"Matched identifier '{identifier}' to config '{config_file}' by shortcode, name, or domain")
+						return config
 					else:
-						# Check shortcode, name, or domain for non-URL identifiers
-						if any(identifier_lower == config.get(key, '').lower()
-							   for key in ['shortcode', 'name', 'domain']):
-							logger.debug(f"Matched identifier '{identifier}' to config '{config_file}' by shortcode, name, or domain")
-							return config
+						logger.warning(f"Didn't know what to do with {config_file}")
 				except Exception as e:
 					logger.warning(f"Failed to load config '{config_file}': {e}")
 					continue
-		
+			else:
+				logger.debug(f"Cannot use {config_file} because it lacks requisite .yaml extension")
 		logger.debug(f"No site config matched for identifier '{identifier}'")
 		return None
 	
@@ -204,6 +206,7 @@ def construct_filename(title, site_config, general_config):
 			
 		logger.debug(f"Filename exceeded 255 bytes; trimmed to: {filename}")
 
+	logger.debug(f"Generated filename: {filename}")
 	return filename
 	
 def construct_url(base_url, pattern, site_config, mode=None, **kwargs):
@@ -739,7 +742,6 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
 	final_metadata = finalize_metadata(raw_data, general_config)
 	file_name = construct_filename(final_metadata['title'], site_config, general_config)
 	destination_config = general_config['download_destinations'][0]
-	
 	state_updated = False
 	if destination_config['type'] == 'smb':
 		smb_path = os.path.join(destination_config['path'], file_name)
@@ -765,7 +767,7 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
 		temp_dir = destination_config.get('temporary_storage', os.path.join(tempfile.gettempdir(), 'smutscrape'))
 		os.makedirs(temp_dir, exist_ok=True)
 		final_destination_path = os.path.join(temp_dir, file_name)
-		logger.debug(f"Final SMB destination path: {final_destination_path}")
+		# logger.debug(f"Final SMB destination path: {final_destination_path}")
 		temp_destination_path = os.path.join(temp_dir, f".{file_name}")  # Changed from .part suffix to . prefix
 		logger.debug(f"Temporary intermediate path: {temp_destination_path}")
 	else:
@@ -1091,6 +1093,7 @@ def apply_permissions(file_path, destination_config):
 
 
 def upload_to_smb(local_path, smb_path, destination_config, overwrite=False):
+	logger.debug(f"Connecting to SMB: {smb_path}")
 	conn = SMBConnection(destination_config['username'], destination_config['password'], "videoscraper", destination_config['server'])
 	try:
 		if conn.connect(destination_config['server'], 445):
@@ -1443,14 +1446,17 @@ def get_content_length(url, headers, general_config):
 		return None
 
 def file_exists_on_smb(destination_config, path):
+	# logger.debug("Connecting to SMB...")
 	conn = SMBConnection(destination_config['username'], destination_config['password'], "videoscraper", destination_config['server'])
 	try:
 		if conn.connect(destination_config['server'], 445):
+			logger.debug(f"Successfully connected to SMB")
 			try:
 				conn.getAttributes(destination_config['share'], path)
 				return True
 			except:
 				return False
+		logger.debug(f"File not on SMB")
 		return False
 	finally:
 		conn.close()

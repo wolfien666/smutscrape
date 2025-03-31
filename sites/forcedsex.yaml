@@ -4,8 +4,8 @@ domain: forcedsex.org
 base_url: "https://forcedsex.org"
 selector_style: css
 no_overwrite: true
-use_selenium: false  # Matches your script; no JS rendering needed
-unique_name: true
+use_selenium: true
+# unique_name: true
 
 url_encoding_rules:
   " ": "-"
@@ -29,7 +29,7 @@ modes:
       - "5"
 
 download:
-  method: "curl"  # Consistent with your script
+  method: "yt-dlp"
 
 scrapers:
   list_scraper:
@@ -57,12 +57,12 @@ scrapers:
     download_url:
       selector: "div.playerArea video"
       attribute: "src"
-      postProcess:
-        - replace:  # Handle relative URLs (if any)
-            - regex: "^(?!https?:)"
-              with: "https://forcedsex.org/"
-        - replace:  # Direct swap per your working script
-            - regex: "https://media\\.forcedsex\\.org/"
-              with: "https://v1.rfsstaic.com/forcedsex.org/"
+#      postProcess:
+#        - replace:  # Handle relative URLs (if any)
+#            - regex: "^(?!https?:)"
+#              with: "https://forcedsex.org/"
+#        - replace:  # Direct swap per your working script
+#            - regex: "https://media\\.forcedsex\\.org/"
+#              with: "https://v1.rfsstaic.com/forcedsex.org/"
 
 name_suffix: " - ForcedSex"  # Matches script’s title formatting

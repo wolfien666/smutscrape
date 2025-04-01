@@ -18,7 +18,7 @@ modes:
     tip: ""
     examples:
       - "some-video-slug"
-  page:
+  all:
     url_pattern: "/"
     url_pattern_pages: "/{page}/"
     scraper: list_scraper

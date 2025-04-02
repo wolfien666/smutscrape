@@ -16,7 +16,7 @@ A Python-based tool to scrape and download adult content from various websites s
 - Recommended: [Conda](https://github.com/conda/conda) or [Mamba](https://github.com/mamba-org/mamba) for environment management 🐼
 - For JavaScript-heavy sites: [Selenium](https://pypi.org/project/selenium/) + [Chromedriver](https://chromedriver.chromium.org/) for JS-heavy sites, and [webdriver-manager](https://pypi.org/project/webdriver-manager/) for foolproof ChromeDriver management.
 - [ffmpeg](https://ffmpeg.org/) for downloading from certain sites that use HLS and aren't supported by [yt-dlp](https://github.com/yt-dlp/yt-dlp).
-- A dozen or so Python libraries listed in [[requirements.txt]]
+- Dozen or so Python libraries listed in [requirements.txt](https://github.com/io-flux/smutscrape/blob/main/requirements.txt).
 
 All Python dependencies are in `requirements.txt`.
 

@@ -125,7 +125,6 @@ def load_configuration(config_type='general', identifier=None):
 					with open(config_path, 'r') as f:
 						config = yaml.safe_load(f)
 					if not config:
-						# logger.warning("Didn't know what to do")
 						continue
 					
 					# Match based on identifier type
@@ -137,8 +136,7 @@ def load_configuration(config_type='general', identifier=None):
 					elif any(identifier_lower == config.get(key, '').lower() for key in ['shortcode', 'name', 'domain']):
 						logger.debug(f"Matched identifier '{identifier}' to config '{config_file}' by shortcode, name, or domain")
 						return config
-					else:
-						logger.warning(f"Didn't know what to do with {config_file}")
+
 				except Exception as e:
 					logger.warning(f"Failed to load config '{config_file}': {e}")
 					continue

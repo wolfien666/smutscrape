@@ -13,11 +13,10 @@ A Python-based tool to scrape and download adult content from various websites s
 ## Requirements 🧰
 
 - Python 3.10+ 🐍
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) for video downloads
-- Either [wget](https://www.gnu.org/software/wget/) or [curl](https://curl.se/) for alternative downloads
-- [ffmpeg](https://ffmpeg.org/) for M3U8 stream downloads and metadata validation
-- Recommended: [Conda](https://github.com/conda/conda) or [Mamba](https://github.com/mamba-org/mamba) for environment management 🐼🐍
-- Only for some sites: [Selenium](https://pypi.org/project/selenium/) + [Chromedriver](https://chromedriver.chromium.org/) for JS-heavy sites, and [webdriver-manager](https://pypi.org/project/webdriver-manager/) for foolproof ChromeDriver management.
+- Recommended: [Conda](https://github.com/conda/conda) or [Mamba](https://github.com/mamba-org/mamba) for environment management 🐼
+- For JavaScript-heavy sites: [Selenium](https://pypi.org/project/selenium/) + [Chromedriver](https://chromedriver.chromium.org/) for JS-heavy sites, and [webdriver-manager](https://pypi.org/project/webdriver-manager/) for foolproof ChromeDriver management.
+- [ffmpeg](https://ffmpeg.org/) for downloading from certain sites that use HLS and aren't supported by [yt-dlp](https://github.com/yt-dlp/yt-dlp).
+- A dozen or so Python libraries listed in [requirements.txt]
 
 All Python dependencies are in `requirements.txt`.
 

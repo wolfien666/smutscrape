@@ -69,7 +69,3 @@ scrapers:
         title:
           selector: "a.infos"
           attribute: "title"
-    pagination:
-      next_page:
-        selector: "a.next.page-numbers"
-        attribute: "href"

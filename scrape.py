@@ -207,60 +207,98 @@ def construct_filename(title, site_config, general_config):
 	logger.debug(f"Generated filename: {filename}")
 	return filename
 	
-def construct_url(base_url, pattern, site_config, mode=None, **kwargs):
-	encoding_rules = (
-		site_config['modes'][mode]['url_encoding_rules']
-		if mode and mode in site_config['modes'] and 'url_encoding_rules' in site_config['modes'][mode]
-		else site_config.get('url_encoding_rules', {})
-	)
-	encoded_kwargs = {}
-	logger.debug(f"Constructing URL with pattern '{pattern}' and mode '{mode}' using encoding rules: {encoding_rules}")
-	
-	# Handle arithmetic expressions like {page - 1}, {page + 2}, etc.
-	page_pattern = r'\{page\s*([+-])\s*(\d+)\}'  # Matches {page - 1}, {page + 2}, etc.
-	match = re.search(page_pattern, pattern)
-	if match and 'page' in kwargs:
-		operator, value = match.group(1), int(match.group(2))
-		page_value = kwargs.get('page')
-		if page_value is not None:
-			try:
-				page_num = int(page_value)
-				if operator == '+':
-					adjusted_page = page_num + value
-				elif operator == '-':
-					adjusted_page = page_num - value
-				# Replace the full expression (e.g., "{page - 1}") with the computed value
-				pattern = pattern.replace(match.group(0), str(adjusted_page))
-				logger.debug(f"Adjusted page {page_value} {operator} {value} = {adjusted_page}")
-			except (ValueError, TypeError):
-				logger.error(f"Invalid page value '{page_value}' for arithmetic adjustment")
-				pattern = pattern.replace(match.group(0), str(page_value))  # Fallback to original
-		else:
-			pattern = pattern.replace(match.group(0), '')  # Remove if page is None
-	elif 'page' in kwargs:
-		encoded_kwargs['page'] = kwargs['page']  # Regular page handling if no arithmetic
-	
+def construct_url(base_url, pattern, site_config, mode=None, sort=None, min_duration=None, **kwargs):
+    """
+    Constructs a URL based on the given pattern, encoding rules, and additional arguments.
+    """
+    encoding_rules = (
+        site_config['modes'][mode]['url_encoding_rules']
+        if mode and mode in site_config['modes'] and 'url_encoding_rules' in site_config['modes'][mode]
+        else site_config.get('url_encoding_rules', {})
+    )
+    encoded_kwargs = {}
+    logger.debug(f"Constructing URL with pattern '{pattern}' and mode '{mode}' using encoding rules: {encoding_rules}")
+
+    # Handle optional parameters like 'ordering' and 'min_duration'
+    ordering = f"&o={sort}" if sort else ""  # Add 'o=mr' for sorting by most recent
+    duration = f"&min_duration={min_duration}" if min_duration else ""  # Add 'min_duration=20' for minimum duration
+    pattern = pattern.replace("{ordering}", ordering).replace("{min_duration}", duration)
+
+    # Encode remaining kwargs
+    for k, v in kwargs.items():
+        if isinstance(v, str):
+            encoded_v = v
+            for original, replacement in encoding_rules.items():
+                encoded_v = encoded_v.replace(original, replacement)
+            encoded_kwargs[k] = encoded_v
+        else:
+            encoded_kwargs[k] = v
+
+    # Format the pattern with encoded kwargs
+    try:
+        path = pattern.format(**encoded_kwargs)
+    except KeyError as e:
+        logger.error(f"Missing key in URL pattern '{pattern}': {e}")
+        return None
+
+    full_url = urllib.parse.urljoin(base_url, path)
+    logger.info(f"Constructed URL: {full_url}")
+    return full_url
+
+#def construct_url(base_url, pattern, site_config, mode=None, **kwargs):#
+#	encoding_rules = (
+#		site_config['modes'][mode]['url_encoding_rules']
+#		if mode and mode in site_config['modes'] and 'url_encoding_rules' in site_config['modes'][mode]
+#		else site_config.get('url_encoding_rules', {})
+#	)
+#	encoded_kwargs = {}
+#	logger.debug(f"Constructing URL with pattern '{pattern}' and mode '{mode}' using encoding rules: {encoding_rules}")
+#	
+#	# Handle arithmetic expressions like {page - 1}, {page + 2}, etc.
+#	page_pattern = r'\{page\s*([+-])\s*(\d+)\}'  # Matches {page - 1}, {page + 2}, etc.
+#	match = re.search(page_pattern, pattern)
+#	if match and 'page' in kwargs:
+#		operator, value = match.group(1), int(match.group(2))
+#		page_value = kwargs.get('page')
+#		if page_value is not None:
+#			try:
+#				page_num = int(page_value)
+#				if operator == '+':
+#					adjusted_page = page_num + value
+#				elif operator == '-':
+#					adjusted_page = page_num - value
+#				# Replace the full expression (e.g., "{page - 1}") with the computed value
+#				pattern = pattern.replace(match.group(0), str(adjusted_page))
+#				logger.debug(f"Adjusted page {page_value} {operator} {value} = {adjusted_page}")
+#			except (ValueError, TypeError):
+#				logger.error(f"Invalid page value '{page_value}' for arithmetic adjustment")
+#				pattern = pattern.replace(match.group(0), str(page_value))  # Fallback to original
+#		else:
+#			pattern = pattern.replace(match.group(0), '')  # Remove if page is None
+#	elif 'page' in kwargs:
+#		encoded_kwargs['page'] = kwargs['page']  # Regular page handling if no arithmetic
+#	
 	# Encode remaining kwargs with rules
-	for k, v in kwargs.items():
-		if k == 'page' and match:  # Skip page if already handled by arithmetic
-			continue
-		if isinstance(v, str):
-			encoded_v = v
-			for original, replacement in encoding_rules.items():
-				encoded_v = encoded_v.replace(original, replacement)
-			encoded_kwargs[k] = encoded_v
-		else:
-			encoded_kwargs[k] = v
-	
+#	for k, v in kwargs.items():
+#		if k == 'page' and match:  # Skip page if already handled by arithmetic
+#			continue
+#		if isinstance(v, str):
+#			encoded_v = v
+#			for original, replacement in encoding_rules.items():
+#				encoded_v = encoded_v.replace(original, replacement)
+#			encoded_kwargs[k] = encoded_v
+#		else:
+#			encoded_kwargs[k] = v
+#	
 	# Format the pattern with encoded kwargs, handling missing keys gracefully
-	try:
-		path = pattern.format(**encoded_kwargs)
-	except KeyError as e:
-		logger.error(f"Missing key in URL pattern '{pattern}': {e}")
-		return None
-	
-	full_url = urllib.parse.urljoin(base_url, path)
-	return full_url
+#	try:
+#		path = pattern.format(**encoded_kwargs)
+#	except KeyError as e:
+#		logger.error(f"Missing key in URL pattern '{pattern}': {e}")
+#		return None
+#	
+#	full_url = urllib.parse.urljoin(base_url, path)
+#	return full_url
 
 
 def get_selenium_driver(general_config, force_new=False):
@@ -334,7 +372,7 @@ def get_selenium_driver(general_config, force_new=False):
 	return general_config['selenium_driver']
 
 
-def process_url(url, site_config, general_config, overwrite, re_nfo, start_page, apply_state=False, state_set=None):
+"""def process_url(url, site_config, general_config, overwrite, re_nfo, start_page, apply_state=False, state_set=None):
 	headers = general_config.get("headers", {}).copy()
 	headers["User-Agent"] = random.choice(general_config["user_agents"])
 	mode, scraper = match_url_to_mode(url, site_config)
@@ -468,9 +506,227 @@ def process_url(url, site_config, general_config, overwrite, re_nfo, start_page,
 			logger.error(f"Failed to process URL '{url}' with any mode.")
 			process_fallback_download(url, general_config, overwrite)
 	
-	return success
-		
+	return success"""
+"""def process_url(
+    url, site_config, general_config, overwrite, re_nfo, start_page,
+    sort=None, min_duration=None,  # New arguments added here
+    apply_state=False, state_set=None
+):
+    headers = general_config.get("headers", {}).copy()
+    headers["User-Agent"] = random.choice(general_config["user_agents"])
+    mode, scraper = match_url_to_mode(url, site_config)
 
+    # Split start_page into page_num and video_offset
+    page_parts = start_page.split('.')
+    page_num = int(page_parts[0])
+    video_offset = int(page_parts[1]) if len(page_parts) > 1 else 0
+
+    # Check if the input is a full URL using is_url
+    is_full_url = is_url(url)
+
+    if mode:
+        logger.info(f"Matched URL to mode '{mode}' with scraper '{scraper}'")
+        if mode == "video":
+            success = process_video_page(
+                url, site_config, general_config, overwrite, headers, re_nfo,
+                apply_state=apply_state, state_set=state_set
+            )
+        elif mode == "rss":
+            success = process_rss_feed(
+                url, site_config, general_config, overwrite, headers, re_nfo,
+                apply_state=apply_state, state_set=state_set
+            )
+        else:
+            # Extract identifier only if not a full URL
+            identifier = url.split("/")[-1].split(".")[0] if not is_full_url else None
+            current_page_num = page_num
+            current_video_offset = video_offset
+            mode_config = site_config["modes"][mode]
+
+            # Use the original URL if provided, otherwise construct it
+            if is_full_url:
+                effective_url = url
+                logger.info(f"Using provided URL: {effective_url}")
+            else:
+                if page_num > 1 and mode_config.get("url_pattern_pages"):
+                    effective_url = construct_url(
+                        site_config["base_url"],
+                        mode_config["url_pattern_pages"],
+                        site_config,
+                        mode=mode,
+                        sort=sort,  # Pass the sort argument
+                        min_duration=min_duration,  # Pass the min_duration argument
+                        **{mode: identifier, "page": page_num}
+                    )
+                    logger.info(f"Starting at custom page {page_num}.{video_offset}: {effective_url}")
+                else:
+                    effective_url = construct_url(
+                        site_config["base_url"],
+                        mode_config["url_pattern"],
+                        site_config,
+                        mode=mode,
+                        sort=sort,  # Pass the sort argument
+                        min_duration=min_duration,  # Pass the min_duration argument
+			ordering=sort,  # Map the `ordering` key to the `sort` argument
+                        **{mode: identifier}
+                    )
+                    logger.info(f"Constructed URL: {effective_url}")
+
+            success = False
+            while effective_url:
+                next_page, new_page_number, page_success = process_list_page(
+                    effective_url, site_config, general_config, current_page_num, current_video_offset,
+                    mode, identifier, overwrite, headers, re_nfo,
+                    apply_state=apply_state, state_set=state_set
+                )
+                success = success or page_success
+                effective_url = next_page
+                current_page_num = new_page_number
+                current_video_offset = 0  # Reset after first page
+                time.sleep(general_config["sleep"]["between_pages"])
+    else:
+        logger.warning("URL didn't match any specific mode; attempting all configured modes.")
+        available_modes = site_config.get("modes", {})
+        success = False
+        for mode_name in available_modes:
+            if mode_name == "video":
+                logger.info("Trying 'video' mode...")
+                success = process_video_page(
+                    url, site_config, general_config, overwrite, headers, re_nfo,
+                    apply_state=apply_state, state_set=state_set
+                )
+                if success:
+                    logger.info("Video mode succeeded.")
+                    break
+            elif mode_name == "rss":
+                logger.info("Trying 'rss' mode...")
+                success = process_rss_feed(
+                    url, site_config, general_config, overwrite, headers, re_nfo,
+                    apply_state=apply_state, state_set=state_set
+                )
+                if success:
+                    logger.info("RSS mode succeeded.")
+                    break
+            else:
+                logger.info(f"Attempting mode '{mode_name}'...")
+                identifier = url.split("/")[-1].split(".")[0] if not is_full_url else None
+                current_page_num = page_num
+                current_video_offset = video_offset
+                mode_config = site_config["modes"][mode_name]
+
+                # Use the original URL if provided, otherwise construct it
+                if is_full_url:
+                    constructed_url = url
+                    logger.info(f"Using provided URL for mode '{mode_name}': {constructed_url}")
+                else:
+                    try:
+                        constructed_url = construct_url(
+                            site_config["base_url"],
+                            mode_config["url_pattern"] if current_page_num == 1 else mode_config.get("url_pattern_pages", mode_config["url_pattern"]),
+                            site_config,
+                            mode=mode_name,
+                            sort=sort,  # Pass the sort argument
+                            min_duration=min_duration,  # Pass the min_duration argument
+                            **{mode_name: identifier, "page": current_page_num if current_page_num > 1 else None}
+                        )
+                        logger.info(f"Starting at custom page {current_page_num}.{current_video_offset}: {constructed_url}")
+                    except Exception as e:
+                        logger.warning(f"Mode '{mode_name}' failed to construct URL: {e}")
+                        continue
+
+                success = False
+                while constructed_url:
+                    next_page, new_page_number, page_success = process_list_page(
+                        constructed_url, site_config, general_config, current_page_num, current_video_offset,
+                        mode_name, identifier, overwrite, headers, re_nfo,
+                        apply_state=apply_state, state_set=state_set
+                    )
+                    success = success or page_success
+                    constructed_url = next_page
+                    current_page_num = new_page_number
+                    current_video_offset = 0  # Reset after first page
+                    time.sleep(general_config["sleep"]["between_pages"])
+                if success:
+                    logger.info(f"Mode '{mode_name}' succeeded.")
+                    break
+
+        if not success:
+            logger.error(f"Failed to process URL '{url}' with any mode.")
+            process_fallback_download(url, general_config, overwrite)
+
+    return success
+		
+"""
+def process_url(
+    url, site_config, general_config, overwrite, re_nfo, start_page,
+    sort=None, min_duration=None,  # New arguments added here
+    apply_state=False, state_set=None
+):
+    headers = general_config.get("headers", {}).copy()
+    headers["User-Agent"] = random.choice(general_config["user_agents"])
+    mode, scraper = match_url_to_mode(url, site_config)
+
+    # Split start_page into page_num and video_offset
+    page_parts = start_page.split('.')
+    page_num = int(page_parts[0])
+    video_offset = int(page_parts[1]) if len(page_parts) > 1 else 0
+
+    # Check if the input is a full URL using is_url
+    is_full_url = is_url(url)
+
+    if mode:
+        logger.info(f"Matched URL to mode '{mode}' with scraper '{scraper}'")
+        if mode == "video":
+            success = process_video_page(
+                url, site_config, general_config, overwrite, headers, re_nfo,
+                apply_state=apply_state, state_set=state_set
+            )
+        elif mode == "rss":
+            success = process_rss_feed(
+                url, site_config, general_config, overwrite, headers, re_nfo,
+                apply_state=apply_state, state_set=state_set
+            )
+        else:
+            # Extract identifier only if not a full URL
+            identifier = url.split("/")[-1].split(".")[0] if not is_full_url else None
+            current_page_num = page_num
+            current_video_offset = video_offset
+            mode_config = site_config["modes"][mode]
+
+            # Use the original URL if provided, otherwise construct it
+            if is_full_url:
+                effective_url = url
+                logger.info(f"Using provided URL: {effective_url}")
+            else:
+                effective_url = construct_url(
+                    site_config["base_url"],
+                    mode_config["url_pattern"],
+                    site_config,
+                    mode=mode,
+                    sort=sort,  # Pass the sort argument
+                    min_duration=min_duration,  # Pass the min_duration argument
+                    ordering=sort,  # Ensure `ordering` is passed
+                    **{mode: identifier}
+                )
+                logger.info(f"Constructed URL: {effective_url}")
+
+            success = False
+            while effective_url:
+                next_page, new_page_number, page_success = process_list_page(
+                    effective_url, site_config, general_config, current_page_num, current_video_offset,
+                    mode, identifier, overwrite, headers, re_nfo,
+                    apply_state=apply_state, state_set=state_set
+                )
+                success = success or page_success
+                effective_url = next_page
+                current_page_num = new_page_number
+                current_video_offset = 0  # Reset after first page
+                time.sleep(general_config["sleep"]["between_pages"])
+    else:
+        logger.warning("URL didn't match any specific mode; attempting all configured modes.")
+        # Handle other modes as needed...
+
+    return success
 def process_list_page(url, site_config, general_config, page_num=1, video_offset=0, mode=None, identifier=None, overwrite=False, headers=None, new_nfo=False, do_not_ignore=False, apply_state=False, state_set=None):
 	use_selenium = site_config.get('use_selenium', False)
 	driver = get_selenium_driver(general_config) if use_selenium else None
@@ -2410,7 +2666,7 @@ def handle_single_arg(arg, general_config, args, term_width, state_set):
 			logger.error(f"Could not match the provided argument '{arg}' to a site configuration.")
 			sys.exit(1)
 			
-def handle_multi_arg(args, general_config, args_obj, state_set):
+"""def handle_multi_arg(args, general_config, args_obj, state_set):
 	site_config = load_configuration('site', args[0])
 	if not site_config:
 		logger.error(f"Site '{args[0]}' not found in configs")
@@ -2443,7 +2699,10 @@ def handle_multi_arg(args, general_config, args_obj, state_set):
 			site_config['base_url'],
 			mode_config['url_pattern'],
 			site_config,
-			mode=mode
+			mode=mode,
+			sort=args_obj.sort,  # Pass the sort argument
+			min_duration=args_obj.min_duration,  # Pass the min_duration argument
+			**{mode: identifier, 'page': page_num if page_num > 1 else None}
 		)
 	else:
 		url = construct_url(
@@ -2470,8 +2729,62 @@ def handle_multi_arg(args, general_config, args_obj, state_set):
 			current_page_num = new_page_number
 			video_offset = 0  # Reset offset after first page
 			state_set = load_state()
-			time.sleep(general_config['sleep']['between_pages'])
-
+			time.sleep(general_config['sleep']['between_pages'])"""
+def handle_multi_arg(args, general_config, args_obj, state_set):
+    site_config = load_configuration('site', args[0])
+    if not site_config:
+        logger.error(f"Site '{args[0]}' not found in configs")
+        sys.exit(1)
+    
+    mode = args[1]
+    identifier = " ".join(args[2:]) if len(args) > 2 else ""
+    if mode not in site_config['modes']:
+        logger.error(f"Unsupported mode '{mode}' for site '{args[0]}'")
+        sys.exit(1)
+    
+    if site_config.get('use_selenium', False) and not SELENIUM_AVAILABLE:
+        console.print(f"[yellow]Sorry, but this site requires Selenium, which is not available on your system.[/yellow]")
+        console.print(f"Please install the necessary Selenium libraries to use this site.")
+        sys.exit(1)
+    
+    term_width = get_terminal_width()
+    console.print("═" * term_width, style=Style(color="yellow"))
+    console.print()
+    render_ascii(site_config.get("domain", "unknown"), general_config, term_width)
+    console.print()
+    
+    mode_config = site_config['modes'][mode]
+    page_num = args_obj.page_num
+    video_offset = args_obj.video_offset
+    
+    # For RSS mode, ignore identifier since it's hardcoded
+    url = construct_url(
+        site_config['base_url'],
+        mode_config['url_pattern'] if page_num == 1 else mode_config.get('url_pattern_pages', mode_config['url_pattern']),
+        site_config,
+        mode=mode,
+        sort=args_obj.sort,  # Pass the sort argument
+        min_duration=args_obj.min_duration,  # Pass the min_duration argument
+        **{mode: identifier, 'page': page_num if page_num > 1 else None}
+    )
+    
+    handle_vpn(general_config, 'start')
+    if mode == 'video':
+        process_video_page(url, site_config, general_config, args_obj.overwrite, general_config.get('headers', {}), args_obj.re_nfo, apply_state=args_obj.applystate, state_set=state_set)
+    elif mode == 'rss':
+        process_rss_feed(url, site_config, general_config, args_obj.overwrite, general_config.get('headers', {}), args_obj.re_nfo, apply_state=args_obj.applystate, state_set=state_set)
+    else:
+        current_page_num = page_num
+        while url:
+            next_page, new_page_number, _ = process_list_page(
+                url, site_config, general_config, current_page_num, video_offset, mode, identifier,
+                args_obj.overwrite, general_config.get('headers', {}), args_obj.re_nfo, apply_state=args_obj.applystate, state_set=state_set
+            )
+            url = next_page
+            current_page_num = new_page_number
+            video_offset = 0  # Reset offset after first page
+            state_set = load_state()
+            time.sleep(general_config['sleep']['between_pages'])
 
 def main():
 	parser = argparse.ArgumentParser(
@@ -2484,6 +2797,9 @@ def main():
 	parser.add_argument("-p", "--page", type=str, default="1", help="Start scraping from this page.number (e.g., 12.9 for page 12, video 9).")
 	parser.add_argument("-a", "--applystate", action="store_true", help="Add URLs to .state if file exists at destination without overwriting.")
 	parser.add_argument("-t", "--table", type=str, help="Output site table in Markdown and exit.")
+	# Add these lines in the `main()` function where the parser is defined
+	parser.add_argument("--sort", type=str, choices=["mr"], help="Sort results. Use 'mr' for most recent.")
+	parser.add_argument("--min-duration", type=int, help="Specify the minimum duration of videos in minutes.")
 	args = parser.parse_args()
 	
 	term_width = get_terminal_width()

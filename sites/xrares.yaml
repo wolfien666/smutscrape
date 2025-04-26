@@ -7,7 +7,7 @@ domain: Xrares.com
 base_url: "https://www.xrares.com"
 selector_style: css
 no_overwrite: true
-use_selenium: true
+use_selenium: false
 download:
   method: "yt-dlp"
 url_encoding_rules:
@@ -44,14 +44,16 @@ scrapers:
       selector: "meta[property='video:tag']"
       attribute: "content"
       multiple: true
+
   list_scraper:
     video_container:
-      selector: "div.row"
+      selector: "div.col-md-12 > div.row"
     video_item:
-      selector: "div.well.well-sm a"
-      fields:
-        url:
-          attribute: "href"
-        title:
-          selector: "img"
-          attribute: "title"
+      selector: "div.well.well-sm"
+    fields:
+      url:
+        selector: "a"
+        attribute: "href"
+      title:
+        selector: "a img"
+        attribute: "title"

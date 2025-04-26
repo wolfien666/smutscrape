@@ -35,46 +35,23 @@ modes:
 scrapers:
   video_scraper:
     title:
-      selector: "div.video-title strong"
-    tags:
-      selector: "div.metadata-row.video-tags a.is-keyword"
-      postProcess:
-        - replace:
-            - regex: "Edit tags and models"
-              with: ""
-    actors:
-      selector: "div.metadata-row.video-tags a.is-pornstar"
-    studios:
-      selector: "span.metadata a.gold-plate, span.metadata a.free-plate"
+      selector: "meta[property='og:title']"
+      attribute: "content"
     description:
-      selector: "p.metadata-row.video-description"
-      postProcess:
-        - replace:
-            - regex: "^\\+More videos like this one at .*?\n"
-              with: ""
-    date:
-      selector: "script[type='application/ld+json']"
-      postProcess:
-        - replace:
-            - regex: '.*"uploadDate":\s*"([^"]+)".*'
-              with: "\\1"
-        - parseDate: "%Y-%m-%dT%H:%M:%S%z"
-    image:
-      selector: "script:contains('setThumbUrl169')"
-      postProcess:
-        - replace:
-            - regex: ".*setThumbUrl169\\(['\"]([^'\"]+)['\"]\\).*"
-              with: "\\1"
-
+      selector: "meta[property='og:description']"
+      attribute: "content"
+    tags:
+      selector: "meta[property='video:tag']"
+      attribute: "content"
+      multiple: true
   list_scraper:
     video_container:
-      selector:
-        - "div#psvideos div.mozaique.cust-nb-cols"
-        - "div#content-thumbs div.mozaique.cust-nb-cols"
+      selector: "div.row"
     video_item:
-      selector: "div.thumb-under a"
+      selector: "div.well.well-sm a"
       fields:
         url:
           attribute: "href"
         title:
+          selector: "img"
           attribute: "title"

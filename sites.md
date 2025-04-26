@@ -17,6 +17,8 @@
 | `xr`   | **_Xrares_**                  | video · search *               | description · tags             |
 | `xv`   | **_XVideos_**                 | video · search * · studio * · model * · tag * · playlist | actors · studios · tags        |
 
+```
 † _Selenium required._
 ‡ _Combine terms with "&"._
 * _Supports pagination; see optional arguments below._
+```

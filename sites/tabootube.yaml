@@ -1,0 +1,73 @@
+# work in progress
+# ./sites/tabootube.yaml
+
+name: TabooTube
+shortcode: tt
+domain: tabootube.xxx
+base_url: "https://www.tabootube.xxx"
+selector_style: css
+no_overwrite: true
+use_selenium: true  # Required for JavaScript rendering
+download:
+  method: "yt-dlp"
+url_encoding_rules:
+  " ": "-"
+  "%20": "-"
+
+modes:
+  video:
+    url_pattern: "/{video}/"
+    scraper: video_scraper
+    tip: "Download video with identifier"
+    examples:
+      - "brother-sister-vintage-collection-part-1"
+  search:
+    scraper: list_scraper
+    url_pattern: "/search/?q={search}"
+    url_encoding_rules:
+      " ": "+"
+      "%20": "+"
+    tip: "Download videos from search results"
+    examples:
+      - "sister"
+
+scrapers:
+  video_scraper:
+    title:
+      selector: "meta[property='og:title']"
+      attribute: "content"
+    description:
+      selector: "meta[property='og:description']"
+      attribute: "content"
+    tags:
+      selector: "meta[name='keywords']"
+      attribute: "content"
+      postProcess:
+        - split: ","
+        - trim: true
+    duration:
+      selector: "meta[property='video:duration']"
+      attribute: "content"
+    date:
+      selector: "meta[property='og:updated_time']"
+      attribute: "content"
+      postProcess:
+        - parseDate: "%Y-%m-%dT%H:%M:%S%z"
+    image:
+      selector: "meta[property='og:image']"
+      attribute: "content"
+
+  list_scraper:
+    video_container:
+      selector: "#list_videos_videos_list_search_result_items"
+    video_item:
+      selector: "div.item a"
+      fields:
+        url:
+          attribute: "href"
+        title:
+          selector: "strong.title"
+    pagination:
+      next_page:
+        selector: "li.next a"
+        attribute: "data-parameters"

@@ -3,11 +3,11 @@
 
 name: TabooTube
 shortcode: tt
-domain: tabootube.xxx
+domain: TabooTube.xxx
 base_url: "https://www.tabootube.xxx"
 selector_style: css
 no_overwrite: true
-use_selenium: true  # Required for JavaScript rendering
+use_selenium: true
 download:
   method: "yt-dlp"
 url_encoding_rules:
@@ -16,17 +16,14 @@ url_encoding_rules:
 
 modes:
   video:
-    url_pattern: "/{video}/"
+    url_pattern: "/{video}"
     scraper: video_scraper
     tip: "Download video with identifier"
     examples:
-      - "brother-sister-vintage-collection-part-1"
+      - "bro-sister-vintage-collection-part-1"
   search:
     scraper: list_scraper
-    url_pattern: "/search/?q={search}"
-    url_encoding_rules:
-      " ": "+"
-      "%20": "+"
+    url_pattern: "/search?q={search}"
     tip: "Download videos from search results"
     examples:
       - "sister"
@@ -34,39 +31,33 @@ modes:
 scrapers:
   video_scraper:
     title:
-      selector: "meta[property='og:title']"
-      attribute: "content"
+      selector: "title"
     description:
-      selector: "meta[property='og:description']"
-      attribute: "content"
+      selector: "div.item.video-desc em"
     tags:
-      selector: "meta[name='keywords']"
-      attribute: "content"
-      postProcess:
-        - split: ","
-        - trim: true
-    duration:
-      selector: "meta[property='video:duration']"
-      attribute: "content"
+      selector: "div.item:contains('Tags') a"
+      multiple: true
+    actors:
+      selector: "div.item:contains('Models') a"
+      multiple: true
+    studios:
+      selector: "h2.content-source-title a"
     date:
-      selector: "meta[property='og:updated_time']"
-      attribute: "content"
+      selector: "div.info span:contains('Submitted') em"
       postProcess:
-        - parseDate: "%Y-%m-%dT%H:%M:%S%z"
-    image:
-      selector: "meta[property='og:image']"
-      attribute: "content"
+        - parseRelativeDate: true
 
   list_scraper:
     video_container:
       selector: "#list_videos_videos_list_search_result_items"
     video_item:
-      selector: "div.item a"
-      fields:
-        url:
-          attribute: "href"
-        title:
-          selector: "strong.title"
+      selector: "div.item"
+    fields:
+      url:
+        selector: "a"
+        attribute: "href"
+      title:
+        selector: "strong.title"
     pagination:
       next_page:
         selector: "li.next a"

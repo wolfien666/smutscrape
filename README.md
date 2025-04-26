@@ -100,23 +100,28 @@ Refer to this table of supported sites with available modes and metadata, or see
 
 | code   | site                          | modes                          | metadata                       |
 | ------ | ----------------------------- | ------------------------------ | ------------------------------ |
-| `9v`   | **_9Vids_** †                 | search · tag                   | tags                           |
-| `fphd` | **_FamilyPornHD_** †          | tag · model · search · studio  | actors · description · studios · tags |
-| `fptv` | **_FamilyPorn_** †            | model · tag · search · studio  | actors · description · studios · tags |
-| `fs`   | **_Family Sex_** †            | tag · search · model           | actors · description · image · studios · tags |
-| `if`   | **_IncestFlix_**              | tag ‡                          | actors · image · studios · tags |
-| `ig`   | **_IncestGuru_**              | tag ‡                          | actors · image · studios · tags |
-| `lf`   | **_LoneFun_**                 | search                         | description · tags             |
-| `ml`   | **_Motherless_** †            | search · tag · user · group · group_code | tags                           |
-| `ph`   | **_PornHub_** †               | model · category · tag · studio · search · pornstar | actors · code · date · image · studios · tags |
-| `sb`   | **_SpankBang_**               | model · search · tag           | actors · description · tags    |
-| `tna`  | **_TNAflix_**                 | search                         | actors · date · description · studios · tags |
-| `xh`   | **_xHamster_**                | model · studio · search · tag  | actors · studios · tags        |
-| `xn`   | **_XNXX_** †                  | search · model · tag · studio  | actors · date · description · image · studios · tags |
-| `xv`   | **_XVideos_**                 | search · studio · model · tag · playlist | actors · studios · tags        |
+| `9v`   | **_9Vids_** †                 | video · search · tag           | tags                           |
+| `fphd` | **_FamilyPornHD_** †          | video · tag * · model * · search * · studio * · rss | actors · description · studios · tags |
+| `fptv` | **_FamilyPorn_** †            | video · model · tag · search · studio | actors · description · studios · tags |
+| `fs`   | **_Family Sex_** †            | video · tag * · search · model * | actors · description · studios · tags |
+| `fsx`  | **_ForcedSex_**               | video · all *                  | None                           |
+| `if`   | **_IncestFlix_**              | video · tag *‡                 | actors · studios · tags        |
+| `ig`   | **_IncestGuru_**              | video · tag *                  | actors · studios · tags        |
+| `lf`   | **_LoneFun_**                 | video · search *               | description · tags             |
+| `ml`   | **_Motherless_** †            | video · search * · tag * · user * · group * · group_code * | tags                           |
+| `ph`   | **_PornHub_** †               | video · model * · category * · tag * · studio * · search * · pornstar * | actors · code · date · studios · tags |
+| `sb`   | **_SpankBang_**               | video · model * · search * · tag * | actors · description · tags    |
+| `tna`  | **_TNAflix_**                 | video · search *               | actors · date · description · studios · tags |
+| `xh`   | **_xHamster_** †              | video · model * · studio * · search * · tag * | actors · studios · tags        |
+| `xn`   | **_XNXX_** †                  | video · search * · model * · tag * · studio * | actors · date · description · studios · tags |
+| `xr`   | **_Xrares_**                  | video · search *               | description · tags             |
+| `xv`   | **_XVideos_**                 | video · search * · studio * · model * · tag * · playlist | actors · studios · tags        |
 
- † _**[Selenium](https://github.com/SeleniumHQ/selenium)** with **chromedriver** required._         
- ‡ _Combine terms with "&"._     
+```
+† Selenium required.
+‡ Combine terms with "&".
+* Supports pagination; see optional arguments below.
+```
 
 ---
 

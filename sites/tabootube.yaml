@@ -52,12 +52,12 @@ scrapers:
       selector: "#list_videos_videos_list_search_result_items"
     video_item:
       selector: "div.item"
-    fields:
-      url:
-        selector: "a"
-        attribute: "href"
-      title:
-        selector: "strong.title"
+      fields:
+        url:
+          selector: "a"
+          attribute: "href"
+        title:
+          selector: "strong.title"
     pagination:
       next_page:
         selector: "li.next a"

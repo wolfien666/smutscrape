@@ -50,10 +50,10 @@ scrapers:
       selector: "div.col-md-12 > div.row"
     video_item:
       selector: "div.well.well-sm"
-    fields:
-      url:
-        selector: "a"
-        attribute: "href"
-      title:
-        selector: "a img"
-        attribute: "title"
+      fields:
+        url:
+          selector: "a"
+          attribute: "href"
+        title:
+          selector: "a img"
+          attribute: "title"

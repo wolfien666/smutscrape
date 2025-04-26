@@ -1,6 +1,3 @@
-# work in progress
-# ./sites/tabootube.yaml
-
 name: TabooTube
 shortcode: tt
 domain: TabooTube.xxx
@@ -9,21 +6,21 @@ selector_style: css
 no_overwrite: true
 use_selenium: true
 download:
-  method: "yt-dlp"
+  method: "requests"
 url_encoding_rules:
   " ": "-"
   "%20": "-"
 
 modes:
   video:
-    url_pattern: "/{video}/"
+    url_pattern: "/{video}"
     scraper: video_scraper
     tip: "Download video with identifier"
     examples:
       - "bro-sister-vintage-collection-part-1"
   search:
     scraper: list_scraper
-    url_pattern: "/search/{search}/"
+    url_pattern: "/search/{search}"
     tip: "Download videos from search results"
     examples:
       - "sister"
@@ -46,6 +43,9 @@ scrapers:
       selector: "div.info span:contains('Submitted') em"
       postProcess:
         - parseRelativeDate: true
+    download_url:
+      selector: "span.download-link:contains('MP4 480p')"
+      attribute: "data-href"
 
   list_scraper:
     video_container:

@@ -16,14 +16,14 @@ url_encoding_rules:
 
 modes:
   video:
-    url_pattern: "/{video}"
+    url_pattern: "/{video}/"
     scraper: video_scraper
     tip: "Download video with identifier"
     examples:
       - "bro-sister-vintage-collection-part-1"
   search:
     scraper: list_scraper
-    url_pattern: "/search/{search}"
+    url_pattern: "/search/{search}/"
     tip: "Download videos from search results"
     examples:
       - "sister"

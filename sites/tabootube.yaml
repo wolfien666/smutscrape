@@ -23,7 +23,7 @@ modes:
       - "bro-sister-vintage-collection-part-1"
   search:
     scraper: list_scraper
-    url_pattern: "/search?q={search}"
+    url_pattern: "/search/{search}"
     tip: "Download videos from search results"
     examples:
       - "sister"

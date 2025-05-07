@@ -551,7 +551,7 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
 		driver.quit()
 	
 	if mode not in site_config['modes']:
-		logger.warning(f"No pagination for mode '{mode}' as it’s not defined in site_config['modes']")
+		logger.warning(f"No pagination for mode '{mode}' as it's not defined in site_config['modes']")
 		return None, None, success
 	
 	mode_config = site_config['modes'][mode]
@@ -835,7 +835,7 @@ def pierce_iframe(driver, url, site_config):
 def extract_m3u8_urls(driver, url, site_config):
 	logger.debug(f"Extracting M3U8 URLs from: {url}")
 	# URL is already loaded (iframe or original) by process_video_page
-	driver.get(url)  # Redundant but ensures we’re on the right page
+	driver.get(url)  # Redundant but ensures we're on the right page
 	
 	driver.execute_script("""
 		(function() {
@@ -875,6 +875,52 @@ def extract_m3u8_urls(driver, url, site_config):
 	logger.debug(f"Cookies after load: {cookies_str if cookies_str else 'None'}")
 	logger.info(f"Selected best M3U8: {best_m3u8}")
 	return best_m3u8, cookies_str
+
+def extract_mp4_urls(driver, url, site_config):
+	logger.debug(f"Extracting MP4 URLs from: {url}")
+	driver.get(url) # Ensure we are on the right page
+
+	driver.execute_script("""
+		(function() {
+			let open = XMLHttpRequest.prototype.open;
+			XMLHttpRequest.prototype.open = function(method, url) {
+				if (url.includes(".mp4")) {
+					console.log("🔥 Found MP4 via XHR:", url);
+				}
+				return open.apply(this, arguments);
+			};
+		})();
+	""")
+
+	time.sleep(5)  # Wait for network requests
+
+	logs = driver.get_log("performance")
+	mp4_urls = []
+	logger.debug(f"Analyzing {len(logs)} performance logs for MP4s")
+	for log in logs:
+		try:
+			message = json.loads(log["message"])["message"]
+			if "Network.responseReceived" in message["method"]:
+				request_url = message["params"]["response"]["url"]
+				if ".mp4" in request_url:
+					mp4_urls.append(request_url)
+					logger.debug(f"Found MP4 URL: {request_url}")
+		except KeyError:
+			continue
+
+	if not mp4_urls:
+		logger.warning("No MP4 URLs detected in network traffic")
+		return None, None
+
+	# Simple selection: take the first MP4 URL found.
+	# More sophisticated selection (e.g., by resolution or size) could be added here.
+	best_mp4 = mp4_urls[0]
+	
+	cookies_list = driver.get_cookies()
+	cookies_str = "; ".join([f"{c['name']}={c['value']}" for c in cookies_list])
+	logger.debug(f"Cookies after load (for MP4): {cookies_str if cookies_str else 'None'}")
+	logger.info(f"Selected best MP4: {best_mp4}")
+	return best_mp4, cookies_str
 
 def fetch_page(url, user_agents, headers, use_selenium=False, driver=None, retry_count=0):
 	if not use_selenium:

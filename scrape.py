@@ -42,6 +42,7 @@ try:
 	from webdriver_manager.chrome import ChromeDriverManager
 	from selenium.webdriver.chrome.service import Service
 	from selenium.webdriver.chrome.options import Options
+	from selenium.common.exceptions import NoSuchElementException, StaleElementReferenceException, ElementClickInterceptedException
 except:
 	SELENIUM_AVAILABLE = False
 
@@ -208,13 +209,17 @@ def construct_filename(title, site_config, general_config):
 	return filename
 	
 def construct_url(base_url, pattern, site_config, mode=None, **kwargs):
-	encoding_rules = (
-		site_config['modes'][mode]['url_encoding_rules']
-		if mode and mode in site_config['modes'] and 'url_encoding_rules' in site_config['modes'][mode]
-		else site_config.get('url_encoding_rules', {})
-	)
+	mode_specific_rules = {}
+	if mode and mode in site_config.get('modes', {}) and 'url_encoding_rules' in site_config['modes'][mode]:
+		mode_specific_rules = site_config['modes'][mode]['url_encoding_rules']
+		logger.debug(f"Loaded mode-specific URL encoding rules for mode '{mode}': {mode_specific_rules}")
+
+	site_specific_rules = site_config.get('url_encoding_rules', {})
+	if site_specific_rules:
+		logger.debug(f"Loaded site-specific URL encoding rules: {site_specific_rules}")
+
 	encoded_kwargs = {}
-	logger.debug(f"Constructing URL with pattern '{pattern}' and mode '{mode}' using encoding rules: {encoding_rules}")
+	logger.debug(f"Constructing URL with pattern '{pattern}' and mode '{mode}'. Applying encoding rules if any.")
 	
 	# Handle arithmetic expressions like {page - 1}, {page + 2}, etc.
 	page_pattern = r'\{page\s*([+-])\s*(\d+)\}'  # Matches {page - 1}, {page + 2}, etc.
@@ -238,25 +243,46 @@ def construct_url(base_url, pattern, site_config, mode=None, **kwargs):
 		else:
 			pattern = pattern.replace(match.group(0), '')  # Remove if page is None
 	elif 'page' in kwargs:
-		encoded_kwargs['page'] = kwargs['page']  # Regular page handling if no arithmetic
+		# Ensure 'page' kwarg is preserved if not used in arithmetic, will be handled by the loop below
+		pass # No special action needed here, will be processed by the main loop
 	
 	# Encode remaining kwargs with rules
 	for k, v in kwargs.items():
-		if k == 'page' and match:  # Skip page if already handled by arithmetic
+		if k == 'page' and match:  # Skip page if already handled by arithmetic adjustment of the pattern
 			continue
+		
 		if isinstance(v, str):
 			encoded_v = v
-			for original, replacement in encoding_rules.items():
-				encoded_v = encoded_v.replace(original, replacement)
+			# Apply mode-specific rules first
+			if mode_specific_rules:
+				for original, replacement in mode_specific_rules.items():
+					if original in encoded_v:
+						logger.debug(f"Applying mode rule for key '{k}': '{original}' -> '{replacement}' to value '{encoded_v}'")
+						encoded_v = encoded_v.replace(original, replacement)
+						logger.debug(f"Value after mode rule for key '{k}': '{encoded_v}'")
+			
+			# Then apply site-specific rules to the (potentially already modified) string
+			if site_specific_rules:
+				for original, replacement in site_specific_rules.items():
+					if original in encoded_v:
+						logger.debug(f"Applying site rule for key '{k}': '{original}' -> '{replacement}' to value '{encoded_v}'")
+						encoded_v = encoded_v.replace(original, replacement)
+						logger.debug(f"Value after site rule for key '{k}': '{encoded_v}'")
+			
 			encoded_kwargs[k] = encoded_v
+		elif k == 'page' and v is None and not match : # handle case where page is None and not part of an arithmetic expression
+			encoded_kwargs[k] = None # Preserve None page if not handled by arithmetic
 		else:
-			encoded_kwargs[k] = v
+			encoded_kwargs[k] = v # Preserve non-string or already handled page values
 	
 	# Format the pattern with encoded kwargs, handling missing keys gracefully
 	try:
-		path = pattern.format(**encoded_kwargs)
+		# Filter out None page values before formatting if they are not explicitly in the pattern
+		# or if the pattern expects a page but it's None (e.g. for first page where page is not in URL)
+		final_format_kwargs = {key: val for key, val in encoded_kwargs.items() if val is not None or f"{{{key}}}" in pattern}
+		path = pattern.format(**final_format_kwargs)
 	except KeyError as e:
-		logger.error(f"Missing key in URL pattern '{pattern}': {e}")
+		logger.error(f"Missing key in URL pattern '{pattern}': {e}. Available kwargs: {final_format_kwargs.keys()}")
 		return None
 	
 	full_url = urllib.parse.urljoin(base_url, path)
@@ -714,6 +740,88 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
 		if soup:
 			raw_data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config)
 		video_url = video_url or raw_data.get('download_url')
+	elif site_config.get('mp4_mode', False) and driver: # New MP4 mode
+		logger.info("Attempting MP4 mode detection.")
+		video_scraper = site_config['scrapers']['video_scraper']
+		iframe_config = next(({'enabled': True, 'selector': config['iframe']} for field, config in video_scraper.items()
+							  if isinstance(config, dict) and 'iframe' in config), None)
+		page_to_scan = original_url
+		if iframe_config:
+			logger.debug(f"Piercing iframe '{iframe_config['selector']}' for MP4")
+			driver.get(original_url)
+			time.sleep(random.uniform(1, 2))
+			try:
+				iframe = driver.find_element(By.CSS_SELECTOR, iframe_config['selector'])
+				iframe_src = iframe.get_attribute("src")
+				if iframe_src:
+					logger.info(f"Found iframe for MP4 scan: {iframe_src}")
+					page_to_scan = iframe_src # Scan inside iframe
+					# driver.get(iframe_src) # Already done by extract_mp4_urls
+					# time.sleep(random.uniform(1, 2))
+			except Exception as e:
+				logger.warning(f"Iframe error during MP4 mode: {e}")
+
+		mp4_found_url, cookies = extract_mp4_urls(driver, page_to_scan, site_config)
+		if mp4_found_url:
+			video_url = mp4_found_url
+			site_config['download'] = {'method': 'requests'} # Override to requests for MP4
+			logger.info(f"MP4 detected: {video_url}, download method set to 'requests'")
+			headers = headers or general_config.get('headers', {}).copy()
+			headers.update({"Cookie": cookies, "Referer": page_to_scan,
+							"User-Agent": general_config.get('selenium_user_agent', random.choice(general_config['user_agents']))})
+		soup = fetch_page(original_url, general_config['user_agents'], headers or {}, use_selenium, driver)
+		if soup:
+			raw_data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config)
+		video_url = video_url or raw_data.get('download_url') # Fallback to scraped URL if direct detection fails
+	elif site_config.get('detect_mode', False) and driver: # New Detect mode
+		logger.info("Attempting Detect mode (MP4 then M3U8).")
+		video_scraper = site_config['scrapers']['video_scraper']
+		iframe_config = next(({'enabled': True, 'selector': config['iframe']} for field, config in video_scraper.items()
+							  if isinstance(config, dict) and 'iframe' in config), None)
+		page_to_scan = original_url
+		scan_headers = headers or general_config.get('headers', {}).copy()
+
+		if iframe_config:
+			logger.debug(f"Piercing iframe '{iframe_config['selector']}' for Detect mode")
+			driver.get(original_url)
+			time.sleep(random.uniform(1, 2))
+			try:
+				iframe = driver.find_element(By.CSS_SELECTOR, iframe_config['selector'])
+				iframe_src = iframe.get_attribute("src")
+				if iframe_src:
+					logger.info(f"Found iframe for Detect scan: {iframe_src}")
+					page_to_scan = iframe_src
+					# driver.get(iframe_src) # Done by extract functions
+					# time.sleep(random.uniform(1, 2))
+			except Exception as e:
+				logger.warning(f"Iframe error during Detect mode: {e}")
+		
+		# Try MP4 first
+		mp4_found_url, mp4_cookies = extract_mp4_urls(driver, page_to_scan, site_config)
+		if mp4_found_url:
+			video_url = mp4_found_url
+			site_config['download'] = {'method': 'requests'}
+			logger.info(f"Detect mode: MP4 found: {video_url}, download method 'requests'")
+			scan_headers.update({"Cookie": mp4_cookies, "Referer": page_to_scan,
+								 "User-Agent": general_config.get('selenium_user_agent', random.choice(general_config['user_agents']))})
+		else:
+			logger.info("Detect mode: MP4 not found, trying M3U8.")
+			# Try M3U8 second
+			m3u8_found_url, m3u8_cookies = extract_m3u8_urls(driver, page_to_scan, site_config)
+			if m3u8_found_url:
+				video_url = m3u8_found_url
+				site_config['download'] = {'method': 'ffmpeg'} # Ensure ffmpeg for m3u8
+				logger.info(f"Detect mode: M3U8 found: {video_url}, download method 'ffmpeg'")
+				scan_headers.update({"Cookie": m3u8_cookies, "Referer": page_to_scan,
+									 "User-Agent": general_config.get('selenium_user_agent', random.choice(general_config['user_agents']))})
+			else:
+				logger.warning("Detect mode: Neither MP4 nor M3U8 found via network sniffing.")
+		
+		headers = scan_headers # Update main headers with cookies if found
+		soup = fetch_page(original_url, general_config['user_agents'], headers, use_selenium, driver)
+		if soup:
+			raw_data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config)
+		video_url = video_url or raw_data.get('download_url') # Fallback
 	else:
 		soup = fetch_page(original_url, general_config['user_agents'], headers or {}, use_selenium, driver)
 		if soup is None and use_selenium:
@@ -878,7 +986,7 @@ def extract_m3u8_urls(driver, url, site_config):
 
 def extract_mp4_urls(driver, url, site_config):
 	logger.debug(f"Extracting MP4 URLs from: {url}")
-	driver.get(url) # Ensure we are on the right page
+	driver.get(url)
 
 	driver.execute_script("""
 		(function() {
@@ -892,7 +1000,7 @@ def extract_mp4_urls(driver, url, site_config):
 		})();
 	""")
 
-	time.sleep(5)  # Wait for network requests
+	time.sleep(5) # Wait for network requests
 
 	logs = driver.get_log("performance")
 	mp4_urls = []
@@ -903,22 +1011,41 @@ def extract_mp4_urls(driver, url, site_config):
 			if "Network.responseReceived" in message["method"]:
 				request_url = message["params"]["response"]["url"]
 				if ".mp4" in request_url:
-					mp4_urls.append(request_url)
-					logger.debug(f"Found MP4 URL: {request_url}")
+					# Basic quality check - prefer URLs with typical video resolution patterns
+					if re.search(r'(240|360|480|720|1080|1440|2160)p', request_url.lower()) or \
+					   re.search(r'(\d{3,4}x\d{3,4})', request_url.lower()):
+						mp4_urls.append(request_url)
+						logger.debug(f"Found MP4 URL (likely video): {request_url}")
+					else:
+						logger.debug(f"Found MP4 URL (potential non-video, logging only): {request_url}")
+
 		except KeyError:
 			continue
-
+	
 	if not mp4_urls:
 		logger.warning("No MP4 URLs detected in network traffic")
 		return None, None
 
-	# Simple selection: take the first MP4 URL found.
-	# More sophisticated selection (e.g., by resolution or size) could be added here.
-	best_mp4 = mp4_urls[0]
-	
+	# Prioritize higher resolution if discernible from URL, very basic sort
+	# This is a simple heuristic and might need refinement based on common URL patterns
+	def quality_key(url_str):
+		resolutions = {"2160p": 6, "1440p": 5, "1080p": 4, "720p": 3, "480p": 2, "360p": 1, "240p": 0}
+		for res, score in resolutions.items():
+			if res in url_str:
+				return score
+		# Try to extract resolution like 1920x1080
+		match = re.search(r'(\d+)x(\d+)', url_str)
+		if match:
+			try:
+				return int(match.group(2)) # Sort by height
+			except ValueError:
+				pass
+		return -1 # Lowest priority if no clear resolution
+
+	best_mp4 = sorted(mp4_urls, key=quality_key, reverse=True)[0]
 	cookies_list = driver.get_cookies()
 	cookies_str = "; ".join([f"{c['name']}={c['value']}" for c in cookies_list])
-	logger.debug(f"Cookies after load (for MP4): {cookies_str if cookies_str else 'None'}")
+	logger.debug(f"Cookies after MP4 detection: {cookies_str if cookies_str else 'None'}")
 	logger.info(f"Selected best MP4: {best_mp4}")
 	return best_mp4, cookies_str
 
@@ -1525,10 +1652,24 @@ def process_fallback_download(url, general_config, overwrite=False):
 	os.makedirs(temp_dir, exist_ok=True)
 	logger.info(f"Fallback download for: {url}")
 	success, downloaded_files = download_with_ytdlp_fallback(url, temp_dir, general_config)
-	if not success or not downloaded_files:
-		shutil.rmtree(temp_dir, ignore_errors=True)
-		return False
 	
+	if not success or not downloaded_files:
+		logger.warning(f"yt-dlp fallback failed for {url}. Attempting direct detection fallback.")
+		if _fallback_detect_and_download(url, general_config, overwrite):
+			logger.info(f"Direct detection fallback succeeded for {url}")
+			# If _fallback_detect_and_download created the temp_dir or used it, 
+			# it should clean up its own specific temp files.
+			# We only try to remove temp_dir if ytdlp might have created it and left it empty.
+			if os.path.exists(temp_dir) and not os.listdir(temp_dir):
+				shutil.rmtree(temp_dir, ignore_errors=True)
+			return True
+		else:
+			logger.error(f"Both yt-dlp and direct detection fallbacks failed for {url}.")
+			shutil.rmtree(temp_dir, ignore_errors=True) # Clean up ytdlp's temp_dir if both failed
+			return False
+	
+	# This part below only runs if yt-dlp succeeded initially
+	logger.info(f"yt-dlp fallback succeeded for {url}, processing {len(downloaded_files)} files.")
 	for downloaded_file in downloaded_files:
 		source_path = os.path.join(temp_dir, downloaded_file)
 		if destination_config['type'] == 'smb':
@@ -1927,6 +2068,125 @@ def cleanup(general_config):
 			logger.warning(f"Failed to close Selenium driver: {e}")
 	print()
 
+
+def _fallback_detect_and_download(url, general_config, overwrite=False):
+	"""Helper function for fallback: tries to detect MP4 then M3U8 and download."""
+	logger.info(f"Fallback: Attempting direct detection for {url}")
+	driver = None
+	video_url_detected = None
+	download_method = None
+	detection_headers = general_config.get("headers", {}).copy()
+	detection_headers["User-Agent"] = random.choice(general_config["user_agents"])
+
+	if SELENIUM_AVAILABLE:
+		driver = get_selenium_driver(general_config) # Ensure driver is fetched/reused via general_config
+		if not driver:
+			logger.error("Fallback: Failed to initialize Selenium driver for detection.")
+			return False
+		
+		current_url_for_scan = url
+		# Simplified iframe check for fallback
+		try:
+			driver.get(url) # Load the initial URL first
+			time.sleep(random.uniform(2,4)) # Allow page to load and scripts to potentially run
+			iframes = driver.find_elements(By.TAG_NAME, "iframe")
+			if iframes:
+				# Try to find a visible, reasonably sized iframe, or just the first one with a src
+				best_iframe_src = None
+				for iframe_element in iframes:
+					iframe_src_attr = iframe_element.get_attribute("src")
+					if iframe_src_attr and is_url(iframe_src_attr):
+						# Basic check, could be improved with size/visibility checks
+						best_iframe_src = iframe_src_attr
+						logger.debug(f"Fallback: Potential iframe found with src: {best_iframe_src}")
+						break # Take the first valid one for simplicity in fallback
+				if best_iframe_src:
+					logger.info(f"Fallback: Scanning inside iframe: {best_iframe_src}")
+					current_url_for_scan = best_iframe_src
+					# driver.get(current_url_for_scan) # extract_mp4/m3u8_urls will navigate
+			else:
+				logger.debug(f"Fallback: No iframes found on {url} or no suitable src attributes.")
+		except Exception as e:
+			logger.warning(f"Fallback: Error during simplified iframe check for {url}: {e}")
+
+		# Try MP4 detection
+		logger.debug(f"Fallback: Attempting MP4 detection on {current_url_for_scan}")
+		mp4_found_url, mp4_cookies = extract_mp4_urls(driver, current_url_for_scan, {}) # Pass empty site_config
+		if mp4_found_url:
+			video_url_detected = mp4_found_url
+			download_method = 'requests'
+			detection_headers.update({"Cookie": mp4_cookies, "Referer": current_url_for_scan,
+								 "User-Agent": general_config.get('selenium_user_agent', detection_headers["User-Agent"])})
+			logger.info(f"Fallback: Detected MP4: {video_url_detected}")
+		else:
+			logger.info(f"Fallback: MP4 not found via direct detection for {current_url_for_scan}, trying M3U8.")
+			# Try M3U8 detection
+			m3u8_found_url, m3u8_cookies = extract_m3u8_urls(driver, current_url_for_scan, {}) # Pass empty site_config
+			if m3u8_found_url:
+				video_url_detected = m3u8_found_url
+				download_method = 'ffmpeg'
+				detection_headers.update({"Cookie": m3u8_cookies, "Referer": current_url_for_scan,
+									 "User-Agent": general_config.get('selenium_user_agent', detection_headers["User-Agent"])})
+				logger.info(f"Fallback: Detected M3U8: {video_url_detected}")
+			else:
+				logger.warning(f"Fallback: Direct detection failed for MP4 and M3U8 on {current_url_for_scan}.")
+				# Selenium driver is managed globally, no quit here for fallback.
+				return False
+	else:
+		logger.warning("Fallback: Selenium not available, cannot perform direct MP4/M3U8 detection.")
+		return False
+
+	if not video_url_detected or not download_method:
+		logger.debug("Fallback: video_url_detected or download_method is missing after detection attempts.")
+		return False
+
+	title_from_url_path = url.split('/')[-1].split('?')[0] if '/' in url else url
+	title = re.sub(r'[^a-zA-Z0-9_.-]', '_', title_from_url_path) or "fallback_video"
+	invalid_chars = general_config['file_naming']['invalid_chars']
+	processed_title = process_title(title, invalid_chars)
+	extension = ".mp4" # Default to .mp4; ffmpeg handles m3u8 to mp4
+	
+	filename = construct_filename(processed_title, {}, general_config) # Use empty site_config for basic construction
+
+	destination_config = general_config['download_destinations'][0]
+	temp_storage_path = destination_config.get('temporary_storage', os.path.join(tempfile.gettempdir(), 'smutscrape'))
+	os.makedirs(temp_storage_path, exist_ok=True)
+	# Use a unique name for the temporary download to avoid collision
+	temp_filename_for_download = str(uuid.uuid4().hex[:8]) + "_" + filename
+	local_temp_path = os.path.join(temp_storage_path, temp_filename_for_download)
+
+	logger.info(f"Fallback: Downloading detected video {video_url_detected} as {temp_filename_for_download} using {download_method}")
+	# Pass an empty site_config as it's not strictly needed for download_video when method/URL are explicit
+	success = download_video(video_url_detected, local_temp_path, {"download": {"method": download_method}}, general_config, headers=detection_headers, overwrite=overwrite)
+
+	if success:
+		final_filename_at_destination = filename # This is the desired final name, not the temp one.
+		if destination_config['type'] == 'smb':
+			smb_final_path = os.path.join(destination_config['path'], final_filename_at_destination)
+			if not overwrite and file_exists_on_smb(destination_config, smb_final_path):
+				logger.info(f"Fallback: File '{final_filename_at_destination}' exists on SMB. Skipping upload.")
+				os.remove(local_temp_path) # Clean up temp file
+				return True
+			upload_to_smb(local_temp_path, smb_final_path, destination_config, overwrite)
+			os.remove(local_temp_path)
+			logger.success(f"Fallback: Uploaded detected video to SMB: {smb_final_path}")
+			return True
+		elif destination_config['type'] == 'local':
+			local_final_storage_path = os.path.join(destination_config['path'], final_filename_at_destination)
+			if not overwrite and os.path.exists(local_final_storage_path):
+				logger.info(f"Fallback: File '{final_filename_at_destination}' exists locally. Skipping move.")
+				os.remove(local_temp_path) # Clean up temp file
+				return True
+			os.makedirs(os.path.dirname(local_final_storage_path), exist_ok=True)
+			shutil.move(local_temp_path, local_final_storage_path)
+			apply_permissions(local_final_storage_path, destination_config)
+			logger.success(f"Fallback: Moved detected video to local destination: {local_final_storage_path}")
+			return True
+	else:
+		logger.error(f"Fallback: Download of detected video failed for {video_url_detected}")
+		if os.path.exists(local_temp_path):
+			os.remove(local_temp_path)
+	return False
 
 def get_terminal_width():
 	try:

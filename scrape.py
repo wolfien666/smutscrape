@@ -1617,20 +1617,21 @@ def get_content_length(url, headers, general_config):
 		return None
 
 def file_exists_on_smb(destination_config, path):
-	# logger.debug("Connecting to SMB...")
-	conn = SMBConnection(destination_config['username'], destination_config['password'], "videoscraper", destination_config['server'])
-	try:
-		if conn.connect(destination_config['server'], 445):
-			logger.debug(f"Successfully connected to SMB")
-			try:
-				conn.getAttributes(destination_config['share'], path)
-				return True
-			except:
-				return False
-		logger.debug(f"File not on SMB")
-		return False
-	finally:
-		conn.close()
+    # logger.debug("Connecting to SMB...")
+    conn = SMBConnection(destination_config['username'], destination_config['password'], "videoscraper", destination_config['server'])
+    try:
+        if not conn.connect(destination_config['server'], 445):
+            raise ConnectionError(f"Failed to connect to SMB server {destination_config['server']}")
+            
+        logger.debug(f"Successfully connected to SMB")
+        try:
+            conn.getAttributes(destination_config['share'], path)
+            return True
+        except:
+            return False
+    finally:
+        conn.close()
+
 
 def handle_vpn(general_config, action='start'):
 	global last_vpn_action_time

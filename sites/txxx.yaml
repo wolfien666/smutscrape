@@ -31,34 +31,32 @@ scrapers:
   video_scraper:
     title:
       selector: "head title"
+    description:
+      selector: "div.block-details div.info div.item:contains('Description:') em"
+    studios:
+      selector: "div.block-details div.info div.item:contains('Channel:') a, div.block-details div.info div.item:contains('Sponsored by:') a"
+    actors:
+      selector: "div.block-details div.info div.item:contains('Models:') a"
+    tags:
+      selector: "div.block-details div.info div.item:contains('Categories:') a, div.block-details div.info div.item:contains('Tags:') a"
     download_url:
       selector: "#kt_player > div.fp-player > video"
       attribute: "src"
-    studios:
-      selector: "div.video-info div.holder div.item a.site div.text"
-    actors:
-      selector: "div.video-info div.holder div.item div.star a.link"
-    description:
-      selector: "div.description div.player-text"
-    tags:
-      selector: "ul.details-tags li.item a.link span.text, ul.top-tags li.item a.link span.text"
-
+    
   list_scraper:
     video_container:
       selector:
         - "#list_videos_videos_list_search_result_items"
         - "#list_videos_common_videos_list_items"
     video_item:
-      selector: "li.item > div.thumb-horizontal > a.link"
+      selector: "div.item > a"
       fields:
         url:
           attribute: "href"
-        title: {}
-#    pagination:
-#      next_page:
-#        selector: "ul.pagination li.next a.primary-link"
-#        attribute: "data-parameters"
+        title:
+          selector: "strong.title"
     pagination:
       next_page:
-        selector: "li.next a"  # Updated selector
-        attribute: "href"
+        selector: "ul.pagination li.next a.primary-link"
+        attribute: "data-parameters"
+

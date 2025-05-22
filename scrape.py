@@ -1964,34 +1964,35 @@ def custom_title_case(text, uppercase_list=None, preserve_mixed_case=False):
 	return final_text
 	
 def finalize_metadata(metadata, general_config):
-	"""Finalize metadata: deduplicate across fields, apply capitalization rules."""
-	case_overrides = general_config.get('case_overrides', [])
-	tag_case_overrides = general_config.get('tag_case_overrides', [])
-	tag_overrides = case_overrides + tag_case_overrides  # Combine for tags
-	
-	final_metadata = metadata.copy()
-	
-	# Normalize fields to lists and strip '#'
-	actors = [actor.lstrip('#') for actor in final_metadata.get('actors', []) if actor]
-	studios = [studio.lstrip('#') for studio in final_metadata.get('studios', []) if studio]
-	tags = [tag.lstrip('#') for tag in final_metadata.get('tags', []) if tag]
-	
-	# Deduplicate: Actors > Studios > Tags
-	actors_lower = set(a.lower() for a in actors)
-	studios = [s for s in studios if s.lower() not in actors_lower]
-	studios_lower = set(s.lower() for s in studios)
-	tags = [t for t in tags if t.lower() not in actors_lower and t.lower() not in studios_lower]
-	
-	# Apply capitalization
-	final_metadata['actors'] = [custom_title_case(a, case_overrides, preserve_mixed_case=True) for a in actors]
-	final_metadata['studios'] = [custom_title_case(s, case_overrides, preserve_mixed_case=True) for s in studios]
-	final_metadata['tags'] = [custom_title_case(t, tag_overrides) for t in tags]
-	if 'title' in final_metadata and final_metadata['title']:
-		final_metadata['title'] = custom_title_case(final_metadata['title'].strip(), case_overrides)
-	if 'studio' in final_metadata and final_metadata['studio']:
-		final_metadata['studio'] = custom_title_case(final_metadata['studio'].lstrip('#'), case_overrides, preserve_mixed_case=True)
-	
-	return final_metadata
+    """Finalize metadata: deduplicate across fields, apply capitalization rules."""
+    case_overrides = general_config.get('case_overrides', [])
+    tag_case_overrides = general_config.get('tag_case_overrides', [])
+    tag_overrides = case_overrides + tag_case_overrides  # Combine for tags
+    
+    final_metadata = metadata.copy()
+    
+    # Normalize fields to lists and strip '#'
+    actors = [actor.lstrip('#') for actor in final_metadata.get('actors', []) if actor and actor.strip() != "and"]
+    studios = [studio.lstrip('#') for studio in final_metadata.get('studios', []) if studio and studio.strip() != "and"]
+    tags = [tag.lstrip('#') for tag in final_metadata.get('tags', []) if tag and tag.strip() != "and"]
+    
+    # Deduplicate: Actors > Studios > Tags
+    actors_lower = set(a.lower() for a in actors)
+    studios = [s for s in studios if s.lower() not in actors_lower]
+    studios_lower = set(s.lower() for s in studios)
+    tags = [t for t in tags if t.lower() not in actors_lower and t.lower() not in studios_lower]
+    
+    # Apply capitalization
+    final_metadata['actors'] = [custom_title_case(a, case_overrides, preserve_mixed_case=True) for a in actors]
+    final_metadata['studios'] = [custom_title_case(s, case_overrides, preserve_mixed_case=True) for s in studios]
+    final_metadata['tags'] = [custom_title_case(t, tag_overrides) for t in tags]
+    if 'title' in final_metadata and final_metadata['title']:
+        final_metadata['title'] = custom_title_case(final_metadata['title'].strip(), case_overrides)
+    if 'studio' in final_metadata and final_metadata['studio']:
+        final_metadata['studio'] = custom_title_case(final_metadata['studio'].lstrip('#'), case_overrides, preserve_mixed_case=True)
+    
+    return final_metadata
+
 
 
 def generate_nfo(destination_path, metadata, overwrite=False):

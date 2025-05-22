@@ -1264,25 +1264,34 @@ def apply_permissions(file_path, destination_config):
 
 
 def upload_to_smb(local_path, smb_path, destination_config, overwrite=False):
-	logger.debug(f"Connecting to SMB: {smb_path}")
+	logger.debug(f"Connecting to SMB for {os.path.basename(local_path)} -> {smb_path}")
 	conn = SMBConnection(destination_config['username'], destination_config['password'], "videoscraper", destination_config['server'])
+	connected = False
 	try:
-		if conn.connect(destination_config['server'], 445):
-			if not overwrite and file_exists_on_smb(destination_config, smb_path):
-				logger.info(f"File '{smb_path}' exists on SMB share. Skipping.")
-				return
-			
-			file_size = os.path.getsize(local_path)
-			with open(local_path, 'rb') as file:
-				with tqdm(total=file_size, unit='B', unit_scale=True, desc="Uploading to SMB") as pbar:
-					progress_file = ProgressFile(file, pbar)
-					conn.storeFile(destination_config['share'], smb_path, progress_file)
-		else:
-			logger.error("Failed to connect to SMB share.")
+		connected = conn.connect(destination_config['server'], 445)
+		if not connected:
+			logger.error(f"Failed to connect to SMB share for {smb_path}.")
+			return False
+
+		if not overwrite and file_exists_on_smb(destination_config, smb_path):
+			logger.info(f"File '{os.path.basename(smb_path)}' exists on SMB share '{destination_config['share']}' at '{smb_path}'. Skipping upload.")
+			return True
+		
+		file_size = os.path.getsize(local_path)
+		with open(local_path, 'rb') as file:
+			with tqdm(total=file_size, unit='B', unit_scale=True, desc=f"Uploading {os.path.basename(local_path)} to SMB") as pbar:
+				progress_file = ProgressFile(file, pbar)
+				conn.storeFile(destination_config['share'], smb_path, progress_file)
+		logger.debug(f"Successfully stored file on SMB: {smb_path}")
+		return True
+
 	except Exception as e:
-		logger.error(f"Error uploading to SMB: {e}")
+		logger.error(f"Error during SMB operation for {os.path.basename(local_path)} to {smb_path}: {e}")
+		return False
 	finally:
-		conn.close()
+		if connected and conn.sock: # Only close if connection was successful and socket exists
+			conn.close()
+			logger.debug(f"SMB connection closed for {smb_path}")
 
 
 def get_video_metadata(file_path):
@@ -2028,35 +2037,70 @@ def download_video(video_url, destination_path, site_config, general_config, hea
 
 def manage_file(destination_path, destination_config, overwrite=False, video_url=None, state_set=None):
 	"""Move or upload the video (and NFO) to the final destination."""
-	success = False
+	smb_upload_successful = False
 	
 	if destination_config['type'] == 'smb':
 		smb_path = os.path.join(destination_config['path'], os.path.basename(destination_path))
 		smb_nfo_path = os.path.join(destination_config['path'], f"{os.path.basename(destination_path).rsplit('.', 1)[0]}.nfo")
-		if not overwrite and file_exists_on_smb(destination_config, smb_path):
-			logger.info(f"File exists on SMB at {smb_path}. Skipping upload.")
-			success = True
-		else:
-			upload_to_smb(destination_path, smb_path, destination_config, overwrite)
-			os.remove(destination_path)
+		
+		# Attempt to upload the main video file
+		smb_upload_successful = upload_to_smb(destination_path, smb_path, destination_config, overwrite)
+		
+		if smb_upload_successful:
+			logger.success(f"Successfully processed video for SMB: {smb_path}")
+			os.remove(destination_path) # Remove video file only if upload was successful
+			logger.debug(f"Removed temporary video file: {destination_path}")
+			
+			# Handle NFO file upload if video upload was successful
 			temp_nfo_path = f"{destination_path.rsplit('.', 1)[0]}.nfo"
 			if os.path.exists(temp_nfo_path):
-				upload_to_smb(temp_nfo_path, smb_nfo_path, destination_config, overwrite)
-				os.remove(temp_nfo_path)
-			logger.success(f"Uploaded to SMB: {smb_path}")
-			success = True
-	else:
+				nfo_upload_successful = upload_to_smb(temp_nfo_path, smb_nfo_path, destination_config, overwrite)
+				if nfo_upload_successful:
+					os.remove(temp_nfo_path) # Remove NFO file only if its upload was successful
+					logger.debug(f"Removed temporary NFO file: {temp_nfo_path}")
+				else:
+					logger.error(f"Failed to upload NFO file {os.path.basename(temp_nfo_path)} to SMB. It remains at {temp_nfo_path}")
+			else:
+				logger.debug(f"No NFO file found at {temp_nfo_path} to upload.")
+		else:
+			logger.error(f"Failed to upload video {os.path.basename(destination_path)} to SMB. It remains at {destination_path}")
+			# Also check if an NFO exists and warn that it wasn't uploaded due to video failure
+			temp_nfo_path_on_failure = f"{destination_path.rsplit('.', 1)[0]}.nfo"
+			if os.path.exists(temp_nfo_path_on_failure):
+				logger.warning(f"NFO file {os.path.basename(temp_nfo_path_on_failure)} was not uploaded due to video upload failure. It remains at {temp_nfo_path_on_failure}")
+		return smb_upload_successful # Return the success status of the main video file processing
+	else: # Local destination type
 		final_path = os.path.join(destination_config['path'], os.path.basename(destination_path))
 		os.makedirs(os.path.dirname(final_path), exist_ok=True)
 		if not overwrite and os.path.exists(final_path):
 			logger.info(f"File exists locally at {final_path}. Skipping move.")
-			success = True
+			# If original destination_path was temporary and different, it might need removal
+			if destination_path != final_path and os.path.exists(destination_path):
+				os.remove(destination_path)
+				logger.debug(f"Removed original file at {destination_path} as final already exists.")
+			return True
 		else:
-			shutil.move(destination_path, final_path)
-			apply_permissions(final_path, destination_config)
-			logger.success(f"Moved to local destination: {final_path}")
-			success = True
-	return success
+			try:
+				shutil.move(destination_path, final_path)
+				apply_permissions(final_path, destination_config)
+				logger.success(f"Moved to local destination: {final_path}")
+				# Handle NFO for local move
+				temp_nfo_path = f"{destination_path.rsplit('.', 1)[0]}.nfo"
+				final_nfo_path = f"{final_path.rsplit('.', 1)[0]}.nfo"
+				if os.path.exists(temp_nfo_path):
+					if not overwrite and os.path.exists(final_nfo_path):
+						logger.info(f"NFO file exists locally at {final_nfo_path}. Skipping move.")
+						if temp_nfo_path != final_nfo_path and os.path.exists(temp_nfo_path):
+							os.remove(temp_nfo_path)
+					else:
+						shutil.move(temp_nfo_path, final_nfo_path)
+						apply_permissions(final_nfo_path, destination_config)
+						logger.debug(f"Moved NFO to {final_nfo_path}")
+				return True
+			except Exception as e:
+				logger.error(f"Failed to move {destination_path} to {final_path}: {e}")
+				return False
+	return False # Should not be reached in local path scenario if logic is correct
 
 
 def cleanup(general_config):
@@ -2722,62 +2766,167 @@ def handle_multi_arg(args, general_config, args_obj, state_set):
 	if not site_config:
 		logger.error(f"Site '{args[0]}' not found in configs")
 		sys.exit(1)
-	
+
+	# Check if the third argument is a URL that matches the site's domain
+	if len(args) >= 3 and is_url(args[2]):
+		potential_url_arg = args[2]
+		site_base_url_str = site_config.get("base_url", "")
+		
+		if not site_base_url_str:
+			logger.warning(f"Site '{args[0]}' has no base_url defined. Cannot validate if URL argument '{potential_url_arg}' belongs to this site. Proceeding to treat '{args[1]}' as mode and remaining args as query.")
+		else:
+			site_base_url_parsed = urlparse(site_base_url_str)
+			potential_url_arg_parsed = urlparse(potential_url_arg)
+
+			site_domain = site_base_url_parsed.netloc.lower().replace('www.', '')
+			arg_domain = potential_url_arg_parsed.netloc.lower().replace('www.', '')
+
+			if site_domain and arg_domain and site_domain == arg_domain:
+				logger.info(f"Third argument '{potential_url_arg}' is a URL matching site '{args[0]}' domain ('{site_domain}'). Processing as a direct URL via handle_single_arg.")
+				term_width = get_terminal_width() # For display in handle_single_arg
+				handle_single_arg(potential_url_arg, general_config, args_obj, term_width, state_set)
+				return # Crucial: exit handle_multi_arg as task is delegated
+			else:
+				domains_match_info = f"URL domain: '{arg_domain or 'unknown'}', Site domain: '{site_domain or 'unknown'}'"
+				logger.warning(f"Third argument '{potential_url_arg}' is a URL, but its domain does not match site '{args[0]}'. ({domains_match_info}). It will be treated as a query string for mode '{args[1]}'.")
+
+	# If the redirect to handle_single_arg didn't happen, proceed with normal multi-argument logic.
 	mode = args[1]
 	identifier = " ".join(args[2:]) if len(args) > 2 else ""
-	if mode not in site_config['modes']:
+
+	if mode not in site_config.get('modes', {}):
 		logger.error(f"Unsupported mode '{mode}' for site '{args[0]}'")
+		available_modes = get_available_modes(site_config)
+		if available_modes:
+			logger.info(f"Available modes for site '{args[0]}': {', '.join(available_modes)}")
+		else:
+			logger.info(f"No specific modes (like 'channel', 'search', etc.) defined for site '{args[0]}'. Try providing a direct video URL.")
 		sys.exit(1)
 	
 	if site_config.get('use_selenium', False) and not SELENIUM_AVAILABLE:
-		console.print(f"[yellow]Sorry, but this site requires Selenium, which is not available on your system.[/yellow]")
+		term_width = get_terminal_width()
+		console.print("═" * term_width, style=Style(color="yellow"))
+		console.print()
+		banner_text_selenium_fail = site_config.get("domain") or site_config.get("name", args[0])
+		render_ascii(banner_text_selenium_fail, general_config, term_width)
+		console.print()
+		console.print(f"[yellow]Sorry, but site '{site_config.get('name', args[0])}' requires Selenium, which is not available on your system.[/yellow]")
 		console.print(f"Please install the necessary Selenium libraries to use this site.")
 		sys.exit(1)
 	
 	term_width = get_terminal_width()
 	console.print("═" * term_width, style=Style(color="yellow"))
 	console.print()
-	render_ascii(site_config.get("domain", "unknown"), general_config, term_width)
+	banner_text = site_config.get("domain") or site_config.get("name", args[0])
+	render_ascii(banner_text, general_config, term_width)
 	console.print()
 	
 	mode_config = site_config['modes'][mode]
 	page_num = args_obj.page_num
 	video_offset = args_obj.video_offset
 	
-	# For RSS mode, ignore identifier since it's hardcoded
+	constructed_url = None
 	if mode == 'rss':
-		url = construct_url(
-			site_config['base_url'],
-			mode_config['url_pattern'],
-			site_config,
-			mode=mode
-		)
-	else:
-		url = construct_url(
-			site_config['base_url'],
-			mode_config['url_pattern'] if page_num == 1 else mode_config.get('url_pattern_pages', mode_config['url_pattern']),
+		if 'url_pattern' in mode_config:
+			constructed_url = construct_url(
+				site_config["base_url"],
+				mode_config["url_pattern"],
+				site_config,
+				mode=mode
+			)
+		else:
+			logger.error(f"RSS mode for site '{args[0]}' is missing 'url_pattern' in its configuration.")
+			sys.exit(1)
+	elif mode == 'video':
+		if 'url_pattern' in mode_config:
+			# For 'video' mode, the identifier is usually a video ID or key
+			video_key_name = mode # Often the mode name itself is the placeholder, e.g., {video}
+			# Check if a specific placeholder is defined, e.g. "video_id_placeholder": "id"
+			video_id_placeholder = mode_config.get("video_id_placeholder", video_key_name)
+
+			constructed_url = construct_url(
+				site_config["base_url"],
+				mode_config["url_pattern"],
+				site_config,
+				mode=mode,
+				**{video_id_placeholder: identifier}
+			)
+		else:
+			logger.error(f"Video mode for site '{args[0]}' is missing 'url_pattern'. Cannot construct video URL from identifier '{identifier}'.")
+			sys.exit(1)
+	else: # For other list modes (channel, search, etc.)
+		current_url_pattern_key = "url_pattern"
+		if page_num > 1 and mode_config.get("url_pattern_pages"):
+			current_url_pattern_key = "url_pattern_pages"
+		elif not mode_config.get("url_pattern"):
+			 logger.error(f"Mode '{mode}' for site '{args[0]}' is missing 'url_pattern' in its configuration.")
+			 sys.exit(1)
+
+		url_pattern_to_use = mode_config[current_url_pattern_key]
+		
+		kwargs_for_url = {mode: identifier}
+		# Only include 'page' if it's part of the pattern or if page_num > 1 and using paged pattern
+		if "{page}" in url_pattern_to_use or (page_num > 1 and current_url_pattern_key == "url_pattern_pages"):
+			kwargs_for_url["page"] = page_num
+		elif page_num == 1 and "{page}" not in url_pattern_to_use and current_url_pattern_key == "url_pattern":
+			# If page is 1, and not in the main pattern, don't pass 'page' kwarg unless explicitly needed.
+			# construct_url handles None gracefully if {page} isn't in pattern.
+			kwargs_for_url["page"] = None
+
+
+		constructed_url = construct_url(
+			site_config["base_url"],
+			url_pattern_to_use,
 			site_config,
 			mode=mode,
-			**{mode: identifier, 'page': page_num if page_num > 1 else None}
+			**kwargs_for_url
 		)
 	
+	if not constructed_url:
+		logger.error(f"Failed to construct URL for site '{args[0]}', mode '{mode}', identifier/query '{identifier}'.")
+		sys.exit(1)
+	
+	logger.info(f"Constructed starting URL: {constructed_url}")
 	handle_vpn(general_config, 'start')
+
 	if mode == 'video':
-		process_video_page(url, site_config, general_config, args_obj.overwrite, general_config.get('headers', {}), args_obj.re_nfo, apply_state=args_obj.applystate, state_set=state_set)
+		process_video_page(
+			constructed_url, site_config, general_config, args_obj.overwrite, 
+			general_config.get('headers', {}), args_obj.re_nfo, 
+			apply_state=args_obj.applystate, state_set=state_set
+		)
 	elif mode == 'rss':
-		process_rss_feed(url, site_config, general_config, args_obj.overwrite, general_config.get('headers', {}), args_obj.re_nfo, apply_state=args_obj.applystate, state_set=state_set)
-	else:
-		current_page_num = page_num
-		while url:
-			next_page, new_page_number, _ = process_list_page(
-				url, site_config, general_config, current_page_num, video_offset, mode, identifier,
-				args_obj.overwrite, general_config.get('headers', {}), args_obj.re_nfo, apply_state=args_obj.applystate, state_set=state_set
+		process_rss_feed(
+			constructed_url, site_config, general_config, args_obj.overwrite, 
+			general_config.get('headers', {}), args_obj.re_nfo, 
+			apply_state=args_obj.applystate, state_set=state_set
+		)
+	else: # List page modes
+		current_url_to_process = constructed_url
+		current_page_num_for_list = page_num
+		current_video_offset_for_list = video_offset if current_page_num_for_list == page_num else 0
+		
+		while current_url_to_process:
+			next_page_url, next_page_number, page_processed_successfully = process_list_page(
+				current_url_to_process, site_config, general_config, 
+				current_page_num_for_list, 
+				current_video_offset_for_list,
+				mode, identifier,
+				args_obj.overwrite, 
+				general_config.get('headers', {}), 
+				args_obj.re_nfo, 
+				apply_state=args_obj.applystate, 
+				state_set=state_set
 			)
-			url = next_page
-			current_page_num = new_page_number
-			video_offset = 0  # Reset offset after first page
-			state_set = load_state()
-			time.sleep(general_config['sleep']['between_pages'])
+			current_video_offset_for_list = 0 
+			current_url_to_process = next_page_url
+			if next_page_number is not None:
+				current_page_num_for_list = next_page_number
+			else:
+				current_url_to_process = None
+
+			if current_url_to_process:
+				time.sleep(general_config['sleep']['between_pages'])
 
 
 def main():

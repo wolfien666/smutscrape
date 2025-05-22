@@ -26,11 +26,16 @@ download_destinations:
 
 # --------------------------------------------------------------------------------
 
-# Terms to skip during scraping (case-insensitive, applied to all metadata fields)
+# Terms to skip during scraping (case-insensitive, applied to all metadata fields).
 ignored:
-  - "JOI"
-  - "Virtual Sex"
   - "Scat"
+  - "Bestiality"
+  - "Underage"
+  - "Jailbait"
+  - "Shota"
+  - "Loli"
+  - "PTHC"
+# ... those are extreme examples and won't be relevant on any of the included sites. You can also use this list for stuff that just isn't your particular kink.
 
 # --------------------------------------------------------------------------------
 
@@ -67,21 +72,25 @@ case_overrides:
   - "ASMR"
   - "BBW"
   - "BDSM"
+  - "BrattySis"
+  - "BrutalX"
+  - "DILF"
+  - "FamilyTherapyXXX"
   - "HD"
   - "JAV"
   - "JOI"
   - "POV"
   - "MILF"
+  - "MissaX"
+  - "MOTHERLESS"
+  - "MOTHERLESS.COM ™"
+  - "TXXX"
   - "XXX"
   - "3D"
   - "4K"
-  # ... you can also include studio names here to retain their correct capitalization, e.g.:
-  # - "BrattySis"
-  # - "BrutalX"
-  # - "FamilyTherapyXXX"
-  # - "MissaX"
+  # ... you can also include studio names here to retain their correct capitalization:
 
-# These special capitalization override rules apply ONLY to tags--not titles or studios
+# These special capitalization override rules apply ONLY to tags--not titles or studios. The examples below are relevant to Incestflix in particular.
 tag_case_overrides:
   - "NoneByDefault"
   # - "BBS"

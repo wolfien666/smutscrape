@@ -66,7 +66,7 @@ modes:
     examples:
       - "step"
   profile:
-    url_pattern: "/profiles/{profile}
+    url_pattern: "/profiles/{profile}"
     scraper: list_scraper
     tip: "Download videos from profile"
     examples:

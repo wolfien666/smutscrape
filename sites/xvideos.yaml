@@ -6,7 +6,7 @@ domain: xvideos.com
 base_url: "https://www.xvideos.com"
 selector_style: css
 no_overwrite: true
-use_selenium: false
+use_selenium: true
 download:
   method: "yt-dlp"
 url_encoding_rules:
@@ -70,7 +70,7 @@ modes:
     scraper: list_scraper
     tip: "Download videos from profile"
     examples:
-      - "incest-fun"
+      - "incest fun"
 
 scrapers:
   video_scraper:

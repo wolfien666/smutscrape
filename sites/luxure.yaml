@@ -1,0 +1,61 @@
+# sites/luxure.yaml
+
+name: Luxure
+shortcode: lux
+domain: en.luxuretv.com
+base_url: "https://en.luxuretv.com"
+selector_style: css
+no_overwrite: true
+use_selenium: false
+download:
+  method: "yt-dlp"
+  impersonate: "generic:impersonate"
+url_encoding_rules:
+  " ": "-"
+  "%20": "-"
+
+modes:
+  video:
+    url_pattern: "/videos/{video}.html"
+    scraper: video_scraper
+    example: "blackmail-collection-310840"
+    
+  search:
+    url_pattern: "/searchgate/videos/{search}/"
+    url_pattern_pages: "/searchgate/videos/{search}/page{page}.html"
+    scraper: list_scraper
+    tip: "Download videos from search results"
+    examples:
+      - "Incest"
+  channel:
+    url_pattern: "/channels/{any}/{channel}/"
+    scraper: list_scraper
+    tip: "Download videos from channel"
+    examples:
+      - "brutal sex"
+
+scrapers:
+  video_scraper:
+    title:
+      selector: "h1.title-right"
+      # Using text extraction
+    
+    download_url:
+      selector: "video#thisPlayer_html5_api source"
+      attribute: "src"
+      # OR alternative options:
+      # selector: "video#thisPlayer_html5_api"
+      # attribute: "src"
+  
+  list_scraper:
+    video_container:
+      selector:
+        - "div.contents"
+    video_item:
+      selector: "div.vtitle a, div.title a"
+      fields:
+        url:
+          attribute: "href"
+        title:
+          text: true
+    # Add pagination if needed

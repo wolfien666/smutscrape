@@ -1357,6 +1357,7 @@ def download_file(url, destination_path, method, general_config, site_config, he
 	desc = f"Downloading {os.path.basename(destination_path)}"
 	temp_path = os.path.join(os.path.dirname(destination_path), f".{os.path.basename(destination_path)}")  # Changed from .part suffix to . prefix
 	
+
 	try:
 		if method == "requests":
 			success = download_with_requests(url, temp_path, headers, general_config, site_config, desc)
@@ -1365,7 +1366,11 @@ def download_file(url, destination_path, method, general_config, site_config, he
 		elif method == 'wget':
 			success = download_with_wget(url, temp_path, headers, general_config, site_config, desc)
 		elif method == 'yt-dlp':
-			success = download_with_ytdlp(url, temp_path, headers, general_config, metadata, desc, overwrite=overwrite)
+			success = download_with_ytdlp(
+				url, temp_path, headers, general_config, metadata, desc, 
+				overwrite=overwrite, 
+				impersonate=site_config.get("download", {}).get("impersonate", False)
+			)
 		elif method == 'ffmpeg':
 			success = download_with_ffmpeg(url, temp_path, general_config, headers, desc, origin=origin)
 	except Exception as e:
@@ -1493,31 +1498,69 @@ def download_with_wget(url, destination_path, headers, general_config, site_conf
 	logger.info(f"Successfully completed wget download to {destination_path}")
 	return True
 
-
-def download_with_ytdlp(url, destination_path, headers, general_config, metadata, desc, overwrite=False):
-	ua = headers.get('User-Agent', random.choice(general_config['user_agents']))
-	command = ["yt-dlp", "-o", destination_path, "--user-agent", ua, "--progress"]
-	if overwrite:
-		command.append("--force-overwrite")
-	if metadata and 'Image' in metadata:
-		command.extend(["--embed-thumbnail", "--convert-thumbnails", "jpg"])
-	command.append(url)
-	
-	logger.debug(f"Executing yt-dlp command: {' '.join(shlex.quote(arg) for arg in command)}")
-	process = subprocess.Popen(
-		command,
-		stdout=sys.stdout,  # Direct yt-dlp progress to terminal
-		stderr=subprocess.STDOUT,  # Errors with stdout
-		universal_newlines=True,
-		bufsize=1  # Line buffering for real-time output
-	)
-	
-	return_code = process.wait()
-	if return_code != 0:
-		logger.error(f"yt-dlp failed with return code {return_code}")
-		return False
-	logger.debug(f"Successfully completed yt-dlp download to {destination_path}")
-	return True
+def download_with_ytdlp(url, destination_path, headers, general_config, metadata, desc, overwrite=False, impersonate=False):
+    """
+    Download a video using yt-dlp with appropriate options.
+    
+    Args:
+        url: URL to download
+        destination_path: Path where the file should be saved
+        headers: Request headers to use
+        general_config: General configuration dictionary
+        metadata: Video metadata dictionary
+        desc: Description for progress reporting
+        overwrite: Whether to overwrite existing files
+        impersonate: Boolean or string for browser impersonation
+    
+    Returns:
+        bool: Success or failure of download
+    """
+    ua = headers.get('User-Agent', random.choice(general_config['user_agents']))
+    command = ["yt-dlp", "-o", destination_path, "--user-agent", ua, "--progress"]
+    
+    # Debug logging for impersonate parameter
+    logger.debug(f"impersonate value: {impersonate}, type: {type(impersonate)}")
+    
+    if overwrite:
+        command.append("--force-overwrite")
+    
+    if metadata and 'Image' in metadata:
+        command.extend(["--embed-thumbnail", "--convert-thumbnails", "jpg"])
+    
+    # Smart handling of impersonate parameter
+    if impersonate:
+        # If impersonate is True, use default value
+        # If impersonate is a string, use that string
+        impersonate_value = "generic:impersonate" if impersonate is True else impersonate
+        logger.debug(f"Adding impersonate arg: {impersonate_value}")
+        command.extend(["--extractor-args", impersonate_value])
+    
+    command.append(url)
+    
+    # Log the full command for debugging
+    cmd_string = ' '.join(shlex.quote(str(arg)) for arg in command)
+    logger.debug(f"Executing yt-dlp command: {cmd_string}")
+    
+    try:
+        process = subprocess.Popen(
+            command,
+            stdout=sys.stdout,  # Direct yt-dlp progress to terminal
+            stderr=subprocess.STDOUT,  # Combine stderr with stdout
+            universal_newlines=True,
+            bufsize=1  # Line buffering for real-time output
+        )
+        
+        return_code = process.wait()
+        if return_code != 0:
+            logger.error(f"yt-dlp failed with return code {return_code}")
+            return False
+            
+        logger.debug(f"Successfully completed yt-dlp download to {destination_path}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Exception during yt-dlp execution: {str(e)}")
+        return False
 	
 	
 def download_with_ffmpeg(url, destination_path, general_config, headers=None, desc="Downloading", origin=None):

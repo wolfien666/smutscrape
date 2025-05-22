@@ -1,3 +1,4 @@
+cat sites/xvideos.yaml
 # sites/xvideos.yaml
 # Work in progress; need to add more metadata scrapers/selectors
 
@@ -66,6 +67,12 @@ modes:
     tip: "Download videos from playlist"
     examples:
       - "step"
+  profile:
+    url_pattern: "/profiles/{profile}
+    scraper: list_scraper
+    tip: "Download videos from profile"
+    examples:
+      - "incest-fun"
 
 scrapers:
   video_scraper:

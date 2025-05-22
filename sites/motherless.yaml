@@ -12,7 +12,8 @@ download:
 url_encoding_rules:
   ' ': '+'
   '%20': '+'
-name_suffix: ' - Motherless'
+remove_title_string: ' | MOTHERLESS.COM ™'
+# name_suffix: ' - Motherless'
 # unique_name: true
 
 modes:

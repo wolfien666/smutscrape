@@ -63,7 +63,7 @@ All Python dependencies are in `requirements.txt`.
 
    For Cloudflare evasion:
    ```bash
-  pip install --upgrade --force-reinstall --no-cache yt-dlp curl_cffi
+   pip install --upgrade --force-reinstall --no-cache yt-dlp curl_cffi
    ```
 
 3. **Configure `config.yaml` ⚙️**

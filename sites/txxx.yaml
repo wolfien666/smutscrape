@@ -5,6 +5,7 @@ name: TXXX
 shortcode: tx
 domain: txxx.video
 base_url: "https://txxx.video"
+remove_title_string: " - HD XXX Porn Video | TXXX.Video"
 selector_style: css
 no_overwrite: true
 use_selenium: true

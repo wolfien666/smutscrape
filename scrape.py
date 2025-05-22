@@ -156,57 +156,59 @@ def process_title(title, invalid_chars):
 	return title
 
 def construct_filename(title, site_config, general_config):
-	prefix = site_config.get('name_prefix', '')
-	suffix = site_config.get('name_suffix', '')
-	extension = general_config['file_naming']['extension']
-	invalid_chars = general_config['file_naming']['invalid_chars']
-	max_chars = general_config['file_naming'].get('max_chars', 255)  # Default to 255 if not specified
-	
-	# Get unique name settings - use boolean values to handle YAML's various ways of representing true/false
-	unique_name = bool(site_config.get("unique_name", False))
-	make_unique = bool(general_config['file_naming'].get('make_unique', False))
-	
-	# Process title by removing invalid characters
-	processed_title = process_title(title, invalid_chars)
-	
-	# Generate a unique ID if needed (6 random characters)
-	unique_id = '_' + ''.join(random.choices(string.ascii_lowercase + string.ascii_uppercase + string.digits, k=6)) if unique_name or make_unique else ''
-	
-	# Calculate available length for the title, accounting for the unique ID if present
-	fixed_length = len(prefix) + len(suffix) + len(extension) + len(unique_id)
-	max_title_chars = min(max_chars, 255) - fixed_length  # Hard cap at 255 chars total
-	
-	if max_title_chars <= 0:
-		logger.warning(f"Fixed filename parts ({fixed_length} chars) exceed max_chars ({max_chars}); truncating to fit.")
-		max_title_chars = max(1, 255 - fixed_length)  # Ensure at least 1 char for title if possible
-	
-	# Truncate title if necessary
-	if len(processed_title) > max_title_chars:
-		processed_title = processed_title[:max_title_chars].rstrip()
-		logger.debug(f"Truncated title to {max_title_chars} chars: {processed_title}")
-	
-	# Construct final filename with unique ID before extension
-	if unique_id:
-		filename = f"{prefix}{processed_title}{suffix}{unique_id}{extension}"
-	else:
-		filename = f"{prefix}{processed_title}{suffix}{extension}"
-	
-	# Double-check byte length (Linux limit is 255 bytes, not chars)
-	while len(filename.encode('utf-8')) > 255:
-		excess = len(filename.encode('utf-8')) - 255
-		trim_chars = excess // 4 + 1  # Rough estimate for UTF-8; adjust conservatively
-		processed_title = processed_title[:-trim_chars].rstrip()
-		
-		# Reconstruct the filename with the trimmed title
-		if unique_id:
-			filename = f"{prefix}{processed_title}{suffix}{unique_id}{extension}"
-		else:
-			filename = f"{prefix}{processed_title}{suffix}{extension}"
-			
-		logger.debug(f"Filename exceeded 255 bytes; trimmed to: {filename}")
+    
+    prefix = site_config.get('name_prefix', '')
+    suffix = site_config.get('name_suffix', '')
+    extension = general_config['file_naming']['extension']
+    invalid_chars = general_config['file_naming']['invalid_chars']
+    max_chars = general_config['file_naming'].get('max_chars', 255)  # Default to 255 if not specified
+    
+    # Get unique name settings - use boolean values to handle YAML's various ways of representing true/false
+    unique_name = bool(site_config.get("unique_name", False))
+    make_unique = bool(general_config['file_naming'].get('make_unique', False))
+    
+    # Process title by removing invalid characters
+    processed_title = process_title(title, invalid_chars)
+    
+    # Generate a unique ID if needed (6 random characters)
+    unique_id = '_' + ''.join(random.choices(string.ascii_lowercase + string.ascii_uppercase + string.digits, k=6)) if unique_name or make_unique else ''
+    
+    # Calculate available length for the title, accounting for the unique ID if present
+    fixed_length = len(prefix) + len(suffix) + len(extension) + len(unique_id)
+    max_title_chars = min(max_chars, 255) - fixed_length  # Hard cap at 255 chars total
+    
+    if max_title_chars <= 0:
+        logger.warning(f"Fixed filename parts ({fixed_length} chars) exceed max_chars ({max_chars}); truncating to fit.")
+        max_title_chars = max(1, 255 - fixed_length)  # Ensure at least 1 char for title if possible
+    
+    # Truncate title if necessary
+    if len(processed_title) > max_title_chars:
+        processed_title = processed_title[:max_title_chars].rstrip()
+        logger.debug(f"Truncated title to {max_title_chars} chars: {processed_title}")
+    
+    # Construct final filename with unique ID before extension
+    if unique_id:
+        filename = f"{prefix}{processed_title}{suffix}{unique_id}{extension}"
+    else:
+        filename = f"{prefix}{processed_title}{suffix}{extension}"
+    
+    # Double-check byte length (Linux limit is 255 bytes, not chars)
+    while len(filename.encode('utf-8')) > 255:
+        excess = len(filename.encode('utf-8')) - 255
+        trim_chars = excess // 4 + 1  # Rough estimate for UTF-8; adjust conservatively
+        processed_title = processed_title[:-trim_chars].rstrip()
+        
+        # Reconstruct the filename with the trimmed title
+        if unique_id:
+            filename = f"{prefix}{processed_title}{suffix}{unique_id}{extension}"
+        else:
+            filename = f"{prefix}{processed_title}{suffix}{extension}"
+            
+        logger.debug(f"Filename exceeded 255 bytes; trimmed to: {filename}")
 
-	logger.debug(f"Generated filename: {filename}")
-	return filename
+    logger.debug(f"Generated filename: {filename}")
+    return filename
+
 	
 def construct_url(base_url, pattern, site_config, mode=None, **kwargs):
 	mode_specific_rules = {}
@@ -674,7 +676,7 @@ def process_rss_feed(url, site_config, general_config, overwrite=False, headers=
 		# Fallback to RSS fields if not found in content
 		video_title = video_data.get('title', '').strip() or entry.get('title', 'Untitled').strip()
 		video_data['title'] = video_title
-		video_data['URL'] = video_url
+		video_data['url'] = video_url
 		
 		print()
 		counter = f"{i} of {len(entries)}"
@@ -837,8 +839,21 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
 	
 	video_url = video_url or original_url
 	video_title = raw_data.get('title', '').strip() or 'Untitled'
-	raw_data['Title'] = video_title
-	raw_data['URL'] = original_url
+
+	remove_title_string = site_config.get('remove_title_string', '')
+
+	if remove_title_string:
+		if video_title.endswith(remove_title_string):
+			video_title = video_title[:-len(remove_title_string)].rstrip()
+			logger.debug(f"Removed string '{remove_title_string}' from title: {video_title}")
+		else:
+			logger.debug(f"\"{remove_title_string}\" not found in title: {video_title}")
+	else:
+		logger.debug("Site config has no remove_title_string set")
+	
+	raw_data['title'] = video_title
+	logger.debug(f"Final title: {raw_data['title']}")
+	raw_data['url'] = original_url
 	
 	if not do_not_ignore and should_ignore_video(raw_data, general_config['ignored']):
 		if driver:
@@ -1213,7 +1228,7 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 			logger.debug(f"No postProcess for '{field}' with multiple values; defaulted to first: {value}")
 		
 		data[field] = value if value or isinstance(value, list) else ''
-		logger.debug(f"Final value for '{field}': {data[field]}")
+		# logger.debug(f"Final value for '{field}': {data[field]}")
 	
 	return data
 
@@ -1991,7 +2006,12 @@ def finalize_metadata(metadata, general_config):
     if 'studio' in final_metadata and final_metadata['studio']:
         final_metadata['studio'] = custom_title_case(final_metadata['studio'].lstrip('#'), case_overrides, preserve_mixed_case=True)
     
+    # Log the final values for each field in the metadata
+    for field in final_metadata:
+        logger.debug(f"Final value for '{field}': {final_metadata[field]}")
+    
     return final_metadata
+
 
 
 
@@ -2021,8 +2041,8 @@ def generate_nfo(destination_path, metadata, overwrite=False):
 			f.write('<movie>\n')
 			if 'title' in metadata and metadata['title']:
 				f.write(f"  <title>{metadata['title']}</title>\n")
-			if 'URL' in metadata and metadata['URL']:
-				f.write(f"  <url>{metadata['URL']}</url>\n")
+			if 'url' in metadata and metadata['url']:
+				f.write(f"  <url>{metadata['url']}</url>\n")
 			if 'date' in metadata and metadata['date']:
 				f.write(f"  <premiered>{metadata['date']}</premiered>\n")
 			if 'Code' in metadata and metadata['Code']:

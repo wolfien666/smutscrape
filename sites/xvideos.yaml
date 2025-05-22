@@ -1,6 +1,4 @@
-cat sites/xvideos.yaml
 # sites/xvideos.yaml
-# Work in progress; need to add more metadata scrapers/selectors
 
 name: XVideos
 shortcode: xv

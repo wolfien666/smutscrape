@@ -87,7 +87,7 @@ All Python dependencies are in `requirements.txt`.
 
 ## Usage 🚀
 
-Run `python scrape.py` (or `scrape` if symlinked) to download adult content and save metadata in `.nfo` files. With no arguments, you’ll get a detailed, aesthetic readout of all supported site modes on your system, dynamically generated from `./sites/` configurations (see left image below). Alternatively, running `scrape {code}` (e.g., `scrape ml`) provides detailed info about that site—curated notes, tips, caveats, available metadata, special requirements, and usage examples (see right image below).
+Run `python scrape.py` (or `scrape` if symlinked) to download adult content and save metadata in `.nfo` files. With no arguments, you'll get a detailed, aesthetic readout of all supported site modes on your system, dynamically generated from `./sites/` configurations (see left image below). Alternatively, running `scrape {code}` (e.g., `scrape ml`) provides detailed info about that site—curated notes, tips, caveats, available metadata, special requirements, and usage examples (see right image below).
 
 <div style="display: flex; justify-content: center; align-items: center; gap: 20px; padding: 10px;"><a href="https://github.com/io-flux/smutscrape/raw/main/screenshots/screenshot1.jpg"><img src="https://github.com/io-flux/smutscrape/raw/main/screenshots/screenshot1.jpg?raw=true" alt="No Arguments Screenshot" width="300" style="border: 2px solid #ff69b4; border-radius: 5px;"></a> <a href="https://github.com/io-flux/smutscrape/raw/main/screenshots/screenshot2.jpg?"><img src="https://github.com/io-flux/smutscrape/raw/main/screenshots/screenshot2.jpg?raw=true" alt="Site Identifier Screenshot" width="300" style="border: 2px solid #ff69b4; border-radius: 5px;"></a></div>
 
@@ -143,16 +143,19 @@ scrape [args] [optional arguments]
 | `-n, --re_nfo`       | refresh metadata and write new `.nfo` files, irrespective of whether `--overwrite` is set. ⚠         |
 | `-a, --applystate`   | retroactively add URL to `.state` without re-downloading if local file matches (`-o` has priority).  |
 | `-t, --table {path}` | generate markdown table of active site configurations with modes, metadata, and examples.            |
+| `-s, --server`       | run as FastAPI server instead of CLI mode.                                                          |
+| `--host {host}`      | host to bind the API server to (overrides config.yaml, use with `-s`).                              |
+| `--port {port}`      | port to bind the API server to (overrides config.yaml, use with `-s`).                              |
 | `-d, --debug`        | enable detailed debug logging.                                                                       |
 | `-h, --help`         | show the help submenu.                                                                               |
 
-**⚠ Caution**: Using `--overwrite` or `--re_nfo` risks overwriting different videos or `.nfo` files with identical names—a growing concern as your collection expands and generic titles (e.g., "Hot Scene") collide. Mitigate this by adding `name_suffix: "{unique site identifier}"` in a site’s YAML config (e.g., `name_suffix: " - Motherless.com"` for Motherless, where duplicate titles are rampant).
+**⚠ Caution**: Using `--overwrite` or `--re_nfo` risks overwriting different videos or `.nfo` files with identical names—a growing concern as your collection expands and generic titles (e.g., "Hot Scene") collide. Mitigate this by adding `name_suffix: "{unique site identifier}"` in a site's YAML config (e.g., `name_suffix: " - Motherless.com"` for Motherless, where duplicate titles are rampant).
 
 ---
 
 ### Usage Examples 🙋
 
-1. **_All videos on Massy Sweet’s 'pornstar' page on PornHub that aren't saved locally, refreshing metadata for already saved videos we encounter again:_**
+1. **_All videos on Massy Sweet's 'pornstar' page on PornHub that aren't saved locally, refreshing metadata for already saved videos we encounter again:_**
      ```bash
      scrape ph pornstar "Massy Sweet" -n
      ```
@@ -182,6 +185,45 @@ scrape [args] [optional arguments]
      scrape https://www.xnxx.com/pornstar/halle-von
      ```
 
+---
+
+### API Server Mode 🌐
+
+**_Smutscrape_** can now run as a FastAPI server, allowing you to execute scraping commands via HTTP requests. This is useful for integrating smutscrape into other applications or creating web interfaces.
+
+```bash
+# Start the API server (uses config.yaml settings or defaults to 127.0.0.1:6999)
+python scrape.py --server
+
+# Override with command-line arguments
+python scrape.py --server --host 0.0.0.0 --port 8080
+```
+
+Configure default server settings in `config.yaml`:
+```yaml
+api_server:
+  host: "127.0.0.1"
+  port: 6999
+```
+
+**Available endpoints:**
+- `GET /` - API information
+- `GET /sites` - List all supported sites
+- `GET /sites/{code}` - Get site details
+- `POST /scrape` - Execute a scrape command
+
+**Example API usage:**
+```bash
+# Execute a scrape command via API
+curl -X POST http://localhost:6999/scrape \
+  -H "Content-Type: application/json" \
+  -d '{
+    "command": "ph pornstar \"Massy Sweet\"",
+    "re_nfo": true
+  }'
+```
+
+See [API.md](API.md) for complete API documentation.
 
 ---
 
@@ -272,10 +314,10 @@ vpn:
 
 ## Contributing 🤝
 
-**_Smutscrape_** welcomes contributions! Its current 2200-line monolithic design isn’t collaboration-friendly, so refactoring into a modular, Pythonic app is a priority. Meanwhile, adding site configurations—YAML files with URL schemes and CSS selectors—is a simple, valuable contribution.
+**_Smutscrape_** welcomes contributions! Its current 2200-line monolithic design isn't collaboration-friendly, so refactoring into a modular, Pythonic app is a priority. Meanwhile, adding site configurations—YAML files with URL schemes and CSS selectors—is a simple, valuable contribution.
 
-Inspired by [Stash CommunityScrapers](https://github.com/stashapp/CommunityScrapers), **_Smutscrape_**’s YAML configs adapt its structure. We use CSS selectors instead of XPath (though conversion is straightforward), and metadata fields port easily. The challenge is video downloading—some sites use iframes or countermeasures—but the yt-dlp fallback often simplifies this. Adapting a CommunityScrapers site for **_Smutscrape_** is a great way to contribute. Pick a site, tweak the config, and submit a pull request!
+Inspired by [Stash CommunityScrapers](https://github.com/stashapp/CommunityScrapers), **_Smutscrape_**'s YAML configs adapt its structure. We use CSS selectors instead of XPath (though conversion is straightforward), and metadata fields port easily. The challenge is video downloading—some sites use iframes or countermeasures—but the yt-dlp fallback often simplifies this. Adapting a CommunityScrapers site for **_Smutscrape_** is a great way to contribute. Pick a site, tweak the config, and submit a pull request!
 
 ---
 
-Scrape responsibly! You’re on your own. 🧠💭
+Scrape responsibly! You're on your own. 🧠💭

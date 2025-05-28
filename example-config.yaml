@@ -63,8 +63,15 @@ vpn:
   new_node_time:       300                          # Seconds between node switches (e.g., 5 minutes)
 
 # --------------------------------------------------------------------------------
-# ---- Advanced settings below (usually no need to change) ----
+
+# API server settings (for running smutscrape in server mode)
+api_server:
+  host:                "127.0.0.1"                  # Host to bind the API server to
+  port:                6999                         # Port to bind the API server to
+
 # --------------------------------------------------------------------------------
+
+# ---- Advanced settings below (usually no need to change) ----
 
 # These capitalization override rules ensure that, for example, "jayspov" is converted to "JaysPOV"
 case_overrides:

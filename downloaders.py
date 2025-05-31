@@ -1,76 +1,72 @@
 #!/usr/bin/env python3
 """
-Download managers for various protocols and methods.
-Handles downloading videos via requests, curl, wget, yt-dlp, and ffmpeg.
+Download Manager Module for Smutscrape
+
+This module provides various download methods and a unified interface
+for downloading video files using different tools and protocols.
 """
 
 import os
 import re
-import sys
 import json
-import shlex
 import random
+import requests
 import subprocess
+import shlex
+import cloudscraper
 import urllib.parse
 from abc import ABC, abstractmethod
 from typing import Dict, Optional, Tuple, Any
-
-import requests
-import cloudscraper
-from loguru import logger
 from tqdm import tqdm
+from loguru import logger
 
 
 class DownloadError(Exception):
-    """Custom exception for download failures."""
+    """Custom exception for download failures"""
     pass
 
 
 class BaseDownloader(ABC):
-    """Abstract base class for all downloaders."""
+    """Abstract base class for all downloaders"""
     
-    def __init__(self, general_config: Dict[str, Any], site_config: Dict[str, Any] = None):
+    def __init__(self, general_config: Dict[str, Any], site_config: Dict[str, Any]):
         self.general_config = general_config
-        self.site_config = site_config or {}
+        self.site_config = site_config
     
     @abstractmethod
-    def download(self, url: str, destination_path: str, headers: Optional[Dict[str, str]] = None, 
-                 desc: str = "Downloading", **kwargs) -> bool:
+    def download(self, url: str, destination_path: str, headers: Optional[Dict] = None, 
+                 metadata: Optional[Dict] = None, desc: str = "Downloading", **kwargs) -> bool:
         """
-        Download a file from URL to destination path.
+        Download a file from the given URL to the destination path.
         
         Args:
-            url: Source URL
+            url: The URL to download from
             destination_path: Where to save the file
             headers: Optional HTTP headers
-            desc: Description for progress bar
+            metadata: Optional metadata for the download
+            desc: Description for progress display
             **kwargs: Additional downloader-specific options
             
         Returns:
-            bool: True if successful, False otherwise
+            bool: True if download succeeded, False otherwise
         """
         pass
     
-    def get_user_agent(self, headers: Optional[Dict[str, str]] = None) -> str:
-        """Get a user agent string, either from headers or randomly from config."""
-        if headers and headers.get('User-Agent'):
+    def get_user_agent(self, headers: Optional[Dict] = None) -> str:
+        """Get a user agent string, either from headers or randomly from config"""
+        if headers and 'User-Agent' in headers:
             return headers['User-Agent']
         return random.choice(self.general_config.get('user_agents', ['Mozilla/5.0']))
-    
-    def prepare_headers(self, headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
-        """Prepare headers with user agent."""
-        headers = headers or {}
-        if 'User-Agent' not in headers:
-            headers['User-Agent'] = self.get_user_agent()
-        return headers
 
 
 class RequestsDownloader(BaseDownloader):
-    """Download using Python requests library."""
+    """Downloader using Python requests library"""
     
-    def download(self, url: str, destination_path: str, headers: Optional[Dict[str, str]] = None,
-                 desc: str = "Downloading", **kwargs) -> bool:
-        headers = self.prepare_headers(headers)
+    def download(self, url: str, destination_path: str, headers: Optional[Dict] = None,
+                 metadata: Optional[Dict] = None, desc: str = "Downloading", **kwargs) -> bool:
+        """Download using requests library with progress bar"""
+        headers = headers or {}
+        headers["User-Agent"] = self.get_user_agent(headers)
         
         logger.debug(f"Executing requests GET: {url} with headers: {headers}")
         
@@ -104,12 +100,13 @@ class RequestsDownloader(BaseDownloader):
 
 
 class CurlDownloader(BaseDownloader):
-    """Download using curl command-line tool."""
+    """Downloader using curl command line tool"""
     
-    def download(self, url: str, destination_path: str, headers: Optional[Dict[str, str]] = None,
-                 desc: str = "Downloading", **kwargs) -> bool:
-        headers = self.prepare_headers(headers)
-        ua = headers.get('User-Agent')
+    def download(self, url: str, destination_path: str, headers: Optional[Dict] = None,
+                 metadata: Optional[Dict] = None, desc: str = "Downloading", **kwargs) -> bool:
+        """Download using curl with native progress display"""
+        headers = headers or {}
+        ua = self.get_user_agent(headers)
         
         # Build curl command
         command = ["curl", "-L", "-o", destination_path, "--retry", "3", "--max-time", "600", "-#", 
@@ -126,12 +123,13 @@ class CurlDownloader(BaseDownloader):
         
         try:
             # Pipe curl output directly to terminal
+            import sys
             process = subprocess.Popen(
                 command,
-                stdout=sys.stdout,
+                stdout=sys.stdout,  # Real-time output to terminal
                 stderr=subprocess.STDOUT,
                 universal_newlines=True,
-                bufsize=1
+                bufsize=1  # Line buffering for live updates
             )
             
             return_code = process.wait()
@@ -148,12 +146,13 @@ class CurlDownloader(BaseDownloader):
 
 
 class WgetDownloader(BaseDownloader):
-    """Download using wget command-line tool."""
+    """Downloader using wget command line tool"""
     
-    def download(self, url: str, destination_path: str, headers: Optional[Dict[str, str]] = None,
-                 desc: str = "Downloading", **kwargs) -> bool:
-        headers = self.prepare_headers(headers)
-        ua = headers.get('User-Agent')
+    def download(self, url: str, destination_path: str, headers: Optional[Dict] = None,
+                 metadata: Optional[Dict] = None, desc: str = "Downloading", **kwargs) -> bool:
+        """Download using wget with custom progress parsing"""
+        headers = headers or {}
+        ua = self.get_user_agent(headers)
         
         command = ["wget", "--tries=3", "--timeout=600", "-O", destination_path]
         command.extend(["--user-agent", ua])
@@ -200,14 +199,16 @@ class WgetDownloader(BaseDownloader):
             logger.error(f"Wget download failed: {e}")
             return False
     
-    def _get_content_length(self, url: str, headers: Dict[str, str]) -> Optional[int]:
-        """Attempt to fetch Content-Length header for progress bar accuracy."""
+    def _get_content_length(self, url: str, headers: Dict) -> Optional[int]:
+        """Attempt to fetch Content-Length header for progress bar accuracy"""
         try:
-            fetch_headers = {"User-Agent": headers.get('User-Agent')}
+            ua = self.get_user_agent(headers)
+            fetch_headers = {"User-Agent": ua}
             if "Referer" in headers:
                 fetch_headers["Referer"] = headers["Referer"]
             if "Cookie" in headers:
                 fetch_headers["Cookie"] = headers["Cookie"]
+                
             response = requests.head(url, headers=fetch_headers, timeout=10, allow_redirects=True)
             response.raise_for_status()
             return int(response.headers.get("Content-Length", 0)) or None
@@ -217,18 +218,16 @@ class WgetDownloader(BaseDownloader):
 
 
 class YtDlpDownloader(BaseDownloader):
-    """Download using yt-dlp tool."""
+    """Downloader using yt-dlp"""
     
-    def download(self, url: str, destination_path: str, headers: Optional[Dict[str, str]] = None,
-                 desc: str = "Downloading", metadata: Optional[Dict[str, Any]] = None,
+    def download(self, url: str, destination_path: str, headers: Optional[Dict] = None,
+                 metadata: Optional[Dict] = None, desc: str = "Downloading", 
                  overwrite: bool = False, impersonate: bool = False, **kwargs) -> bool:
-        headers = self.prepare_headers(headers)
-        ua = headers.get('User-Agent')
+        """Download using yt-dlp with various options"""
+        headers = headers or {}
+        ua = self.get_user_agent(headers)
         
         command = ["yt-dlp", "-o", destination_path, "--user-agent", ua, "--progress"]
-        
-        # Debug logging for impersonate parameter
-        logger.debug(f"impersonate value: {impersonate}, type: {type(impersonate)}")
         
         if overwrite:
             command.append("--force-overwrite")
@@ -237,26 +236,25 @@ class YtDlpDownloader(BaseDownloader):
             command.extend(["--embed-thumbnail", "--convert-thumbnails", "jpg"])
         
         # Smart handling of impersonate parameter
+        logger.debug(f"impersonate value: {impersonate}, type: {type(impersonate)}")
         if impersonate:
-            # If impersonate is True, use default value
-            # If impersonate is a string, use that string
             impersonate_value = "generic:impersonate" if impersonate is True else impersonate
             logger.debug(f"Adding impersonate arg: {impersonate_value}")
             command.extend(["--extractor-args", impersonate_value])
         
         command.append(url)
         
-        # Log the full command for debugging
         cmd_string = ' '.join(shlex.quote(str(arg)) for arg in command)
         logger.debug(f"Executing yt-dlp command: {cmd_string}")
         
         try:
+            import sys
             process = subprocess.Popen(
                 command,
                 stdout=sys.stdout,  # Direct yt-dlp progress to terminal
-                stderr=subprocess.STDOUT,  # Combine stderr with stdout
+                stderr=subprocess.STDOUT,
                 universal_newlines=True,
-                bufsize=1  # Line buffering for real-time output
+                bufsize=1
             )
             
             return_code = process.wait()
@@ -273,13 +271,16 @@ class YtDlpDownloader(BaseDownloader):
 
 
 class FFmpegDownloader(BaseDownloader):
-    """Download HLS streams using ffmpeg."""
+    """Downloader using FFmpeg for M3U8/streaming content"""
     
-    def download(self, url: str, destination_path: str, headers: Optional[Dict[str, str]] = None,
-                 desc: str = "Downloading", origin: Optional[str] = None, **kwargs) -> bool:
-        headers = self.prepare_headers(headers)
-        ua = headers.get('User-Agent')
+    def download(self, url: str, destination_path: str, headers: Optional[Dict] = None,
+                 metadata: Optional[Dict] = None, desc: str = "Downloading", 
+                 origin: Optional[str] = None, **kwargs) -> bool:
+        """Download M3U8 streams using FFmpeg"""
+        headers = headers or {}
+        ua = self.get_user_agent(headers)
         
+        # Prepare headers for M3U8 fetch
         fetch_headers = {
             "User-Agent": ua,
             "Referer": headers.get("Referer", ""),
@@ -288,6 +289,7 @@ class FFmpegDownloader(BaseDownloader):
         if "Cookie" in headers and headers["Cookie"]:
             logger.debug(f"Including provided cookie: {headers['Cookie']}")
             fetch_headers["Cookie"] = headers["Cookie"]
+            
         if origin:
             logger.debug(f"Including header for origin: {origin}")
             fetch_headers["Origin"] = origin
@@ -303,16 +305,13 @@ class FFmpegDownloader(BaseDownloader):
             response.raise_for_status()
             m3u8_content = response.text
             logger.debug(f"Fetched M3U8 content: {m3u8_content[:100]}...")
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to fetch M3U8: {e}")
-            return False
-        
-        # Save M3U8 content to temporary file
-        temp_m3u8_path = destination_path + ".m3u8"
-        try:
+            
+            # Write M3U8 content with resolved URLs
+            temp_m3u8_path = destination_path + ".m3u8"
             with open(temp_m3u8_path, "w", encoding="utf-8") as f:
                 base_url = url.rsplit('/', 1)[0] + "/"
                 segments = []
+                
                 for line in m3u8_content.splitlines():
                     if line and not line.startswith("#"):
                         if not line.startswith("http"):
@@ -325,7 +324,7 @@ class FFmpegDownloader(BaseDownloader):
             total_segments = len(segments)
             logger.debug(f"Found {total_segments} segments in M3U8")
             
-            # Build ffmpeg command
+            # Build FFmpeg command
             command = [
                 "ffmpeg",
                 "-protocol_whitelist", "file,http,https,tcp,tls,crypto",
@@ -337,6 +336,8 @@ class FFmpegDownloader(BaseDownloader):
             ]
             
             logger.debug(f"Executing FFmpeg command: {' '.join(shlex.quote(arg) for arg in command)}")
+            
+            # Run FFmpeg with progress tracking
             process = subprocess.Popen(
                 command,
                 stdout=subprocess.PIPE,
@@ -356,6 +357,11 @@ class FFmpegDownloader(BaseDownloader):
                         logger.debug(f"FFmpeg output: {line}")
             
             return_code = process.wait()
+            
+            # Cleanup
+            if os.path.exists(temp_m3u8_path):
+                os.remove(temp_m3u8_path)
+            
             if return_code != 0:
                 logger.error(f"FFmpeg failed with return code {return_code}")
                 return False
@@ -365,54 +371,51 @@ class FFmpegDownloader(BaseDownloader):
             
         except Exception as e:
             logger.error(f"FFmpeg download failed: {e}")
-            return False
-            
-        finally:
-            # Clean up temporary M3U8 file
-            if os.path.exists(temp_m3u8_path):
+            if 'temp_m3u8_path' in locals() and os.path.exists(temp_m3u8_path):
                 os.remove(temp_m3u8_path)
+            return False
 
 
 class DownloadManager:
-    """Factory class to manage different downloaders."""
+    """Manager class to handle different download methods"""
     
-    DOWNLOADERS = {
-        'requests': RequestsDownloader,
-        'curl': CurlDownloader,
-        'wget': WgetDownloader,
-        'yt-dlp': YtDlpDownloader,
-        'ytdlp': YtDlpDownloader,  # Alias
-        'ffmpeg': FFmpegDownloader,
-    }
-    
-    def __init__(self, general_config: Dict[str, Any], site_config: Dict[str, Any] = None):
+    def __init__(self, general_config: Dict[str, Any]):
         self.general_config = general_config
-        self.site_config = site_config
-        self._downloaders = {}
+        self.downloaders = {
+            'requests': RequestsDownloader,
+            'curl': CurlDownloader,
+            'wget': WgetDownloader,
+            'yt-dlp': YtDlpDownloader,
+            'ffmpeg': FFmpegDownloader
+        }
     
-    def get_downloader(self, method: str) -> BaseDownloader:
-        """Get or create a downloader instance for the specified method."""
-        if method not in self._downloaders:
-            downloader_class = self.DOWNLOADERS.get(method)
-            if not downloader_class:
-                raise ValueError(f"Unknown download method: {method}")
-            self._downloaders[method] = downloader_class(self.general_config, self.site_config)
-        return self._downloaders[method]
+    def get_downloader(self, method: str, site_config: Dict[str, Any]) -> Optional[BaseDownloader]:
+        """Get a downloader instance for the specified method"""
+        downloader_class = self.downloaders.get(method)
+        if not downloader_class:
+            logger.error(f"Unknown download method: {method}")
+            return None
+        return downloader_class(self.general_config, site_config)
     
-    def download(self, url: str, destination_path: str, method: str,
-                 headers: Optional[Dict[str, str]] = None, **kwargs) -> bool:
+    def download_file(self, url: str, destination_path: str, method: str, 
+                      site_config: Dict[str, Any], headers: Optional[Dict] = None, 
+                      metadata: Optional[Dict] = None, origin: Optional[str] = None, 
+                      overwrite: bool = False) -> bool:
         """
         Download a file using the specified method.
         
         Args:
-            url: Source URL
+            url: URL to download from
             destination_path: Where to save the file
-            method: Download method (requests, curl, wget, yt-dlp, ffmpeg)
+            method: Download method to use
+            site_config: Site configuration
             headers: Optional HTTP headers
-            **kwargs: Additional method-specific options
+            metadata: Optional metadata
+            origin: Optional origin URL (for FFmpeg)
+            overwrite: Whether to overwrite existing files
             
         Returns:
-            bool: True if successful, False otherwise
+            bool: True if download succeeded, False otherwise
         """
         if not url:
             logger.error("Invalid or empty URL")
@@ -423,31 +426,47 @@ class DownloadManager:
         if url.startswith('//'):
             url = 'http:' + url
         
-        desc = kwargs.pop('desc', f"Downloading {os.path.basename(destination_path)}")
+        use_headers = headers and any(k in headers for k in ["Cookie"])
+        desc = f"Downloading {os.path.basename(destination_path)}"
+        
+        # Use temporary file during download
         temp_path = os.path.join(os.path.dirname(destination_path), f".{os.path.basename(destination_path)}")
         
         try:
-            downloader = self.get_downloader(method)
-            success = downloader.download(url, temp_path, headers, desc=desc, **kwargs)
+            downloader = self.get_downloader(method, site_config)
+            if not downloader:
+                return False
+            
+            # Prepare kwargs for specific downloaders
+            kwargs = {}
+            if method == 'yt-dlp':
+                kwargs['overwrite'] = overwrite
+                kwargs['impersonate'] = site_config.get("download", {}).get("impersonate", False)
+            elif method == 'ffmpeg':
+                kwargs['origin'] = origin
+            
+            # Execute download
+            success = downloader.download(
+                url=url,
+                destination_path=temp_path,
+                headers=headers,
+                metadata=metadata,
+                desc=desc,
+                **kwargs
+            )
             
             if success and os.path.exists(temp_path):
-                # Validate the download if it's a video
-                if method in ['ffmpeg', 'yt-dlp', 'ytdlp'] or destination_path.endswith(('.mp4', '.mkv', '.avi', '.webm')):
-                    video_info = self._get_video_metadata(temp_path)
-                    if video_info:
-                        os.rename(temp_path, destination_path)
-                        logger.debug(f"Download completed: {os.path.basename(destination_path)}")
-                        logger.info(f"Size: {video_info['size_str']} · Duration: {video_info['duration']} · Resolution: {video_info['resolution']}")
-                        return True
-                    else:
-                        logger.warning(f"Download completed but metadata invalid for {temp_path}. Removing.")
-                        os.remove(temp_path)
-                        return False
-                else:
-                    # Non-video file, just rename
+                # Validate downloaded file
+                video_info = self.get_video_metadata(temp_path)
+                if video_info:
                     os.rename(temp_path, destination_path)
                     logger.debug(f"Download completed: {os.path.basename(destination_path)}")
+                    logger.info(f"Size: {video_info['size_str']} · Duration: {video_info['duration']} · Resolution: {video_info['resolution']}")
                     return True
+                else:
+                    logger.warning(f"Download completed but metadata invalid for {temp_path}. Removing.")
+                    os.remove(temp_path)
+                    return False
             elif not success:
                 logger.error(f"Download failed for {temp_path}")
                 if os.path.exists(temp_path):
@@ -462,8 +481,8 @@ class DownloadManager:
         
         return False
     
-    def _get_video_metadata(self, file_path: str) -> Optional[Dict[str, Any]]:
-        """Extract video duration, resolution, and bitrate using ffprobe, with sanity check."""
+    def get_video_metadata(self, file_path: str) -> Optional[Dict[str, Any]]:
+        """Extract video duration, resolution, and bitrate using ffprobe"""
         command = [
             "ffprobe",
             "-v", "error",
@@ -471,12 +490,13 @@ class DownloadManager:
             "-of", "json",
             file_path
         ]
+        
         try:
             result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
                                   universal_newlines=True, check=True)
             metadata = json.loads(result.stdout)
             
-            # File size in bytes (from ffprobe or os)
+            # File size in bytes
             file_size = int(metadata.get('format', {}).get('size', os.path.getsize(file_path)))
             
             # Duration in seconds
@@ -491,8 +511,8 @@ class DownloadManager:
             # Bitrate in kbps
             bitrate = int(metadata.get('format', {}).get('bit_rate', 0)) // 1000 if metadata.get('format', {}).get('bit_rate') else 0
             
-            # Sanity check: reject if file is too small for claimed duration (e.g., < 10KB/s)
-            if duration > 0 and file_size / duration < 10240:  # ~10KB/s minimum, adjustable
+            # Sanity check: reject if file is too small for claimed duration
+            if duration > 0 and file_size / duration < 10240:  # ~10KB/s minimum
                 logger.warning(f"File {file_path} too small ({file_size} bytes) for duration {duration}s")
                 return None
             
@@ -503,6 +523,7 @@ class DownloadManager:
                 'resolution': resolution,
                 'bitrate': f"{bitrate} kbps" if bitrate else "Unknown"
             }
+            
         except subprocess.CalledProcessError as e:
             logger.error(f"ffprobe failed for {file_path}: {e.stderr}")
             return None
@@ -511,16 +532,62 @@ class DownloadManager:
             return None
 
 
-# Convenience function for backwards compatibility
-def download_file(url: str, destination_path: str, method: str, general_config: Dict[str, Any],
-                  site_config: Dict[str, Any], headers: Optional[Dict[str, str]] = None,
-                  metadata: Optional[Dict[str, Any]] = None, origin: Optional[str] = None,
-                  overwrite: bool = False) -> bool:
+def download_with_ytdlp_fallback(url: str, temp_dir: str, general_config: Dict[str, Any]) -> Tuple[bool, list]:
     """
-    Legacy function for downloading files. Use DownloadManager instead.
+    Fallback download using yt-dlp for unsupported sites.
+    
+    Args:
+        url: URL to download
+        temp_dir: Temporary directory for downloads
+        general_config: General configuration
+        
+    Returns:
+        Tuple of (success, list of downloaded files)
     """
-    manager = DownloadManager(general_config, site_config)
-    return manager.download(
-        url, destination_path, method, headers,
-        metadata=metadata, origin=origin, overwrite=overwrite
-    ) 
+    command = f"yt-dlp --paths {temp_dir} --format best --add-metadata"
+    if general_config.get('user_agents'):
+        command += f" --user-agent \"{random.choice(general_config['user_agents'])}\""
+    command += f" \"{url}\""
+    
+    process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, 
+                              stderr=subprocess.STDOUT, universal_newlines=True, cwd=temp_dir)
+    
+    progress_regex = re.compile(r'\[download\]\s+(\d+\.\d+)% of ~?\s*(\d+\.\d+)(K|M|G)iB')
+    filename_regex = re.compile(r'\[download\] Destination: (.+)')
+    downloaded_files = []
+    total_size = None
+    pbar = None
+    
+    try:
+        for line in process.stdout:
+            filename_match = filename_regex.search(line)
+            if filename_match:
+                filename = os.path.basename(filename_match.group(1))
+                if filename not in downloaded_files:
+                    downloaded_files.append(filename)
+                    
+            progress_match = progress_regex.search(line)
+            if progress_match:
+                percent, size, size_unit = progress_match.groups()
+                if total_size is None:
+                    total_size = float(size) * {'K': 1024, 'M': 1024**2, 'G': 1024**3}[size_unit]
+                    pbar = tqdm(total=total_size, unit='B', unit_scale=True, desc="Downloading")
+                progress = float(percent) * total_size / 100
+                if pbar:
+                    pbar.update(progress - pbar.n)
+            logger.debug(line.strip())
+            
+    except KeyboardInterrupt:
+        process.terminate()
+        if pbar:
+            pbar.close()
+        return False, []
+        
+    if pbar:
+        pbar.close()
+        
+    success = process.wait() == 0
+    if success and not downloaded_files:
+        downloaded_files = os.listdir(temp_dir)
+        
+    return success and downloaded_files, downloaded_files 

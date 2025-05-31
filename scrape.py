@@ -2,7 +2,6 @@
 
 import argparse
 import yaml
-import art
 import requests
 import cloudscraper
 import os
@@ -30,23 +29,24 @@ from datetime import datetime
 from loguru import logger
 from tqdm import tqdm
 from termcolor import colored
-from rich.console import Console
 from rich.table import Table
 from rich.style import Style
-from rich.text import Text
 
-# FastAPI imports
+# FastAPI imports moved to api.py
 FASTAPI_AVAILABLE = True
 try:
-	from fastapi import FastAPI, HTTPException, BackgroundTasks
-	from fastapi.responses import JSONResponse, StreamingResponse
-	from pydantic import BaseModel, Field
-	from typing import Optional, List, Dict, Any
-	import uvicorn
-	import asyncio
-	from concurrent.futures import ThreadPoolExecutor
+	from api import run_api_server, FASTAPI_AVAILABLE as API_AVAILABLE
+	FASTAPI_AVAILABLE = API_AVAILABLE
 except ImportError:
 	FASTAPI_AVAILABLE = False
+
+# Download functionality moved to downloaders.py
+from downloaders import DownloadManager, download_with_ytdlp_fallback
+from sites import SiteManager, SiteConfiguration
+from utilities import (
+    get_terminal_width, render_ascii, display_options, 
+    display_global_examples, display_usage, handle_vpn, console
+)
 
 SELENIUM_AVAILABLE = True
 try:
@@ -65,64 +65,19 @@ STATE_FILE = os.path.join(SCRIPT_DIR, '.state')
 
 last_vpn_action_time = 0
 session = requests.Session()
-console = Console()
 
-# FastAPI setup
-if FASTAPI_AVAILABLE:
-	# Pydantic models for API requests/responses
-	class ScrapeRequest(BaseModel):
-		"""Request model for scraping commands"""
-		command: str = Field(..., description="Full command as you would type in CLI (e.g., 'ph pornstar \"Massy Sweet\"')")
-		overwrite: bool = Field(False, description="Overwrite existing files")
-		re_nfo: bool = Field(False, description="Regenerate .nfo files")
-		page: str = Field("1", description="Page to start from (e.g., '12.9' for page 12, video 9)")
-		applystate: bool = Field(False, description="Add URLs to .state if file exists")
-		debug: bool = Field(False, description="Enable debug logging")
+# Initialize download manager (will be properly configured when general_config is loaded)
+download_manager = None
 
-	class ScrapeResponse(BaseModel):
-		"""Response model for scraping operations"""
-		success: bool
-		message: str
-		task_id: Optional[str] = None
-		details: Optional[Dict[str, Any]] = None
-		errors: Optional[List[str]] = None
+# Initialize site manager (will be created when needed)
+site_manager = None
 
-	class TaskStatus(BaseModel):
-		"""Response model for task status queries"""
-		task_id: str
-		status: str  # "pending", "running", "completed", "failed"
-		message: Optional[str] = None
-		created_at: str
-		started_at: Optional[str] = None
-		completed_at: Optional[str] = None
-
-	class SiteInfo(BaseModel):
-		"""Response model for site information"""
-		code: str
-		name: str
-		domain: str
-		modes: List[Dict[str, Any]]  # Changed from List[Dict[str, str]]
-		metadata: List[str]
-		requires_selenium: bool
-		notes: Optional[List[str]] = None
-
-	# Create FastAPI app
-	app = FastAPI(
-		title="Smutscrape API",
-		description="API for scraping and downloading adult content with metadata",
-		version="1.0.0"
-	)
-	
-	# Thread executor for running blocking operations
-	executor = ThreadPoolExecutor(max_workers=4)
-	
-	# Task tracking
-	from collections import OrderedDict
-	import threading
-	
-	active_tasks = OrderedDict()  # task_id -> task_info
-	task_lock = threading.Lock()
-	MAX_TASK_HISTORY = 100  # Keep last 100 tasks in memory
+def get_site_manager():
+	"""Get or create the site manager instance."""
+	global site_manager
+	if site_manager is None:
+		site_manager = SiteManager(SITE_DIR)
+	return site_manager
 		
 class ProgressFile:
 	"""A file-like wrapper to track progress during SMB upload."""
@@ -185,36 +140,15 @@ def load_configuration(config_type='general', identifier=None):
 		if not identifier:
 			raise ValueError("Site identifier required for site config loading")
 		
-		identifier_lower = identifier.lower()
-		is_url_flag = is_url(identifier)
-		parsed_netloc = urlparse(identifier).netloc.lower().replace('www.', '') if is_url_flag else None
-		
-		for config_file in os.listdir(SITE_DIR):
-			if config_file.endswith('.yaml'):
-				config_path = os.path.join(SITE_DIR, config_file)
-				try:
-					with open(config_path, 'r') as f:
-						config = yaml.safe_load(f)
-					if not config:
-						continue
-					
-					# Match based on identifier type
-					if is_url_flag:
-						if parsed_netloc == config.get('domain', '').lower():
-							logger.debug(f"Matched URL '{identifier}' to config '{config_file}' by domain '{config.get('domain')}'")
-							return config
-				
-					elif any(identifier_lower == config.get(key, '').lower() for key in ['shortcode', 'name', 'domain']):
-						logger.debug(f"Matched identifier '{identifier}' to config '{config_file}' by shortcode, name, or domain")
-						return config
-
-				except Exception as e:
-					logger.warning(f"Failed to load config '{config_file}': {e}")
-					continue
-			else:
-				logger.debug(f"Cannot use {config_file} because it lacks requisite .yaml extension")
-		logger.debug(f"No site config matched for identifier '{identifier}'")
-		return None
+		# Use the site manager to get site configuration
+		site_config = get_site_manager().get_site_by_identifier(identifier)
+		if site_config:
+			logger.debug(f"Loaded site config for '{identifier}' using SiteManager")
+			# Return the raw config dict for backward compatibility
+			return site_config.to_dict()
+		else:
+			logger.debug(f"No site config matched for identifier '{identifier}'")
+			return None
 	
 	raise ValueError(f"Unknown config type: {config_type}")
 	
@@ -774,7 +708,7 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
 	if vpn_config.get('enabled', False):
 		current_time = time.time()
 		if current_time - last_vpn_action_time > vpn_config.get('new_node_time', 300):
-			handle_vpn(general_config, 'new_node')
+			last_vpn_action_time = handle_vpn(general_config, 'new_node') or last_vpn_action_time
 	
 	logger.info(f"Processing video page: {url}")
 	use_selenium = site_config.get('use_selenium', False)
@@ -967,7 +901,7 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
 	
 	# Check for existing complete file in temp dir
 	if destination_config['type'] == 'smb' and not overwrite and os.path.exists(final_destination_path):
-		video_info = get_video_metadata(final_destination_path)
+		video_info = download_manager.get_video_metadata(final_destination_path)
 		if video_info:
 			logger.info(f"Valid complete file '{final_destination_path}' exists in temp dir. Skipping download.")
 			success = True
@@ -1378,381 +1312,6 @@ def upload_to_smb(local_path, smb_path, destination_config, overwrite=False):
 			conn.close()
 			logger.debug(f"SMB connection closed for {smb_path}")
 
-
-def get_video_metadata(file_path):
-	"""Extract video duration, resolution, and bitrate using ffprobe, with sanity check."""
-	command = [
-		"ffprobe",
-		"-v", "error",
-		"-show_entries", "format=duration,bit_rate,size:stream=width,height",
-		"-of", "json",
-		file_path
-	]
-	try:
-		result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, check=True)
-		metadata = json.loads(result.stdout)
-		
-		# File size in bytes (from ffprobe or os)
-		file_size = int(metadata.get('format', {}).get('size', os.path.getsize(file_path)))
-		
-		# Duration in seconds
-		duration = float(metadata.get('format', {}).get('duration', 0))
-		duration_str = f"{int(duration // 3600):02d}:{int((duration % 3600) // 60):02d}:{int(duration % 60):02d}"
-		
-		# Resolution
-		streams = metadata.get('streams', [])
-		video_stream = next((s for s in streams if s.get('width') and s.get('height')), None)
-		resolution = f"{video_stream['width']}x{video_stream['height']}" if video_stream else "Unknown"
-		
-		# Bitrate in kbps
-		bitrate = int(metadata.get('format', {}).get('bit_rate', 0)) // 1000 if metadata.get('format', {}).get('bit_rate') else 0
-		
-		# Sanity check: reject if file is too small for claimed duration (e.g., < 10KB/s)
-		if duration > 0 and file_size / duration < 10240:  # ~10KB/s minimum, adjustable
-			logger.warning(f"File {file_path} too small ({file_size} bytes) for duration {duration}s")
-			return None
-		
-		return {
-			'size': file_size,
-			'size_str': f"{file_size / 1024 / 1024:.2f} MB",
-			'duration': duration_str,
-			'resolution': resolution,
-			'bitrate': f"{bitrate} kbps" if bitrate else "Unknown"
-		}
-	except subprocess.CalledProcessError as e:
-		logger.error(f"ffprobe failed for {file_path}: {e.stderr}")
-		return None
-	except Exception as e:
-		logger.error(f"Error extracting metadata for {file_path}: {e}")
-		return None
-
-
-
-def download_file(url, destination_path, method, general_config, site_config, headers=None, metadata=None, origin=None, overwrite=False):
-	if not url:
-		logger.error("Invalid or empty URL")
-		return False
-	os.makedirs(os.path.dirname(destination_path), exist_ok=True)
-	if url.startswith('//'):
-		url = 'http:' + url
-	
-	use_headers = headers and any(k in headers for k in ["Cookie"])
-	success = False
-	
-	desc = f"Downloading {os.path.basename(destination_path)}"
-	temp_path = os.path.join(os.path.dirname(destination_path), f".{os.path.basename(destination_path)}")  # Changed from .part suffix to . prefix
-	
-
-	try:
-		if method == "requests":
-			success = download_with_requests(url, temp_path, headers, general_config, site_config, desc)
-		elif method == 'curl':
-			success = download_with_curl(url, temp_path, headers, general_config, site_config, desc)
-		elif method == 'wget':
-			success = download_with_wget(url, temp_path, headers, general_config, site_config, desc)
-		elif method == 'yt-dlp':
-			success = download_with_ytdlp(
-				url, temp_path, headers, general_config, metadata, desc, 
-				overwrite=overwrite, 
-				impersonate=site_config.get("download", {}).get("impersonate", False)
-			)
-		elif method == 'ffmpeg':
-			success = download_with_ffmpeg(url, temp_path, general_config, headers, desc, origin=origin)
-	except Exception as e:
-		logger.error(f"Download method '{method}' failed: {e}")
-		if os.path.exists(temp_path):
-			os.remove(temp_path)
-		return False
-	
-	if success and os.path.exists(temp_path):
-		video_info = get_video_metadata(temp_path)
-		if video_info:
-			os.rename(temp_path, destination_path)  # Rename only if valid
-			logger.debug(f"Download completed: {os.path.basename(destination_path)}")
-			logger.info(f"Size: {video_info['size_str']} · Duration: {video_info['duration']} · Resolution: {video_info['resolution']}")
-			return True
-		else:
-			logger.warning(f"Download completed but metadata invalid for {temp_path}. Removing.")
-			os.remove(temp_path)
-			return False
-	elif not success:
-		logger.error(f"Download failed for {temp_path}")
-		if os.path.exists(temp_path):
-			os.remove(temp_path)
-		return False
-	
-	return False
-
-def download_with_requests(url, destination_path, headers, general_config, site_config, desc):
-	ua = headers.get('User-Agent', random.choice(general_config['user_agents']))
-	headers["User-Agent"] = ua
-	
-	logger.debug(f"Executing requests GET: {url} with headers: {headers}")
-	
-	with requests.get(url, headers=headers, stream=True) as r:
-		r.raise_for_status()
-		total_size = int(r.headers.get("Content-Length", 0)) or None
-		if not total_size:
-			logger.debug("Content-Length unavailable; total size will be determined at completion.")
-		
-		os.makedirs(os.path.dirname(destination_path), exist_ok=True)
-		with open(destination_path, "wb") as f:
-			with tqdm(total=total_size, unit="B", unit_scale=True, desc=desc, disable=False) as pbar:
-				for chunk in r.iter_content(chunk_size=1024):
-					size = f.write(chunk)
-					pbar.update(size)
-					if not total_size:
-						pbar.total = pbar.n
-	
-	if os.path.exists(destination_path):
-		final_size = os.path.getsize(destination_path)
-	else:
-		logger.error("Download failed: File not found")
-		return False
-		
-	logger.info(f"Successfully completed download to {destination_path}")
-	return True
-	
-def download_with_curl(url, destination_path, headers, general_config, site_config, desc):
-	ua = headers.get('User-Agent', random.choice(general_config['user_agents']))
-	# -# for progress bar, -w for sizes at each step
-	command = ["curl", "-L", "-o", destination_path, "--retry", "3", "--max-time", "600", "-#", 
-			   "-w", "Downloaded: %{size_download} bytes / Total: %{size_total} bytes (%{speed_download} bytes/s)\n"]
-	if headers:
-		command.extend(["-A", ua])
-		if "Referer" in headers:
-			command.extend(["-H", f"Referer: {headers['Referer']}"])
-		if "Cookie" in headers:
-			command.extend(["-H", f"Cookie: {headers['Cookie']}"])
-	command.append(url)
-	
-	logger.debug(f"Executing curl command: {' '.join(shlex.quote(arg) for arg in command)}")
-	
-	# Pipe curl output directly to terminal
-	process = subprocess.Popen(
-		command,
-		stdout=sys.stdout,  # Real-time output to terminal
-		stderr=subprocess.STDOUT,
-		universal_newlines=True,
-		bufsize=1  # Line buffering for live updates
-	)
-	
-	return_code = process.wait()
-	if return_code != 0:
-		logger.error(f"curl failed with return code {return_code}")
-		return False
-	
-	logger.info(f"Successfully completed curl download to {destination_path}")
-	return True
-
-def download_with_wget(url, destination_path, headers, general_config, site_config, desc):
-	ua = headers.get('User-Agent', random.choice(general_config['user_agents']))
-	command = ["wget", "--tries=3", "--timeout=600", "-O", destination_path]
-	if headers:
-		command.extend(["--user-agent", ua])
-		if "Referer" in headers:
-			command.extend(["--referer", headers['Referer']])
-		if "Cookie" in headers:
-			command.extend(["--header", f"Cookie: {headers['Cookie']}"])
-	command.append(url)
-	
-	logger.debug(f"Executing wget command: {' '.join(shlex.quote(arg) for arg in command)}")
-	process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
-	
-	total_size = get_content_length(url, headers, general_config)
-	progress_regex = re.compile(r'(\d+)%\s+(\d+[KMG]?)')
-	with tqdm(total=total_size, unit='B', unit_scale=True, desc=desc, disable=not total_size) as pbar:
-		for line in process.stdout:
-			match = progress_regex.search(line)
-			if match:
-				percent, _ = match.groups()
-				if total_size:
-					pbar.update((int(percent) * total_size // 100) - pbar.n)
-			elif "Length:" in line and total_size is None:
-				size = int(re.search(r'Length: (\d+)', line).group(1))
-				pbar.total = size
-			elif line.strip():
-				logger.debug(f"wget output: {line.strip()}")
-			if os.path.exists(destination_path):
-				pbar.update(os.path.getsize(destination_path) - pbar.n)
-	
-	return_code = process.wait()
-	if return_code != 0:
-		logger.error(f"wget failed with return code {return_code}")
-		return False
-	logger.info(f"Successfully completed wget download to {destination_path}")
-	return True
-
-def download_with_ytdlp(url, destination_path, headers, general_config, metadata, desc, overwrite=False, impersonate=False):
-    """
-    Download a video using yt-dlp with appropriate options.
-    
-    Args:
-        url: URL to download
-        destination_path: Path where the file should be saved
-        headers: Request headers to use
-        general_config: General configuration dictionary
-        metadata: Video metadata dictionary
-        desc: Description for progress reporting
-        overwrite: Whether to overwrite existing files
-        impersonate: Boolean or string for browser impersonation
-    
-    Returns:
-        bool: Success or failure of download
-    """
-    ua = headers.get('User-Agent', random.choice(general_config['user_agents']))
-    command = ["yt-dlp", "-o", destination_path, "--user-agent", ua, "--progress"]
-    
-    # Debug logging for impersonate parameter
-    logger.debug(f"impersonate value: {impersonate}, type: {type(impersonate)}")
-    
-    if overwrite:
-        command.append("--force-overwrite")
-    
-    if metadata and 'Image' in metadata:
-        command.extend(["--embed-thumbnail", "--convert-thumbnails", "jpg"])
-    
-    # Smart handling of impersonate parameter
-    if impersonate:
-        # If impersonate is True, use default value
-        # If impersonate is a string, use that string
-        impersonate_value = "generic:impersonate" if impersonate is True else impersonate
-        logger.debug(f"Adding impersonate arg: {impersonate_value}")
-        command.extend(["--extractor-args", impersonate_value])
-    
-    command.append(url)
-    
-    # Log the full command for debugging
-    cmd_string = ' '.join(shlex.quote(str(arg)) for arg in command)
-    logger.debug(f"Executing yt-dlp command: {cmd_string}")
-    
-    try:
-        process = subprocess.Popen(
-            command,
-            stdout=sys.stdout,  # Direct yt-dlp progress to terminal
-            stderr=subprocess.STDOUT,  # Combine stderr with stdout
-            universal_newlines=True,
-            bufsize=1  # Line buffering for real-time output
-        )
-        
-        return_code = process.wait()
-        if return_code != 0:
-            logger.error(f"yt-dlp failed with return code {return_code}")
-            return False
-            
-        logger.debug(f"Successfully completed yt-dlp download to {destination_path}")
-        return True
-        
-    except Exception as e:
-        logger.error(f"Exception during yt-dlp execution: {str(e)}")
-        return False
-	
-	
-def download_with_ffmpeg(url, destination_path, general_config, headers=None, desc="Downloading", origin=None):
-	headers = headers or {}
-	ua = headers.get('User-Agent', random.choice(general_config['user_agents']))
-	# if "Headless" in ua:
-	#	ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-	
-	fetch_headers = {
-		"User-Agent": ua,
-		"Referer": headers.get("Referer", ""),
-		"Accept": "application/vnd.apple.mpegurl",
-	}
-	if "Cookie" in headers and headers["Cookie"]:
-		logger.debug(f"Including provided cookie: {headers['Cookie']}")
-		fetch_headers["Cookie"] = headers["Cookie"]
-	# else:
-	# 	logger.debug("No cookie provided for fetch")
-	if origin:
-		logger.debug(f"Including header for origin: {origin}")
-		fetch_headers["Origin"] = origin
-	else:
-		logger.debug("No origin url provided; omitting origin header")
-	
-	logger.debug(f"Fetching M3U8 with headers: {fetch_headers}")
-	try:
-		scraper = cloudscraper.create_scraper()
-		response = scraper.get(url, headers=fetch_headers, timeout=30)
-		response.raise_for_status()
-		m3u8_content = response.text
-		logger.debug(f"Fetched M3U8 content: {m3u8_content[:100]}...")
-	except requests.exceptions.RequestException as e:
-		logger.error(f"Failed to fetch M3U8: {e}")
-		return False
-	
-	temp_m3u8_path = destination_path + ".m3u8"
-	with open(temp_m3u8_path, "w", encoding="utf-8") as f:
-		base_url = url.rsplit('/', 1)[0] + "/"
-		segments = []
-		for line in m3u8_content.splitlines():
-			if line and not line.startswith("#"):
-				if not line.startswith("http"):
-					line = urllib.parse.urljoin(base_url, line)
-				segments.append(line)
-				f.write(line + "\n")
-			else:
-				f.write(line + "\n")
-	
-	total_segments = len(segments)
-	logger.debug(f"Found {total_segments} segments in M3U8")
-	
-	command = [
-		"ffmpeg",
-		"-protocol_whitelist", "file,http,https,tcp,tls,crypto",
-		"-i", temp_m3u8_path,
-		"-c", "copy",
-		"-bsf:a", "aac_adtstoasc",
-		"-y",
-		destination_path
-	]
-	
-	logger.debug(f"Executing FFmpeg command: {' '.join(shlex.quote(arg) for arg in command)}")
-	process = subprocess.Popen(
-		command,
-		stdout=subprocess.PIPE,
-		stderr=subprocess.PIPE,
-		universal_newlines=True
-	)
-	
-	desc = f"Downloading {os.path.basename(destination_path)}"
-	with tqdm(total=total_segments, unit='seg', desc=desc) as pbar:
-		for line in process.stderr:
-			line = line.strip()
-			if "Opening 'http" in line and '.ts' in line:
-				pbar.update(1)
-			elif "error" in line.lower() or "failed" in line.lower():
-				logger.error(f"FFmpeg error: {line}")
-			elif "Duration:" in line:
-				logger.debug(f"FFmpeg output: {line}")
-	
-	return_code = process.wait()
-	if os.path.exists(temp_m3u8_path):
-		os.remove(temp_m3u8_path)
-	
-	if return_code != 0:
-		logger.error(f"FFmpeg failed with return code {return_code}")
-		return False
-	logger.info(f"Successfully completed ffmpeg download to {destination_path}")
-	return True
-	
-
-def get_content_length(url, headers, general_config):
-	"""Attempt to fetch Content-Length header for progress bar accuracy."""
-	try:
-		ua = headers.get('User-Agent', random.choice(general_config['user_agents']))
-		fetch_headers = {"User-Agent": ua}
-		if "Referer" in headers:
-			fetch_headers["Referer"] = headers["Referer"]
-		if "Cookie" in headers:
-			fetch_headers["Cookie"] = headers["Cookie"]
-		response = requests.head(url, headers=fetch_headers, timeout=10, allow_redirects=True)
-		response.raise_for_status()
-		return int(response.headers.get("Content-Length", 0)) or None
-	except Exception as e:
-		logger.debug(f"Failed to get Content-Length: {e}")
-		return None
-
 def file_exists_on_smb(destination_config, path):
     # logger.debug("Connecting to SMB...")
     conn = SMBConnection(destination_config['username'], destination_config['password'], "videoscraper", destination_config['server'])
@@ -1770,21 +1329,14 @@ def file_exists_on_smb(destination_config, path):
         conn.close()
 
 
-def handle_vpn(general_config, action='start'):
-	global last_vpn_action_time
-	vpn_config = general_config.get('vpn', {})
-	if not vpn_config.get('enabled', False):
-		return
-	vpn_bin = vpn_config.get('vpn_bin', '')
-	cmd = vpn_config.get(f"{action}_cmd", '').format(vpn_bin=vpn_bin)
-	try:
-		subprocess.run(cmd, shell=True, check=True)
-		last_vpn_action_time = time.time()
-		logger.info(f"VPN {action} executed")
-	except subprocess.CalledProcessError as e:
-		logger.error(f"Failed VPN {action}: {e}")
+
 
 def process_fallback_download(url, general_config, overwrite=False):
+	# Ensure download_manager is initialized
+	global download_manager
+	if download_manager is None:
+		download_manager = DownloadManager(general_config)
+		
 	destination_config = general_config['download_destinations'][0]
 	temp_dir = os.path.join(tempfile.gettempdir(), f"download_{uuid.uuid4().hex[:8]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
 	os.makedirs(temp_dir, exist_ok=True)
@@ -1827,45 +1379,7 @@ def process_fallback_download(url, general_config, overwrite=False):
 	shutil.rmtree(temp_dir, ignore_errors=True)
 	return True
 
-def download_with_ytdlp_fallback(url, temp_dir, general_config):
-	command = f"yt-dlp --paths {temp_dir} --format best --add-metadata"
-	if general_config.get('user_agents'):
-		command += f" --user-agent \"{random.choice(general_config['user_agents'])}\""
-	command += f" \"{url}\""
-	process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, cwd=temp_dir)
-	progress_regex = re.compile(r'\[download\]\s+(\d+\.\d+)% of ~?\s*(\d+\.\d+)(K|M|G)iB')
-	filename_regex = re.compile(r'\[download\] Destination: (.+)')
-	downloaded_files = []
-	total_size = None
-	pbar = None
-	try:
-		for line in process.stdout:
-			filename_match = filename_regex.search(line)
-			if filename_match:
-				filename = os.path.basename(filename_match.group(1))
-				if filename not in downloaded_files:
-					downloaded_files.append(filename)
-			progress_match = progress_regex.search(line)
-			if progress_match:
-				percent, size, size_unit = progress_match.groups()
-				if total_size is None:
-					total_size = float(size) * {'K': 1024, 'M': 1024**2, 'G': 1024**3}[size_unit]
-					pbar = tqdm(total=total_size, unit='B', unit_scale=True, desc="Downloading")
-				progress = float(percent) * total_size / 100
-				if pbar:
-					pbar.update(progress - pbar.n)
-			logger.debug(line.strip())
-	except KeyboardInterrupt:
-		process.terminate()
-		if pbar:
-			pbar.close()
-		return False, []
-	if pbar:
-		pbar.close()
-	success = process.wait() == 0
-	if success and not downloaded_files:
-		downloaded_files = os.listdir(temp_dir)
-	return success and downloaded_files, downloaded_files
+# Moved to downloaders.py - imported at top of file
 
 
 def parse_url_pattern(pattern):
@@ -2001,6 +1515,11 @@ def match_url_to_mode(url, site_config):
 
 def get_available_modes(site_config):
 	"""Return a list of available scrape modes for a site config, excluding 'video'."""
+	# If it's a SiteConfiguration object, use its method
+	if isinstance(site_config, SiteConfiguration):
+		return site_config.get_available_modes(exclude_video=True)
+	
+	# Backward compatibility for dict configs
 	return [m for m in site_config.get("modes", {}).keys() if m != "video"]
 
 def has_metadata_selectors(site_config, return_fields=False):
@@ -2008,6 +1527,13 @@ def has_metadata_selectors(site_config, return_fields=False):
 	Check if the site config has selectors for metadata fields beyond title, download_url, and image.
 	If return_fields=True, return the list of fields instead of a boolean.
 	"""
+	# If it's a SiteConfiguration object, use its methods
+	if isinstance(site_config, SiteConfiguration):
+		if return_fields:
+			return site_config.get_metadata_fields()
+		return site_config.has_metadata_selectors()
+	
+	# Backward compatibility for dict configs
 	video_scraper = site_config.get('scrapers', {}).get('video_scraper', {})
 	excluded = {'title', 'download_url', 'image'}
 	metadata_fields = [field for field in video_scraper.keys() if field not in excluded]
@@ -2149,7 +1675,7 @@ def download_video(video_url, destination_path, site_config, general_config, hea
 	origin = urllib.parse.urlparse(video_url).scheme + "://" + urllib.parse.urlparse(video_url).netloc
 	
 	if os.path.exists(destination_path) and not overwrite:
-		video_info = get_video_metadata(destination_path)
+		video_info = download_manager.get_video_metadata(destination_path)
 		if video_info:
 			logger.info(f"Valid video exists at {destination_path}. Skipping download.")
 			return True
@@ -2158,8 +1684,8 @@ def download_video(video_url, destination_path, site_config, general_config, hea
 			os.remove(destination_path)
 	
 	logger.info(f"Downloading to {destination_path}")
-	success = download_file(
-		video_url, destination_path, download_method, general_config, site_config,
+	success = download_manager.download_file(
+		video_url, destination_path, download_method, site_config,
 		headers=headers, metadata=metadata, origin=origin, overwrite=overwrite
 	)
 	if success:
@@ -2250,6 +1776,11 @@ def cleanup(general_config):
 
 def _fallback_detect_and_download(url, general_config, overwrite=False):
 	"""Helper function for fallback: tries to detect MP4 then M3U8 and download."""
+	# Ensure download_manager is initialized
+	global download_manager
+	if download_manager is None:
+		download_manager = DownloadManager(general_config)
+	
 	logger.info(f"Fallback: Attempting direct detection for {url}")
 	driver = None
 	video_url_detected = None
@@ -2367,389 +1898,7 @@ def _fallback_detect_and_download(url, general_config, overwrite=False):
 			os.remove(local_temp_path)
 	return False
 
-def get_terminal_width():
-	try:
-		return os.get_terminal_size().columns
-	except OSError:
-		return 80
 
-
-def generate_adaptive_gradient(num_lines):
-	"""Generate subtle red/purple/pink gradients with HSV fixes."""
-	base_gradients = [
-		((94, 38, 95), (199, 62, 119)),     
-		((76, 25, 91), (181, 58, 127)),     
-		((109, 33, 79), (214, 93, 107)),    
-		((126, 35, 58), (228, 116, 112)),   
-		((82, 19, 64), (188, 65, 119)),     
-		((55, 23, 62), (168, 45, 106)),     
-		((139, 0, 55), (255, 105, 97))      
-	]
-	
-	start_rgb, end_rgb = random.choice(base_gradients)
-	start_h, start_s, start_v = rgb_to_hsv(*start_rgb)
-	end_h, end_s, end_v = rgb_to_hsv(*end_rgb)
-	
-	line_factor = min(num_lines / 12, 1.0)
-	hue_scale = 0.4 + (line_factor * 0.6)
-	sat_scale = 0.8 + (0.3 * line_factor)
-	
-	hue_diff = ((end_h - start_h + 180) % 360) - 180
-	adj_hue_diff = hue_diff * hue_scale
-	new_end_h = (start_h + adj_hue_diff) % 360
-	
-	if 60 < new_end_h < 270:
-		new_end_h = 270 if new_end_h > 180 else 60
-	
-	new_end_s = min(end_s * sat_scale, 0.9)
-	new_end_v = end_v * (0.85 + (0.15 * line_factor))
-	
-	# FIX APPLIED HERE: Normalize hue to 0-1 range
-	new_end_rgb = hsv_to_rgb(new_end_h / 360.0, new_end_s, new_end_v)
-	
-	clamped_rgb = tuple(min(max(v, 0), 255) for v in new_end_rgb)
-	return start_rgb, clamped_rgb
-
-
-def color_distance(color1, color2):
-	"""Calculate perceptual distance between two RGB colors using a simplified CIEDE2000 approach."""
-	# Convert to HSV for more perceptual measurement
-	hsv1 = rgb_to_hsv(*color1)
-	hsv2 = rgb_to_hsv(*color2)
-	
-	# Calculate hue distance (in degrees, accounting for wrap-around)
-	hue_dist = min(abs(hsv1[0] - hsv2[0]), 360 - abs(hsv1[0] - hsv2[0])) / 180.0
-	
-	# Calculate saturation and value distances
-	sat_dist = abs(hsv1[1] - hsv2[1])
-	val_dist = abs(hsv1[2] - hsv2[2])
-	
-	# Weighted combination (hue changes are more noticeable)
-	# Scale is 0-1 where 1 is maximum possible distance
-	return 0.6 * hue_dist + 0.2 * sat_dist + 0.2 * val_dist
-	
-def hsv_to_rgb(h, s, v):
-	"""Convert HSV color to RGB color."""
-	if s == 0.0:
-		return int(v * 255), int(v * 255), int(v * 255)
-	
-	i = int(h * 6)
-	f = (h * 6) - i
-	p = v * (1 - s)
-	q = v * (1 - s * f)
-	t = v * (1 - s * (1 - f))
-	
-	i %= 6
-	
-	if i == 0:
-		r, g, b = v, t, p
-	elif i == 1:
-		r, g, b = q, v, p
-	elif i == 2:
-		r, g, b = p, v, t
-	elif i == 3:
-		r, g, b = p, q, v
-	elif i == 4:
-		r, g, b = t, p, v
-	else:
-		r, g, b = v, p, q
-	
-	return int(r * 255), int(g * 255), int(b * 255)
-
-def rgb_to_hsv(r, g, b):
-	"""Convert RGB color to HSV color."""
-	r, g, b = r/255.0, g/255.0, b/255.0
-	mx = max(r, g, b)
-	mn = min(r, g, b)
-	df = mx - mn
-	
-	if mx == mn:
-		h = 0
-	elif mx == r:
-		h = (60 * ((g-b)/df) + 360) % 360
-	elif mx == g:
-		h = (60 * ((b-r)/df) + 120) % 360
-	elif mx == b:
-		h = (60 * ((r-g)/df) + 240) % 360
-		
-	s = 0 if mx == 0 else df/mx
-	v = mx
-	
-	return h, s, v
-
-def interpolate_color(start_rgb, end_rgb, steps, current_step):
-	"""Interpolate between two RGB colors."""
-	r = start_rgb[0] + (end_rgb[0] - start_rgb[0]) * current_step / (steps - 1) if steps > 1 else start_rgb[0]
-	g = start_rgb[1] + (end_rgb[1] - start_rgb[1]) * current_step / (steps - 1) if steps > 1 else start_rgb[1]
-	b = start_rgb[2] + (end_rgb[2] - start_rgb[2]) * current_step / (steps - 1) if steps > 1 else start_rgb[2]
-	return int(r), int(g), int(b)
-	
-
-
-def render_ascii(input_text, general_config, term_width, font=None):
-	"""Render ASCII art for the given input text using the art library with a specified or random font and gradient.
-
-	Args:
-		input_text (str): The text to render as ASCII art.
-		general_config (dict): Configuration dictionary containing a list of fonts.
-		term_width (int): The width of the terminal in characters.
-		font (str, optional): Specific font to use. If None, a random font is selected from the config.
-
-	Returns:
-		bool: True if rendering succeeded, False otherwise.
-	"""
-	# Calculate max width (90% of terminal width)
-	max_width = int(term_width * 0.9)
-	logger.debug(f"Terminal width: {term_width}, Max width (90%): {max_width}")
-
-	# If a specific font is provided, try to use it
-	selected_font = None
-	art_width = None
-	if font:
-		try:
-			# Test if the font is valid by rendering the text
-			art_text = art.text2art(input_text, font=font)
-			art_text = art_text.replace("\t", "    ")
-			lines = [line.rstrip() for line in art_text.splitlines() if line.strip()]
-			if lines:
-				max_line_width = max(len(line) for line in lines)
-				# logger.debug(f"Specified font '{font}': Unbounded width = {max_line_width}")
-				if max_line_width <= max_width:
-					selected_font = font
-					art_width = max_line_width
-					logger.debug(f"Specified font '{font}' fits within max_width {max_width}. Using it.")
-				else:
-					logger.debug(f"Specified font '{font}' width {max_line_width} exceeds max_width {max_width}. Falling back to random selection.")
-			else:
-				logger.debug(f"Specified font '{font}': No valid lines rendered. Falling back to random selection.")
-		except Exception as e:
-			logger.debug(f"Specified font '{font}' rendering failed: {e}. Falling back to random selection.")
-
-	# If no valid font was specified or the specified font doesn't fit, select a random font
-	if not selected_font:
-		fonts = general_config.get("fonts", [])
-		if not fonts:
-			logger.warning("No fonts specified in general_config['fonts']. Falling back to default.")
-			fonts = ["standard"]
-
-		# Sample all fonts to get their unbounded width
-		font_widths = {}
-		for font in fonts:
-			try:
-				art_text = art.text2art(input_text, font=font)
-				art_text = art_text.replace("\t", "    ")
-				lines = [line.rstrip() for line in art_text.splitlines() if line.strip()]
-				if lines:
-					max_line_width = max(len(line) for line in lines)
-					font_widths[font] = max_line_width
-					# logger.debug(f"Font '{font}': Unbounded width = {max_line_width}")
-			except Exception as e:
-				logger.debug(f"Font '{font}' rendering failed: {e}, skipping.")
-				continue
-
-		if not font_widths:
-			# logger.warning("No valid fonts found. Using fallback.")
-			selected_font = "standard"
-			art_width = len(input_text)
-		else:
-			# Filter fonts that fit within max_width
-			qualifying_fonts = [(font, width) for font, width in font_widths.items() if width <= max_width]
-			# logger.debug(f"Qualifying fonts (width <= {max_width}): {qualifying_fonts}")
-			
-			if not qualifying_fonts:
-				# If no qualifying fonts, use the narrowest available
-				qualifying_fonts = sorted(font_widths.items(), key=lambda x: x[1])
-				selected_font, art_width = qualifying_fonts[0]
-				logger.debug(f"No fonts fit within {max_width} characters. Using narrowest available: '{selected_font}' with width {art_width}")
-			else:
-				# Simply take the largest qualifying font
-				sorted_fonts = sorted(qualifying_fonts, key=lambda x: x[1], reverse=True)
-				selected_font, art_width = sorted_fonts[0]
-				logger.debug(f"Selected largest qualifying font: '{selected_font}' with width {art_width}")
-
-	# Render final art with the selected font
-	try:
-		art_text = art.text2art(input_text, font=selected_font)
-		art_text = art_text.replace("\t", "    ")
-		lines = [line.rstrip() for line in art_text.splitlines() if line.strip()]
-		# logger.debug(f"Raw lines before trimming: {[line for line in lines]}")
-	except Exception as e:
-		logger.error(f"Failed to render ASCII art with font '{selected_font}': {e}")
-		return False
-	
-	# Trim each line to max_width
-	final_lines = []
-	for line in lines:
-		line_width = len(line)
-		if line_width > max_width:
-			# logger.debug(f"Line '{line}' width {line_width} exceeds max_width {max_width}. Trimming.")
-			final_lines.append(line[:max_width])
-		else:
-			final_lines.append(line)
-		#logger.debug(f"Line width after trimming: {len(final_lines[-1])}, Line: '{final_lines[-1]}'")
-	art_width = max(len(line) for line in final_lines) if final_lines else len(input_text)
-	logger.debug(f"Adjusted art_width: {art_width}")
-
-	# Pad lines to art_width for consistent centering
-	final_lines = [line.ljust(art_width) for line in final_lines]
-
-	# Center the art
-	left_padding = (term_width - art_width) // 2 if art_width < term_width else 0
-	centered_lines = [" " * left_padding + line for line in final_lines]
-	logger.debug(f"Art centered with padding: {left_padding}, Total lines: {len(centered_lines)}, Final width: {art_width}")
-
-	# Apply adaptive gradient
-	start_rgb, end_rgb = generate_adaptive_gradient(len(centered_lines))
-	logger.debug(f"start_rgb: {start_rgb}, end_rgb: {end_rgb}")
-	steps = len(centered_lines)
-
-	for i, line in enumerate(centered_lines):
-		if steps > 1:
-			rgb = interpolate_color(start_rgb, end_rgb, steps, i)
-		else:
-			rgb = start_rgb
-		style = Style(color=f"rgb({rgb[0]},{rgb[1]},{rgb[2]})", bold=True)
-		text = Text(line, style=style)
-		console.print(text, justify="left", overflow="crop", no_wrap=True)
-
-	return True
-
-def display_options():
-
-	console.print("[bold][yellow]optional arguments:[/yellow][/bold]")
-	console.print("  [magenta]-o[/magenta], [magenta]--overwrite[/magenta]               replace files with same name at download destination")
-	console.print("  [magenta]-n[/magenta], [magenta]--re_nfo[/magenta]                  replace metadata in existing .nfo files")
-	console.print("  [magenta]-a[/magenta], [magenta]--applystate[/magenta]              add URLs to .state if file already present")
-	console.print("  [magenta]-p[/magenta], [magenta]--page[/magenta] [yellow]{ pg. }.{ vid. }[/yellow]   start scraping on given page of results")
-	console.print("  [magenta]-t[/magenta], [magenta]--table[/magenta] [yellow]{ path }[/yellow]          output table of current site configurations")
-	console.print("  [magenta]-d[/magenta], [magenta]--debug[/magenta]                   enable detailed debug logging")
-	console.print("  [magenta]-h[/magenta], [magenta]--help[/magenta]                    show help submenu")
-
-def display_global_examples():
-	console.print("[yellow][bold]examples[/bold] (generated from ./sites/):[/yellow]")
-	
-	# Collect all site/mode/example combos
-	all_examples = []
-	for site_config_file in os.listdir(SITE_DIR):
-		if site_config_file.endswith(".yaml"):
-			try:
-				with open(os.path.join(SITE_DIR, site_config_file), 'r') as f:
-					site_config = yaml.safe_load(f)
-				site_name = site_config.get("name", "Unknown")
-				shortcode = site_config.get("shortcode", "??")
-				modes = site_config.get("modes", {})
-				for mode, config in modes.items():
-					tip = config.get("tip", "No description available")
-					examples = config.get("examples", ["N/A"])
-					for example in examples:
-						all_examples.append((site_name, shortcode, mode, tip, example))
-			except Exception as e:
-				logger.warning(f"Failed to load config '{site_config_file}': {e}")
-	
-	# Randomly select up to 10 examples
-	selected_examples = random.sample(all_examples, min(10, len(all_examples))) if all_examples else []
-	
-	# Display in a borderless table
-	table = Table(show_edge=False, expand=True, show_lines=False, show_header=True)
-	table.add_column("[magenta][bold]command[/bold][/magenta]", justify="right")
-	table.add_column("[yellow]action[/yellow]", justify="left")
-	
-	for site_name, shortcode, mode, tip, example in selected_examples:
-		cmd = f"[red]scrape[/red] [magenta]{shortcode}[/magenta] [yellow]{mode}[/yellow] [blue]\"{example}\"[/blue]"
-		effect = f"{tip} [blue]\"{example}\"[/blue] on [magenta]{site_name}[/magenta]"
-		table.add_row(cmd, effect)
-	
-	console.print(table)
-	console.print()
-
-
-def display_site_details(site_config, term_width):
-	"""Display a detailed readout for a specific site config with domain-based ASCII art."""
-	site_name = site_config.get("name", "Unknown")
-	shortcode = site_config.get("shortcode", "??")
-	domain = site_config.get("domain", "n/a")
-	base_url = site_config.get("base_url", "https://example.com")
-	video_uri = site_config.get("modes", {}).get("video", {}).get("url_pattern", "/watch/0123456.html")
-	download_method = site_config.get("download", {}).get("method", "N/A")
-	use_selenium = site_config.get("use_selenium", False)
-	name_suffix = site_config.get("name_suffix", None)
-	unique_name = bool(site_config.get("unique_name", False))
-	metadata = has_metadata_selectors(site_config, return_fields=True)
-	site_note = site_config.get("note", None)
-	
-	general_config = load_configuration('general')
-	console.print()
-	render_ascii(domain, general_config, term_width)
-	console.print()
-	
-	console.print()
-	
-	label_width = 12
-	
-	console.print(f"{'name:':>{label_width}} [bold]{site_name}[/bold] ({shortcode})")
-	console.print(f"{'homepage:':>{label_width}} [bold]{base_url}[/bold]")
-	console.print(f"{'downloader:':>{label_width}} [bold]{download_method}[/bold]")
-	console.print(f"{'metadata:':>{label_width}} {', '.join(metadata)}") 
-	
-	if site_note:
-		console.print(f"{'note:':>{label_width}} {site_note}")
-	if name_suffix:
-		console.print(f"{'note:':>{label_width}} Filenames are appended with [bold]\"{name_suffix}\"[/bold].")
-	if unique_name is True:
-		console.print(f"{'note:':>{label_width}} Filenames are appended with a UID to avoid filename collisions, at the risk of downloading multiple duplicates.")
-	if use_selenium:
-		console.print(f"{'note:':>{label_width}} [yellow][bold]selenium[/bold][/yellow] and [yellow][bold]chromedriver[/bold][/yellow] are required to scrape this site.")
-		console.print(f"{'':>{label_width}} See: https://github.com/io-flux/smutscrape#selenium--chromedriver-%EF%B8%8F%EF%B8%8F")
-	
-	console.print()
-	console.print(f"{'usage:':>{label_width}} [magenta]scrape {shortcode} {{mode}} {{query}}[/magenta]")
-	console.print(f"{'':>{label_width}} [magenta]scrape {base_url}{video_uri}[/magenta]")
-	console.print()
-	
-	modes = site_config.get("modes", {})
-	if modes:
-		console.print("[yellow][bold]supported modes:[/bold][/yellow]")
-		mode_table = Table(show_edge=True, expand=True, width=term_width)
-		mode_table.add_column("[bold]mode[/bold]", width=15)
-		mode_table.add_column("[bold]function[/bold]", width=(term_width//10)*4)
-		mode_table.add_column("[bold]example[/bold]", width=term_width//2)
-		
-		has_pagination_footnote = False
-		has_encoding_footnote = False
-		for mode, config in modes.items():
-			tip = config.get("tip", "No description available")
-			examples = config.get("examples", ["N/A"])
-			example = random.choice(examples)
-			example_cmd = f"[magenta]scrape {shortcode} {mode} \"{example}\"[/magenta]"
-			# Check for footnotes per mode
-			supports_pagination = "url_pattern_pages" in config
-			mode_url_rules = config.get("url_encoding_rules", {})
-			has_special_encoding = " & " in mode_url_rules or "&" in mode_url_rules
-			footnotes = []
-			if supports_pagination:
-				footnotes.append("⸸")
-				has_pagination_footnote = True
-			if has_special_encoding:
-				footnotes.append("‡")
-				has_encoding_footnote = True
-			mode_display = f"[yellow][bold]{mode}[/bold][/yellow]" + (f" {''.join(footnotes)}" if footnotes else "")
-			mode_table.add_row(mode_display, tip, example_cmd)
-		
-		# Add all applicable footnotes
-		footnotes = []
-		if use_selenium:
-			footnotes.append("[italic]† [yellow][bold]selenium[/bold][/yellow] and [yellow][bold]chromedriver[/bold][/yellow] required.[/italic]")
-		if has_encoding_footnote:
-			footnotes.append("[italic]‡ combine terms with \'&\' to search them together.[/italic]")
-		if has_pagination_footnote:
-			footnotes.append("[italic]⸸ supports [bold][green]pagination[/green][/bold]; see [bold][yellow]optional arguments[/yellow][/bold] below.[/italic]")
-		
-		from rich.console import Group
-		console.print(Group(mode_table, *footnotes) if footnotes else mode_table)
-		console.print()
-	console.print()
-	display_options()
-	
 
 def generate_global_table(term_width, output_path=None):
 	"""Generate the global sites table, optionally saving as Markdown to output_path."""
@@ -2854,21 +2003,15 @@ def generate_global_table(term_width, output_path=None):
 	return Group(table, *footnotes) if footnotes else table
 
 
-def display_usage(term_width):
-	console.print("usage: [red]scrape[/red] [magenta]{site}[/magenta] [yellow]{mode}[/yellow] [blue]{query}[/blue]")
-	console.print("       [red]scrape[/red] [blue]{url}[/blue]")
-	console.print()
-	console.print("[yellow][bold]supported sites[/bold] (loaded from ./sites/):[/yellow]")
-	console.print()
-	global_table = generate_global_table(term_width)  # Get the table object
-	console.print(global_table)  # Print it once with full color control
-	console.print()
-	console.print()
-	display_global_examples()
-	display_options()
+
 	
 
 def handle_single_arg(arg, general_config, args, term_width, state_set):
+	# Ensure download_manager is initialized
+	global download_manager
+	if download_manager is None:
+		download_manager = DownloadManager(general_config)
+	
 	is_url_flag = is_url(arg)
 	config = load_configuration('site', arg)
 	if config:
@@ -2885,7 +2028,11 @@ def handle_single_arg(arg, general_config, args, term_width, state_set):
 				console.print()
 				process_url(arg, config, general_config, args.overwrite, args.re_nfo, args.page, apply_state=args.applystate, state_set=state_set)
 		else:
-			display_site_details(config, term_width)
+			# Get the SiteConfiguration object instead of dict
+			site_obj = get_site_manager().get_site_by_identifier(arg)
+			if site_obj:
+				site_obj.display_details(term_width, general_config)
+				display_options()
 			sys.exit(0)
 	else:
 		if is_url_flag:
@@ -2896,6 +2043,11 @@ def handle_single_arg(arg, general_config, args, term_width, state_set):
 			sys.exit(1)
 			
 def handle_multi_arg(args, general_config, args_obj, state_set):
+	# Ensure download_manager is initialized
+	global download_manager
+	if download_manager is None:
+		download_manager = DownloadManager(general_config)
+	
 	site_config = load_configuration('site', args[0])
 	if not site_config:
 		logger.error(f"Site '{args[0]}' not found in configs")
@@ -3063,398 +2215,7 @@ def handle_multi_arg(args, general_config, args_obj, state_set):
 				time.sleep(general_config['sleep']['between_pages'])
 
 
-# ============================================================================
-# FastAPI endpoints (only available when FASTAPI_AVAILABLE is True)
-# ============================================================================
 
-if FASTAPI_AVAILABLE:
-
-	from fastapi.middleware.cors import CORSMiddleware
-
-	# Add this near the top of your file where you initialize FastAPI
-	app.add_middleware(
-		CORSMiddleware,
-		allow_origins=["*"],  # Allows all origins
-		allow_credentials=True,
-		allow_methods=["*"],  # Allows all methods
-		allow_headers=["*"],  # Allows all headers
-	)
-	@app.options("/scrape")
-	async def options_scrape():
-		return {}
-
-
-	@app.get("/", response_model=Dict[str, Any])
-	async def root():
-		"""Root endpoint providing API information"""
-		return {
-			"name": "Smutscrape API",
-			"version": "1.0.0",
-			"description": "API for scraping and downloading adult content with metadata",
-			"endpoints": {
-				"/": "This information page",
-				"/sites": "List all supported sites",
-				"/sites/{code}": "Get detailed information about a specific site",
-				"/scrape": "Execute a scrape command (returns immediately with task_id)",
-				"/tasks/{task_id}": "Get status of a specific task",
-				"/tasks": "List all tasks (optional: ?status=pending/running/completed/failed)"
-			},
-			"notes": [
-				"POST /scrape returns immediately with a task_id",
-				"Use GET /tasks/{task_id} to check progress",
-				"Multiple scraping tasks can run concurrently"
-			]
-		}
-
-	@app.get("/sites", response_model=List[SiteInfo])
-	async def get_sites():
-		"""Get list of all supported sites"""
-		sites = []
-		for site_config_file in os.listdir(SITE_DIR):
-			if site_config_file.endswith(".yaml"):
-				try:
-					with open(os.path.join(SITE_DIR, site_config_file), 'r') as f:
-						site_config = yaml.safe_load(f)
-					
-					modes_list = []
-					for mode, config in site_config.get("modes", {}).items():
-						modes_list.append({
-							"name": mode,
-							"description": config.get("tip", "No description available"),
-							"supports_pagination": bool(config.get("url_pattern_pages", False)),
-							"examples": config.get("examples", [])
-						})
-					
-					notes = []
-					if site_config.get("note"):
-						notes.append(site_config["note"])
-					if site_config.get("name_suffix"):
-						notes.append(f"Filenames are appended with '{site_config['name_suffix']}'")
-					if site_config.get("unique_name"):
-						notes.append("Filenames include UID to avoid collisions")
-					
-					site_info = SiteInfo(
-						code=site_config.get("shortcode", "??"),
-						name=site_config.get("name", "Unknown"),
-						domain=site_config.get("domain", "n/a"),
-						modes=modes_list,
-						metadata=has_metadata_selectors(site_config, return_fields=True),
-						requires_selenium=site_config.get("use_selenium", False),
-						notes=notes if notes else None
-					)
-					sites.append(site_info)
-				except Exception as e:
-					logger.warning(f"Failed to load config '{site_config_file}': {e}")
-		
-		return sorted(sites, key=lambda x: x.code)
-
-	@app.get("/sites/{code}", response_model=SiteInfo)
-	async def get_site(code: str):
-		"""Get detailed information about a specific site"""
-		site_config = load_configuration('site', code)
-		if not site_config:
-			raise HTTPException(status_code=404, detail=f"Site '{code}' not found")
-		
-		modes_list = []
-		for mode, config in site_config.get("modes", {}).items():
-			modes_list.append({
-				"name": mode,
-				"description": config.get("tip", "No description available"),
-				"supports_pagination": bool(config.get("url_pattern_pages", False)),
-				"examples": config.get("examples", [])
-			})
-		
-		notes = []
-		if site_config.get("note"):
-			notes.append(site_config["note"])
-		if site_config.get("name_suffix"):
-			notes.append(f"Filenames are appended with '{site_config['name_suffix']}'")
-		if site_config.get("unique_name"):
-			notes.append("Filenames include UID to avoid collisions")
-		
-		return SiteInfo(
-			code=site_config.get("shortcode", "??"),
-			name=site_config.get("name", "Unknown"),
-			domain=site_config.get("domain", "n/a"),
-			modes=modes_list,
-			metadata=has_metadata_selectors(site_config, return_fields=True),
-			requires_selenium=site_config.get("use_selenium", False),
-			notes=notes if notes else None
-		)
-
-	def run_scrape_command(command: str, overwrite: bool = False, re_nfo: bool = False, 
-						  page: str = "1", applystate: bool = False, debug: bool = False):
-		"""Execute a scrape command in a thread"""
-		# Parse the command string
-		import shlex
-		try:
-			command_parts = shlex.split(command)
-		except ValueError as e:
-			return {"success": False, "message": f"Invalid command format: {e}"}
-		
-		# Create a mock args object
-		class MockArgs:
-			def __init__(self):
-				self.args = command_parts
-				self.overwrite = overwrite
-				self.re_nfo = re_nfo
-				self.page = page
-				self.applystate = applystate
-				self.debug = debug
-				self.table = None
-				# Parse page into page_num and video_offset
-				page_parts = page.split('.')
-				self.page_num = int(page_parts[0])
-				self.video_offset = int(page_parts[1]) if len(page_parts) > 1 else 0
-		
-		mock_args = MockArgs()
-		
-		# Setup logging for this request
-		if debug:
-			logger.add(
-				sys.stderr,
-				level="DEBUG",
-				format="<d>{time:YYYYMMDDHHmmss.SSS}</d> | <d>{level:1.1}</d> | <d>{function}:{line}</d> · <d>{message}</d>",
-				colorize=True,
-				filter=lambda record: record["level"].name == "DEBUG"
-			)
-		
-		try:
-			# Load configurations
-			general_config = load_configuration('general')
-			if not general_config:
-				return {"success": False, "message": "Failed to load general configuration"}
-			
-			# Load state
-			state_set = load_state()
-			
-			# Process the command
-			if len(command_parts) == 1:
-				# Single argument (URL or site code)
-				arg = command_parts[0]
-				is_url_flag = is_url(arg)
-				config = load_configuration('site', arg)
-				
-				if config:
-					if is_url_flag:
-						if config.get('use_selenium', False) and not SELENIUM_AVAILABLE:
-							return {
-								"success": False,
-								"message": f"Site requires Selenium, which is not available on this system"
-							}
-						process_url(arg, config, general_config, mock_args.overwrite, 
-								   mock_args.re_nfo, mock_args.page, apply_state=mock_args.applystate, 
-								   state_set=state_set)
-						return {"success": True, "message": f"Successfully processed URL: {arg}"}
-					else:
-						# Just site code - return site info
-						return {
-							"success": False,
-							"message": f"Please specify a mode and query for site '{arg}'"
-						}
-				else:
-					if is_url_flag:
-						# Fallback download
-						success = process_fallback_download(arg, general_config, mock_args.overwrite)
-						return {
-							"success": success,
-							"message": f"{'Successfully' if success else 'Failed to'} process URL with fallback downloader"
-						}
-					else:
-						return {"success": False, "message": f"Unknown site or invalid URL: {arg}"}
-			
-			elif len(command_parts) >= 2:
-				# Multi-argument command
-				handle_multi_arg(command_parts, general_config, mock_args, state_set)
-				return {
-					"success": True,
-					"message": f"Successfully executed: {' '.join(command_parts)}"
-				}
-			else:
-				return {"success": False, "message": "Invalid command format"}
-			
-		except SystemExit as e:
-			# Catch sys.exit() calls and convert to API response
-			return {
-				"success": False,
-				"message": f"Command failed with exit code: {e.code}"
-			}
-		except Exception as e:
-			logger.error(f"API command execution error: {e}", exc_info=debug)
-			return {
-				"success": False,
-				"message": f"Error executing command: {str(e)}"
-			}
-		finally:
-			# Cleanup
-			handle_vpn(general_config, 'stop')
-			cleanup(general_config)
-
-	def validate_and_prepare_command(command: str, overwrite: bool = False, re_nfo: bool = False, 
-									 page: str = "1", applystate: bool = False, debug: bool = False):
-		"""Validate command before executing - returns (is_valid, message, command_parts)"""
-		import shlex
-		try:
-			command_parts = shlex.split(command)
-		except ValueError as e:
-			return False, f"Invalid command format: {e}", None
-		
-		if not command_parts:
-			return False, "Empty command", None
-		
-		# Quick validation of command structure
-		if len(command_parts) == 1:
-			arg = command_parts[0]
-			is_url_flag = is_url(arg)
-			
-			if not is_url_flag:
-				# Check if it's a valid site code
-				config = load_configuration('site', arg)
-				if config:
-					return False, f"Please specify a mode and query for site '{arg}'", None
-				else:
-					return False, f"Unknown site: {arg}", None
-		
-		elif len(command_parts) >= 2:
-			# Check if site exists
-			site_config = load_configuration('site', command_parts[0])
-			if not site_config:
-				return False, f"Site '{command_parts[0]}' not found", None
-			
-			# Check if mode is valid
-			mode = command_parts[1]
-			if mode not in site_config.get('modes', {}):
-				available_modes = get_available_modes(site_config)
-				return False, f"Invalid mode '{mode}' for site '{command_parts[0]}'. Available modes: {', '.join(available_modes)}", None
-			
-			# Check selenium availability if required
-			if site_config.get('use_selenium', False) and not SELENIUM_AVAILABLE:
-				return False, f"Site '{command_parts[0]}' requires Selenium, which is not available", None
-		
-		return True, "Command validated", command_parts
-
-	def run_scrape_task(task_id: str, command: str, overwrite: bool, re_nfo: bool, 
-					   page: str, applystate: bool, debug: bool):
-		"""Execute scraping task and update task status"""
-		with task_lock:
-			if task_id in active_tasks:
-				active_tasks[task_id]["status"] = "running"
-				active_tasks[task_id]["started_at"] = datetime.now().isoformat()
-		
-		try:
-			result = run_scrape_command(command, overwrite, re_nfo, page, applystate, debug)
-			
-			with task_lock:
-				if task_id in active_tasks:
-					active_tasks[task_id]["status"] = "completed" if result["success"] else "failed"
-					active_tasks[task_id]["message"] = result["message"]
-					active_tasks[task_id]["completed_at"] = datetime.now().isoformat()
-					
-					# Clean up old tasks if we have too many
-					if len(active_tasks) > MAX_TASK_HISTORY:
-						# Remove oldest completed tasks
-						to_remove = []
-						for tid, info in active_tasks.items():
-							if info["status"] in ["completed", "failed"] and len(to_remove) < 10:
-								to_remove.append(tid)
-						for tid in to_remove:
-							del active_tasks[tid]
-		
-		except Exception as e:
-			with task_lock:
-				if task_id in active_tasks:
-					active_tasks[task_id]["status"] = "failed"
-					active_tasks[task_id]["message"] = f"Unexpected error: {str(e)}"
-					active_tasks[task_id]["completed_at"] = datetime.now().isoformat()
-
-	@app.post("/scrape", response_model=ScrapeResponse)
-	async def scrape(request: ScrapeRequest, background_tasks: BackgroundTasks):
-		"""Execute a scrape command"""
-		# Validate command first
-		is_valid, message, command_parts = validate_and_prepare_command(
-			request.command, request.overwrite, request.re_nfo, 
-			request.page, request.applystate, request.debug
-		)
-		
-		if not is_valid:
-			return ScrapeResponse(
-				success=False,
-				message=message,
-				errors=[message]
-			)
-		
-		# Generate task ID
-		task_id = str(uuid.uuid4())
-		
-		# Create task record
-		with task_lock:
-			active_tasks[task_id] = {
-				"task_id": task_id,
-				"command": request.command,
-				"status": "pending",
-				"created_at": datetime.now().isoformat(),
-				"started_at": None,
-				"completed_at": None,
-				"message": None
-			}
-		
-		# Add to background tasks
-		background_tasks.add_task(
-			run_scrape_task,
-			task_id,
-			request.command,
-			request.overwrite,
-			request.re_nfo,
-			request.page,
-			request.applystate,
-			request.debug
-		)
-		
-		return ScrapeResponse(
-			success=True,
-			message=f"Scraping task started successfully",
-			task_id=task_id,
-			details={"command": request.command, "task_id": task_id}
-		)
-
-	@app.get("/tasks/{task_id}", response_model=TaskStatus)
-	async def get_task_status(task_id: str):
-		"""Get the status of a scraping task"""
-		with task_lock:
-			if task_id not in active_tasks:
-				raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
-			
-			task_info = active_tasks[task_id]
-			return TaskStatus(
-				task_id=task_info["task_id"],
-				status=task_info["status"],
-				message=task_info.get("message"),
-				created_at=task_info["created_at"],
-				started_at=task_info.get("started_at"),
-				completed_at=task_info.get("completed_at")
-			)
-
-	@app.get("/tasks", response_model=List[TaskStatus])
-	async def list_tasks(status: Optional[str] = None):
-		"""List all tasks, optionally filtered by status"""
-		with task_lock:
-			tasks = []
-			for task_info in active_tasks.values():
-				if status is None or task_info["status"] == status:
-					tasks.append(TaskStatus(
-						task_id=task_info["task_id"],
-						status=task_info["status"],
-						message=task_info.get("message"),
-						created_at=task_info["created_at"],
-						started_at=task_info.get("started_at"),
-						completed_at=task_info.get("completed_at")
-					))
-			return tasks
-
-	def run_api_server(host: str = "0.0.0.0", port: int = 8000):
-		"""Run the FastAPI server"""
-		logger.info(f"Starting Smutscrape API server on {host}:{port}")
-		uvicorn.run(app, host=host, port=port)
 
 
 def main():
@@ -3539,6 +2300,10 @@ def main():
 		logger.error("Failed to load general configuration. Please check 'config/general.yml'.")
 		sys.exit(1)
 	
+	# Initialize download manager with general config
+	global download_manager
+	download_manager = DownloadManager(general_config)
+	
 	# Load state once at startup
 	state_set = load_state()
 	logger.debug(f"Loaded {len(state_set)} URLs from state file")
@@ -3553,7 +2318,10 @@ def main():
 	
 	if not args.args:
 		print()
-		display_usage(term_width)
+		global_table = generate_global_table(term_width)
+		display_usage(term_width, global_table)
+		display_global_examples(SITE_DIR)
+		display_options()
 		sys.exit(0)
 	
 	# Split --page into page_num and video_offset
@@ -3568,7 +2336,10 @@ def main():
 			handle_multi_arg(args.args, general_config, args, state_set)
 		else:
 			logger.error("Invalid arguments. Use: scrape {site} {mode} {query} or scrape {url}")
-			display_usage(term_width)
+			global_table = generate_global_table(term_width)
+			display_usage(term_width, global_table)
+			display_global_examples(SITE_DIR)
+			display_options()
 			sys.exit(1)
 	except KeyboardInterrupt:
 		logger.warning("Interrupted by user. Cleaning up...")

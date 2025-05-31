@@ -3068,6 +3068,22 @@ def handle_multi_arg(args, general_config, args_obj, state_set):
 # ============================================================================
 
 if FASTAPI_AVAILABLE:
+
+	from fastapi.middleware.cors import CORSMiddleware
+
+	# Add this near the top of your file where you initialize FastAPI
+	app.add_middleware(
+		CORSMiddleware,
+		allow_origins=["*"],  # Allows all origins
+		allow_credentials=True,
+		allow_methods=["*"],  # Allows all methods
+		allow_headers=["*"],  # Allows all headers
+	)
+	@app.options("/scrape")
+	async def options_scrape():
+		return {}
+
+
 	@app.get("/", response_model=Dict[str, Any])
 	async def root():
 		"""Root endpoint providing API information"""

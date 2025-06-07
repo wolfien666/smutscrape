@@ -1,0 +1,53 @@
+# /sites/fatherdaughterpornincestsex.yaml
+name: FatherDaughterPornIncestSex
+shortcode: fdps
+domain: fatherdaughterpornincestsex.com
+base_url: "https://fatherdaughterpornincestsex.com"
+selector_style: css
+no_overwrite: true
+name_suffix: " - FatherDaughterPornIncestSex" 
+# use_selenium: true
+# unique_name: true
+
+url_encoding_rules:
+  " ": "-"
+  "%20": "-"
+
+modes:
+  video:
+    url_pattern: "/fatherdaughterpornincestsex.php?url=/videos/{video}.html"
+    scraper: video_scraper
+    tip: ""
+    examples:
+      - "chubby-dad-fucking-his-favorite-daughter"
+  all:
+    url_pattern: "/"
+    url_pattern_pages: "/?page={page}"
+    scraper: list_scraper
+    max_pages: 999
+    tip: "Download videos starting from a page number (1 is root)"
+    examples:
+      - "1"
+      - "5"
+
+download:
+  method: "yt-dlp"
+
+scrapers:
+  list_scraper:
+    video_container:
+      selector:
+        - "div.apt-content"
+    video_item:
+      selector: "div.apt-th"
+      fields:
+        url:
+          selector: "a"
+          attribute: "href"
+
+  video_scraper:
+    title:
+      selector: "head title"
+    download_url:
+      selector: "video#player source"
+      attribute: "src"

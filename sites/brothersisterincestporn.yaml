@@ -1,0 +1,53 @@
+# /sites/brothersisterincestporn.yaml
+name: BrotherSisterIncestPorn
+shortcode: bsip
+domain: brothersisterincestporn.com
+base_url: "https://brothersisterincestporn.com"
+selector_style: css
+no_overwrite: true
+name_suffix: " - BrotherSisterIncestPorn" 
+# use_selenium: true
+# unique_name: true
+
+url_encoding_rules:
+  " ": "-"
+  "%20": "-"
+
+modes:
+  video:
+    url_pattern: "/brothersisterincestporn.php?url=/videos/{video}.html"
+    scraper: video_scraper
+    tip: ""
+    examples:
+      - "my-horny-sister-knows-how-to-suck-my-dick"
+  all:
+    url_pattern: "/"
+    url_pattern_pages: "/?page={page}"
+    scraper: list_scraper
+    max_pages: 999
+    tip: "Download videos starting from a page number (1 is root)"
+    examples:
+      - "1"
+      - "5"
+
+download:
+  method: "yt-dlp"
+
+scrapers:
+  list_scraper:
+    video_container:
+      selector:
+        - "div.apt-content"
+    video_item:
+      selector: "div.apt-th"
+      fields:
+        url:
+          selector: "a"
+          attribute: "href"
+
+  video_scraper:
+    title:
+      selector: "head title"
+    download_url:
+      selector: "video#player source"
+      attribute: "src"

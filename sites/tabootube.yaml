@@ -7,7 +7,7 @@ selector_style: css
 no_overwrite: true
 use_selenium: true
 download:
-  method: "requests"
+  method: "yt-dlp"
 url_encoding_rules:
   " ": "-"
   "%20": "-"
@@ -45,8 +45,8 @@ scrapers:
       postProcess:
         - parseRelativeDate: true
     download_url:
-      selector: "span.download-link:contains('MP4 480p')"
-      attribute: "data-href"
+      selector: "video.fp-engine"
+      attribute: "src"
 
   list_scraper:
     video_container:

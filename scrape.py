@@ -1933,7 +1933,7 @@ def generate_global_table(term_width, output_path=None):
 					has_special_encoding = " & " in mode_url_rules or "&" in mode_url_rules
 					footnotes = []
 					if supports_pagination:
-						footnotes.append("⸸")
+						footnotes.append("*")
 						pagination_modes.add(mode)
 					if has_special_encoding:
 						footnotes.append("‡")
@@ -1960,13 +1960,13 @@ def generate_global_table(term_width, output_path=None):
 	
 	# Prepare footnotes
 	footnotes = []
+	if pagination_modes:
+		footnotes.append("[italic]* supports [bold][green]pagination[/green][/bold]; see [bold][yellow]optional arguments[/yellow][/bold] below.[/italic]")
 	if selenium_sites:
 		footnotes.append("[italic]† [yellow][bold]selenium[/bold][/yellow] and [yellow][bold]chromedriver[/bold][/yellow] required.[/italic]")
 	if encoding_rule_sites:
 		footnotes.append("[italic]‡ combine terms with \'&\' to search them together.[/italic]")
-	if pagination_modes:
-		footnotes.append("[italic]⸸ supports [bold][green]pagination[/green][/bold]; see [bold][yellow]optional arguments[/yellow][/bold] below.[/italic]")
-	
+
 	if output_path:
 		md_lines = [
 			"| code   | site                          | modes                          | metadata                       |\n",
@@ -1984,12 +1984,13 @@ def generate_global_table(term_width, output_path=None):
 			metadata_str = " · ".join(metadata) if metadata else "None"
 			md_lines.append(f"| {code_str:<6} | {site_str:<29} | {modes_str:<30} | {metadata_str:<30} |\n")
 		
+		if pagination_modes:
+			md_lines.append("\n* _Supports pagination; see optional arguments below._\n")
 		if selenium_sites:
 			md_lines.append("\n† _Selenium required._\n")
 		if encoding_rule_sites:
-			md_lines.append("‡ _Combine terms with \"&\"._\n")
-		if pagination_modes:
-			md_lines.append("⸸ _Supports pagination; see optional arguments below._\n")
+			md_lines.append("\n‡ _Combine terms with \"&\"._\n")
+		
 		
 		try:
 			with open(output_path, 'w', encoding='utf-8') as f:

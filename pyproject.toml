@@ -1,0 +1,75 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smutscrape"
+version = "1.0.0"
+authors = [
+    {name = "Smutscrape Contributors"},
+]
+description = "Adult content scraper with metadata support"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+dependencies = [
+    "requests",
+    "cloudscraper",
+    "beautifulsoup4",
+    "lxml",
+    "feedparser",
+    "pyyaml",
+    "loguru",
+    "rich",
+    "termcolor",
+    "tqdm",
+    "pysmb",
+]
+
+[project.optional-dependencies]
+selenium = ["selenium", "webdriver-manager"]
+api = ["fastapi", "uvicorn"]
+dev = ["pytest", "black", "flake8", "mypy"]
+all = ["selenium", "webdriver-manager", "fastapi", "uvicorn"]
+
+[project.scripts]
+smutscrape = "smutscrape.cli:main"
+
+[project.urls]
+Homepage = ""
+Repository = ""
+Documentation = ""
+"Bug Tracker" = ""
+
+[tool.setuptools]
+packages = ["smutscrape"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+smutscrape = ["*.py"]
+"*" = ["sites/*.yaml", "config/*.yaml", "*.md", "*.txt"]
+
+[tool.black]
+line-length = 100
+target-version = ['py38']
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true 

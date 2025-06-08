@@ -1,0 +1,25 @@
+# Include important documentation and configuration files
+include README.md
+include requirements.txt
+include config.py
+include example-config.yaml
+include API.md
+include sites.md
+
+# Include all site configuration files
+recursive-include sites *.yaml
+
+# Include all Python files in the smutscrape package
+recursive-include smutscrape *.py
+
+# Exclude development and build files
+exclude setup.py
+exclude scrape.py
+global-exclude __pycache__
+global-exclude *.py[co]
+global-exclude .DS_Store
+global-exclude *.so
+prune logs
+prune screenshots
+prune temp_downloads
+prune testbench 

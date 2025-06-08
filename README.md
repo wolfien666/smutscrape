@@ -142,6 +142,7 @@ Refer to this table of supported sites with available modes and metadata, or see
 
 ### Command-Line Arguments [ > ]
 
+#### CLI Mode (default)
 ```bash
 scrape [args] [optional arguments]
 ```
@@ -152,12 +153,22 @@ scrape [args] [optional arguments]
 | `-o, --overwrite`    | download all videos, ignoring `.state` and overwriting existing media when filenames collide. ⚠      |
 | `-n, --re_nfo`       | refresh metadata and write new `.nfo` files, irrespective of whether `--overwrite` is set. ⚠         |
 | `-a, --applystate`   | retroactively add URL to `.state` without re-downloading if local file matches (`-o` has priority).  |
-| `-t, --table {path}` | generate markdown table of active site configurations with modes, metadata, and examples.            |
-| `-s, --server`       | run as FastAPI server instead of CLI mode.                                                          |
-| `--host {host}`      | host to bind the API server to (overrides config.yaml, use with `-s`).                              |
-| `--port {port}`      | port to bind the API server to (overrides config.yaml, use with `-s`).                              |
+| `-t, --table {site}` | output site table in Markdown format and exit (specify site code or leave empty for all sites).     |
 | `-d, --debug`        | enable detailed debug logging.                                                                       |
 | `-h, --help`         | show the help submenu.                                                                               |
+
+#### Server Mode
+```bash
+scrape --server [server options]
+```
+
+| argument             | summary                                                                                              |
+| ---------------------| ---------------------------------------------------------------------------------------------------- |
+| `--server`           | run as FastAPI server instead of CLI mode.                                                          |
+| `--host {host}`      | host to bind the API server to (overrides config.yaml).                                             |
+| `--port {port}`      | port to bind the API server to (overrides config.yaml).                                             |
+| `-d, --debug`        | enable detailed debug logging.                                                                       |
+| `-h, --help`         | show server-specific help menu.                                                                      |
 
 **⚠ Caution**: Using `--overwrite` or `--re_nfo` risks overwriting different videos or `.nfo` files with identical names—a growing concern as your collection expands and generic titles (e.g., "Hot Scene") collide. Mitigate this by adding `name_suffix: "{unique site identifier}"` in a site's YAML config (e.g., `name_suffix: " - Motherless.com"` for Motherless, where duplicate titles are rampant).
 
@@ -228,7 +239,7 @@ api_server:
 curl -X POST http://localhost:6999/scrape \
   -H "Content-Type: application/json" \
   -d '{
-    "command": "ph pornstar \"Massy Sweet\"",
+    "command": "xh search \"Vintage taboo\"",
     "re_nfo": true
   }'
 ```
@@ -324,7 +335,7 @@ vpn:
 
 ## Contributing 🤝
 
-**_Smutscrape_** welcomes contributions! Its current 2200-line monolithic design isn't collaboration-friendly, so refactoring into a modular, Pythonic app is a priority. Meanwhile, adding site configurations—YAML files with URL schemes and CSS selectors—is a simple, valuable contribution.
+**_Smutscrape_** welcomes contributions! The application features a modular, PyPI-ready package structure that makes collaboration straightforward. Adding site configurations—YAML files with URL schemes and CSS selectors—is a simple, valuable contribution.
 
 Inspired by [Stash CommunityScrapers](https://github.com/stashapp/CommunityScrapers), **_Smutscrape_**'s YAML configs adapt its structure. We use CSS selectors instead of XPath (though conversion is straightforward), and metadata fields port easily. The challenge is video downloading—some sites use iframes or countermeasures—but the yt-dlp fallback often simplifies this. Adapting a CommunityScrapers site for **_Smutscrape_** is a great way to contribute. Pick a site, tweak the config, and submit a pull request!
 

@@ -27,23 +27,28 @@ except ImportError:
 
 from loguru import logger
 
-# These will be imported from the main scrape module
-from scrape import (
-    load_configuration,
-    get_session_manager,
-    is_url,
-    process_url,
-    process_fallback_download,
-    handle_multi_arg,
-    handle_vpn,
-    cleanup,
-    get_available_modes,
-    has_metadata_selectors,
-    SITE_DIR,
-    SELENIUM_AVAILABLE
+# Import from the modular structure
+from smutscrape.cli import (
+    load_configuration, get_session_manager, get_available_modes, cleanup,
+    handle_multi_arg
 )
-from downloaders import DownloadManager
-from sites import SiteManager, SiteConfiguration
+from smutscrape.core import process_url, has_metadata_selectors
+from smutscrape.utilities import is_url, handle_vpn
+from smutscrape.downloaders import DownloadManager
+from smutscrape.sites import SiteManager, SiteConfiguration
+from config import ConfigManager
+import os
+
+# Check Selenium availability
+try:
+    from selenium import webdriver
+    SELENIUM_AVAILABLE = True
+except ImportError:
+    SELENIUM_AVAILABLE = False
+
+# Set up directory paths
+SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+SITE_DIR = os.path.join(SCRIPT_DIR, 'sites')
 
 
 # Pydantic models for API requests/responses
@@ -143,8 +148,9 @@ async def root():
 @app.get("/sites", response_model=List[SiteInfo])
 async def get_sites():
     """Get list of all supported sites"""
-    # Use the global site manager
-    from scrape import site_manager
+    # Use the site manager from CLI module
+    from smutscrape.cli import get_site_manager
+    site_manager = get_site_manager()
     
     sites = []
     for site_config in site_manager.get_all_sites():
@@ -182,7 +188,8 @@ async def get_sites():
 @app.get("/sites/{code}", response_model=SiteInfo)
 async def get_site(code: str):
     """Get detailed information about a specific site"""
-    from scrape import site_manager
+    from smutscrape.cli import get_site_manager
+    site_manager = get_site_manager()
     
     site_config = site_manager.get_site_by_identifier(code)
     if not site_config:
@@ -261,10 +268,11 @@ def run_scrape_command(command: str, overwrite: bool = False, re_nfo: bool = Fal
         if not general_config:
             return {"success": False, "message": "Failed to load general configuration"}
         
-        # Initialize download manager
-        import scrape
-        if not hasattr(scrape, 'download_manager') or scrape.download_manager is None:
-            scrape.download_manager = DownloadManager(general_config)
+        # Initialize download manager via config manager
+        from smutscrape.cli import get_config_manager
+        config_manager = get_config_manager()
+        if config_manager.download_manager is None:
+            config_manager.download_manager = DownloadManager(general_config)
         
         # Load state
         state_set = get_session_manager().processed_urls
@@ -295,11 +303,13 @@ def run_scrape_command(command: str, overwrite: bool = False, re_nfo: bool = Fal
                     }
             else:
                 if is_url_flag:
-                    # Fallback download
-                    success = process_fallback_download(arg, general_config, mock_args.overwrite)
+                    # Fallback download via download manager
+                    from smutscrape.cli import get_config_manager
+                    download_manager = get_config_manager().download_manager
+                    download_manager.process_fallback_download(arg, mock_args.overwrite)
                     return {
-                        "success": success,
-                        "message": f"{'Successfully' if success else 'Failed to'} process URL with fallback downloader"
+                        "success": True,
+                        "message": f"Successfully processed URL with fallback downloader"
                     }
                 else:
                     return {"success": False, "message": f"Unknown site or invalid URL: {arg}"}
@@ -505,4 +515,61 @@ def run_api_server(host: str = "0.0.0.0", port: int = 8000):
         raise ImportError("FastAPI is not installed. Please install it with: pip install fastapi uvicorn")
     
     logger.info(f"Starting Smutscrape API server on {host}:{port}")
-    uvicorn.run(app, host=host, port=port) 
+    uvicorn.run(app, host=host, port=port)
+
+
+def main():
+    """Main API server entry point with argument parsing."""
+    import argparse
+    import sys
+    
+    parser = argparse.ArgumentParser(
+        description="Smutscrape API Server: REST API for scraping and downloading adult content"
+    )
+    parser.add_argument("-d", "--debug", action="store_true", help="Enable detailed debug logging.")
+    parser.add_argument("--host", type=str, default=None, help="Host to bind the API server to (overrides config)")
+    parser.add_argument("--port", type=int, default=None, help="Port to bind the API server to (overrides config)")
+    
+    # Parse only server-related args, ignore others
+    args, unknown = parser.parse_known_args()
+    
+    if not FASTAPI_AVAILABLE:
+        logger.error("FastAPI is not installed. Please install it with: pip install fastapi uvicorn")
+        sys.exit(1)
+    
+    # Setup logging for server mode
+    log_level = "DEBUG" if args.debug else "INFO"
+    logger.remove()
+    logger.add(
+        sys.stderr,
+        level=log_level,
+        format="<d>{time:YYYY-MM-DD HH:mm:ss}</d> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+        colorize=True
+    )
+    
+    # Load general config to get server settings
+    from smutscrape.cli import load_configuration  # Import from CLI module
+    general_config = load_configuration('general')
+    if not general_config:
+        logger.error("Failed to load general configuration. Please check 'config.yaml'.")
+        sys.exit(1)
+    
+    # Determine host and port with priority: CLI args > config.yaml > defaults
+    default_host = "127.0.0.1"
+    default_port = 6999
+    
+    # Get values from config if present
+    api_server_config = general_config.get('api_server', {})
+    config_host = api_server_config.get('host', default_host)
+    config_port = api_server_config.get('port', default_port)
+    
+    # Apply priority: CLI args override config, config overrides defaults
+    final_host = args.host if args.host is not None else config_host
+    final_port = args.port if args.port is not None else config_port
+    
+    logger.info(f"Starting Smutscrape in API server mode on {final_host}:{final_port}")
+    run_api_server(host=final_host, port=final_port)
+
+
+if __name__ == "__main__":
+    main() 

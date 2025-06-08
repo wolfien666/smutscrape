@@ -30,7 +30,7 @@ from loguru import logger
 # These will be imported from the main scrape module
 from scrape import (
     load_configuration,
-    load_state,
+    get_session_manager,
     is_url,
     process_url,
     process_fallback_download,
@@ -267,7 +267,7 @@ def run_scrape_command(command: str, overwrite: bool = False, re_nfo: bool = Fal
             scrape.download_manager = DownloadManager(general_config)
         
         # Load state
-        state_set = load_state()
+        state_set = get_session_manager().processed_urls
         
         # Process the command
         if len(command_parts) == 1:

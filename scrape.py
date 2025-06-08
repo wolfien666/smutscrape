@@ -32,21 +32,25 @@ from termcolor import colored
 from rich.table import Table
 from rich.style import Style
 
-# FastAPI imports moved to api.py
+from config import ConfigManager
+from smutscrape.session import SessionManager, is_url_processed
+from smutscrape.storage import StorageManager, get_storage_manager
+from smutscrape.downloaders import DownloadManager, download_with_ytdlp_fallback
+from smutscrape.sites import SiteManager, SiteConfiguration
+from smutscrape.metadata import finalize_metadata, generate_nfo
+from smutscrape.utilities import (
+    get_terminal_width, render_ascii, display_options, 
+    display_global_examples, display_usage, handle_vpn, console,
+    is_url, process_title, custom_title_case, construct_filename,
+    should_ignore_video, parse_url_pattern, pattern_to_regex
+)
+
 FASTAPI_AVAILABLE = True
 try:
-	from api import run_api_server, FASTAPI_AVAILABLE as API_AVAILABLE
+	from smutscrape.api import run_api_server, FASTAPI_AVAILABLE as API_AVAILABLE
 	FASTAPI_AVAILABLE = API_AVAILABLE
 except ImportError:
 	FASTAPI_AVAILABLE = False
-
-# Download functionality moved to downloaders.py
-from downloaders import DownloadManager, download_with_ytdlp_fallback
-from sites import SiteManager, SiteConfiguration
-from utilities import (
-    get_terminal_width, render_ascii, display_options, 
-    display_global_examples, display_usage, handle_vpn, console
-)
 
 SELENIUM_AVAILABLE = True
 try:
@@ -63,156 +67,42 @@ SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 SITE_DIR = os.path.join(SCRIPT_DIR, 'sites')
 STATE_FILE = os.path.join(SCRIPT_DIR, '.state')
 
-last_vpn_action_time = 0
-session = requests.Session()
+# Global manager instances
+config_manager = None
+session_manager = None
+requests_session = requests.Session()
 
-# Initialize download manager (will be properly configured when general_config is loaded)
-download_manager = None
+def get_config_manager():
+	"""Get or create the configuration manager instance."""
+	global config_manager
+	if config_manager is None:
+		config_manager = ConfigManager(SCRIPT_DIR)
+	return config_manager
 
-# Initialize site manager (will be created when needed)
-site_manager = None
+def get_session_manager():
+	"""Get or create the session manager instance."""
+	global session_manager
+	if session_manager is None:
+		session_manager = SessionManager(STATE_FILE)
+	return session_manager
 
+# Backward compatibility functions
 def get_site_manager():
-	"""Get or create the site manager instance."""
-	global site_manager
-	if site_manager is None:
-		site_manager = SiteManager(SITE_DIR)
-	return site_manager
+	"""Get the site manager instance via config manager."""
+	return get_config_manager().site_manager
 		
-class ProgressFile:
-	"""A file-like wrapper to track progress during SMB upload."""
-	def __init__(self, file_obj, progress_bar):
-		self.file_obj = file_obj
-		self.pbar = progress_bar
-		self.total_size = os.fstat(file_obj.fileno()).st_size
-	
-	def read(self, size=-1):
-		data = self.file_obj.read(size)
-		if data:
-			self.pbar.update(len(data))
-		return data
-	
-	def __getattr__(self, name):
-		return getattr(self.file_obj, name)
 
-def load_state():
-	"""Load processed video URLs from .state file into a set."""
-	if not os.path.exists(STATE_FILE):
-		return set()
-	try:
-		with open(STATE_FILE, 'r', encoding='utf-8') as f:
-			return set(line.strip() for line in f if line.strip())
-	except Exception as e:
-		logger.error(f"Failed to load state file '{STATE_FILE}': {e}")
-		return set()
-
-def save_state(url):
-	"""Append a single URL to the end of the .state file."""
-	try:
-		with open(STATE_FILE, 'a', encoding='utf-8') as f:
-			f.write(f"{url}\n")
-		logger.info(f"Appended URL to state: {url}")
-	except Exception as e:
-		logger.error(f"Failed to append to state file '{STATE_FILE}': {e}")
-		
-def is_url(string):
-	"""Check if a string is a URL by parsing it with urlparse."""
-	parsed = urlparse(string)
-	# A string is considered a URL if it has a netloc (domain) or a scheme
-	return bool(parsed.netloc) or bool(parsed.scheme)
-
-def is_url_processed(url, state_set):
-	"""Check if a URL is in the state set."""
-	return url in state_set
-
+# Backward compatibility configuration function - now uses config manager
 def load_configuration(config_type='general', identifier=None):
 	"""Load general or site-specific configuration based on identifier type."""
 	if config_type == 'general':
-		config_path = os.path.join(SCRIPT_DIR, 'config.yaml')
-		try:
-			with open(config_path, 'r') as file:
-				return yaml.safe_load(file)
-		except Exception as e:
-			logger.error(f"Failed to load general config from '{config_path}': {e}")
-			raise
-	
+		return get_config_manager().general_config
 	elif config_type == 'site':
 		if not identifier:
 			raise ValueError("Site identifier required for site config loading")
-		
-		# Use the site manager to get site configuration
-		site_config = get_site_manager().get_site_by_identifier(identifier)
-		if site_config:
-			logger.debug(f"Loaded site config for '{identifier}' using SiteManager")
-			# Return the raw config dict for backward compatibility
-			return site_config.to_dict()
-		else:
-			logger.debug(f"No site config matched for identifier '{identifier}'")
-			return None
-	
-	raise ValueError(f"Unknown config type: {config_type}")
-	
-def process_title(title, invalid_chars):
-	logger.debug(f"Processing {title} for invalid chars...")
-	for char in invalid_chars:
-		title = title.replace(char, "")
-	logger.debug(f"Processed title: {title}")
-	return title
-
-def construct_filename(title, site_config, general_config):
-    
-    prefix = site_config.get('name_prefix', '')
-    suffix = site_config.get('name_suffix', '')
-    extension = general_config['file_naming']['extension']
-    invalid_chars = general_config['file_naming']['invalid_chars']
-    max_chars = general_config['file_naming'].get('max_chars', 255)  # Default to 255 if not specified
-    
-    # Get unique name settings - use boolean values to handle YAML's various ways of representing true/false
-    unique_name = bool(site_config.get("unique_name", False))
-    make_unique = bool(general_config['file_naming'].get('make_unique', False))
-    
-    # Process title by removing invalid characters
-    processed_title = process_title(title, invalid_chars)
-    
-    # Generate a unique ID if needed (6 random characters)
-    unique_id = '_' + ''.join(random.choices(string.ascii_lowercase + string.ascii_uppercase + string.digits, k=6)) if unique_name or make_unique else ''
-    
-    # Calculate available length for the title, accounting for the unique ID if present
-    fixed_length = len(prefix) + len(suffix) + len(extension) + len(unique_id)
-    max_title_chars = min(max_chars, 255) - fixed_length  # Hard cap at 255 chars total
-    
-    if max_title_chars <= 0:
-        logger.warning(f"Fixed filename parts ({fixed_length} chars) exceed max_chars ({max_chars}); truncating to fit.")
-        max_title_chars = max(1, 255 - fixed_length)  # Ensure at least 1 char for title if possible
-    
-    # Truncate title if necessary
-    if len(processed_title) > max_title_chars:
-        processed_title = processed_title[:max_title_chars].rstrip()
-        logger.debug(f"Truncated title to {max_title_chars} chars: {processed_title}")
-    
-    # Construct final filename with unique ID before extension
-    if unique_id:
-        filename = f"{prefix}{processed_title}{suffix}{unique_id}{extension}"
-    else:
-        filename = f"{prefix}{processed_title}{suffix}{extension}"
-    
-    # Double-check byte length (Linux limit is 255 bytes, not chars)
-    while len(filename.encode('utf-8')) > 255:
-        excess = len(filename.encode('utf-8')) - 255
-        trim_chars = excess // 4 + 1  # Rough estimate for UTF-8; adjust conservatively
-        processed_title = processed_title[:-trim_chars].rstrip()
-        
-        # Reconstruct the filename with the trimmed title
-        if unique_id:
-            filename = f"{prefix}{processed_title}{suffix}{unique_id}{extension}"
-        else:
-            filename = f"{prefix}{processed_title}{suffix}{extension}"
-            
-        logger.debug(f"Filename exceeded 255 bytes; trimmed to: {filename}")
-
-    logger.debug(f"Generated filename: {filename}")
-    return filename
-
+		return get_config_manager().get_site_config(identifier)
+	else:
+		raise ValueError(f"Unknown config type: {config_type}")
 	
 def construct_url(base_url, pattern, site_config, mode=None, **kwargs):
 	mode_specific_rules = {}
@@ -295,75 +185,10 @@ def construct_url(base_url, pattern, site_config, mode=None, **kwargs):
 	return full_url
 
 
+# Backward compatibility selenium function - now uses config manager
 def get_selenium_driver(general_config, force_new=False):
-	selenium_config = general_config.get('selenium', {})
-	chromedriver_path = selenium_config.get('chromedriver_path')  # None if not specified
-	
-	create_new = force_new or 'selenium_driver' not in general_config
-	if not create_new:
-		try:
-			driver = general_config['selenium_driver']
-			driver.current_url  # Test if the driver is still valid
-		except Exception as e:
-			logger.warning(f"Existing Selenium driver invalid: {e}")
-			create_new = True
-	
-	if create_new:
-		if 'selenium_driver' in general_config:
-			try:
-				general_config['selenium_driver'].quit()
-			except:
-				pass
-		
-		chrome_options = Options()
-		chrome_options.add_argument("--headless")
-		chrome_options.add_argument("--no-sandbox")
-		chrome_options.add_argument("--disable-dev-shm-usage")
-		chrome_options.add_argument("--disable-gpu")
-		chrome_options.add_argument("--window-size=1920,1080")
-		chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-		chrome_options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
-		
-		chrome_binary = selenium_config.get('chrome_binary')
-		if chrome_binary:
-			chrome_options.binary_location = chrome_binary
-			logger.debug(f"Set Chrome binary location to: {chrome_binary}")
-		
-		try:
-			if chromedriver_path:
-				# Use user-specified ChromeDriver path
-				logger.debug(f"Using user-specified ChromeDriver at: {chromedriver_path}")
-				service = Service(executable_path=chromedriver_path)
-			else:
-				# Fallback to webdriver_manager
-				logger.debug("No chromedriver_path specified; using webdriver_manager to fetch ChromeDriver")
-				service = Service(ChromeDriverManager().install())
-				logger.debug(f"Using ChromeDriver at: {service.path}")
-			
-			driver = webdriver.Chrome(service=service, options=chrome_options)
-			logger.debug(f"Initialized Selenium driver with Chrome version: {driver.capabilities['browserVersion']}")
-		except Exception as e:
-			logger.error(f"Failed to initialize Selenium driver: {e}")
-			return None
-		
-		driver.execute_script("""
-			(function() {
-				let open = XMLHttpRequest.prototype.open;
-				XMLHttpRequest.prototype.open = function(method, url) {
-					if (url.includes(".m3u8")) {
-						console.log("🔥 Found M3U8 via XHR:", url);
-					}
-					return open.apply(this, arguments);
-				};
-			})();
-		""")
-		general_config['selenium_driver'] = driver
-	
-	# Store User-Agent for later use
-	user_agent = driver.execute_script("return navigator.userAgent;")
-	general_config['selenium_user_agent'] = user_agent
-	logger.debug(f"Selenium User-Agent: {user_agent}")
-	return general_config['selenium_driver']
+	"""Get selenium driver via config manager."""
+	return get_config_manager().get_selenium_driver(force_new=force_new)
 
 
 def process_url(url, site_config, general_config, overwrite, re_nfo, start_page, apply_state=False, state_set=None):
@@ -498,7 +323,7 @@ def process_url(url, site_config, general_config, overwrite, re_nfo, start_page,
 		
 		if not success:
 			logger.error(f"Failed to process URL '{url}' with any mode.")
-			process_fallback_download(url, general_config, overwrite)
+			get_config_manager().download_manager.process_fallback_download(url, overwrite)
 	
 	return success
 		
@@ -703,12 +528,13 @@ def process_rss_feed(url, site_config, general_config, overwrite=False, headers=
 	return success
 
 def process_video_page(url, site_config, general_config, overwrite=False, headers=None, new_nfo=False, do_not_ignore=False, apply_state=False, state_set=None):
-	global last_vpn_action_time
+	# VPN handling via session manager
+	session_mgr = get_session_manager()
 	vpn_config = general_config.get('vpn', {})
 	if vpn_config.get('enabled', False):
-		current_time = time.time()
-		if current_time - last_vpn_action_time > vpn_config.get('new_node_time', 300):
-			last_vpn_action_time = handle_vpn(general_config, 'new_node') or last_vpn_action_time
+		if session_mgr.should_refresh_vpn(vpn_config.get('new_node_time', 300)):
+			new_time = handle_vpn(general_config, 'new_node')
+			session_mgr.update_vpn_time(new_time)
 	
 	logger.info(f"Processing video page: {url}")
 	use_selenium = site_config.get('use_selenium', False)
@@ -734,12 +560,12 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
 					logger.info(f"Found iframe: {iframe_url}")
 					driver.get(iframe_url)
 					time.sleep(random.uniform(1, 2))
-					m3u8_url, cookies = extract_m3u8_urls(driver, iframe_url, site_config)
+					m3u8_url, cookies = get_config_manager().download_manager.extract_m3u8_urls(driver, iframe_url, site_config)
 					if m3u8_url:
 						video_url = m3u8_url
 						headers = headers or general_config.get('headers', {}).copy()
 						headers.update({"Cookie": cookies, "Referer": iframe_url, 
-										"User-Agent": general_config.get('selenium_user_agent', random.choice(general_config['user_agents']))})
+										"User-Agent": get_config_manager().selenium_user_agent or random.choice(general_config['user_agents'])})
 			except Exception as e:
 				logger.warning(f"Iframe error: {e}")
 		soup = fetch_page(original_url, general_config['user_agents'], headers or {}, use_selenium, driver)
@@ -767,14 +593,14 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
 			except Exception as e:
 				logger.warning(f"Iframe error during MP4 mode: {e}")
 
-		mp4_found_url, cookies = extract_mp4_urls(driver, page_to_scan, site_config)
+		mp4_found_url, cookies = get_config_manager().download_manager.extract_mp4_urls(driver, page_to_scan, site_config)
 		if mp4_found_url:
 			video_url = mp4_found_url
 			site_config['download'] = {'method': 'requests'} # Override to requests for MP4
 			logger.info(f"MP4 detected: {video_url}, download method set to 'requests'")
 			headers = headers or general_config.get('headers', {}).copy()
 			headers.update({"Cookie": cookies, "Referer": page_to_scan,
-							"User-Agent": general_config.get('selenium_user_agent', random.choice(general_config['user_agents']))})
+							"User-Agent": get_config_manager().selenium_user_agent or random.choice(general_config['user_agents'])})
 		soup = fetch_page(original_url, general_config['user_agents'], headers or {}, use_selenium, driver)
 		if soup:
 			raw_data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config)
@@ -803,23 +629,23 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
 				logger.warning(f"Iframe error during Detect mode: {e}")
 		
 		# Try MP4 first
-		mp4_found_url, mp4_cookies = extract_mp4_urls(driver, page_to_scan, site_config)
+		mp4_found_url, mp4_cookies = get_config_manager().download_manager.extract_mp4_urls(driver, page_to_scan, site_config)
 		if mp4_found_url:
 			video_url = mp4_found_url
 			site_config['download'] = {'method': 'requests'}
 			logger.info(f"Detect mode: MP4 found: {video_url}, download method 'requests'")
 			scan_headers.update({"Cookie": mp4_cookies, "Referer": page_to_scan,
-								 "User-Agent": general_config.get('selenium_user_agent', random.choice(general_config['user_agents']))})
+								 "User-Agent": get_config_manager().selenium_user_agent or random.choice(general_config['user_agents'])})
 		else:
 			logger.info("Detect mode: MP4 not found, trying M3U8.")
 			# Try M3U8 second
-			m3u8_found_url, m3u8_cookies = extract_m3u8_urls(driver, page_to_scan, site_config)
+			m3u8_found_url, m3u8_cookies = get_config_manager().download_manager.extract_m3u8_urls(driver, page_to_scan, site_config)
 			if m3u8_found_url:
 				video_url = m3u8_found_url
 				site_config['download'] = {'method': 'ffmpeg'} # Ensure ffmpeg for m3u8
 				logger.info(f"Detect mode: M3U8 found: {video_url}, download method 'ffmpeg'")
 				scan_headers.update({"Cookie": m3u8_cookies, "Referer": page_to_scan,
-									 "User-Agent": general_config.get('selenium_user_agent', random.choice(general_config['user_agents']))})
+									 "User-Agent": get_config_manager().selenium_user_agent or random.choice(general_config['user_agents'])})
 			else:
 				logger.warning("Detect mode: Neither MP4 nor M3U8 found via network sniffing.")
 		
@@ -870,20 +696,20 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
 	state_updated = False
 	if destination_config['type'] == 'smb':
 		smb_path = os.path.join(destination_config['path'], file_name)
-		if not overwrite and file_exists_on_smb(destination_config, smb_path):
+		if not overwrite and get_storage_manager().file_exists_on_smb(destination_config, smb_path):
 			logger.info(f"File '{smb_path}' exists on SMB share. Skipping download.")
 			if apply_state and not is_url_processed(original_url, state_set):
 				state_set.add(original_url)
-				save_state(original_url)
+				get_session_manager().save_state(original_url)
 				logger.info(f"Retroactively added {original_url} to state due to existing file and --applystate")
 				state_updated = True
 			if general_config.get('make_nfo', False) and has_metadata_selectors(site_config):
 				smb_nfo_path = os.path.join(destination_config['path'], f"{file_name.rsplit('.', 1)[0]}.nfo")
-				if not (new_nfo or file_exists_on_smb(destination_config, smb_nfo_path)):
+				if not (new_nfo or get_storage_manager().file_exists_on_smb(destination_config, smb_nfo_path)):
 					temp_nfo_path = os.path.join(tempfile.gettempdir(), 'smutscrape', f"{file_name.rsplit('.', 1)[0]}.nfo")
 					os.makedirs(os.path.dirname(temp_nfo_path), exist_ok=True)
 					generate_nfo(temp_nfo_path, final_metadata, True)
-					upload_to_smb(temp_nfo_path, smb_nfo_path, destination_config, overwrite)
+					get_storage_manager().upload_to_smb(temp_nfo_path, smb_nfo_path, destination_config, overwrite)
 					os.remove(temp_nfo_path)
 			if driver:
 				driver.quit()
@@ -901,7 +727,7 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
 	
 	# Check for existing complete file in temp dir
 	if destination_config['type'] == 'smb' and not overwrite and os.path.exists(final_destination_path):
-		video_info = download_manager.get_video_metadata(final_destination_path)
+		video_info = get_config_manager().download_manager.get_video_metadata(final_destination_path)
 		if video_info:
 			logger.info(f"Valid complete file '{final_destination_path}' exists in temp dir. Skipping download.")
 			success = True
@@ -916,12 +742,12 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
 		generate_nfo(final_destination_path, final_metadata, overwrite or new_nfo)
 	if success and destination_config['type'] == 'smb':
 		logger.debug(f"Successful video download, now managing file.")
-		manage_file(final_destination_path, destination_config, overwrite, video_url=original_url, state_set=state_set)
+		get_storage_manager().manage_file(final_destination_path, destination_config, overwrite, video_url=original_url, state_set=state_set)
 	
 	if success and not is_url_processed(original_url, state_set):
 		logger.debug(f"Adding {original_url} to state")
 		state_set.add(original_url)
-		save_state(original_url)
+		get_session_manager().save_state(original_url)
 	
 	if driver:
 		driver.quit()
@@ -959,114 +785,7 @@ def pierce_iframe(driver, url, site_config):
 		logger.warning(f"No iframe found or error piercing: {e}")
 		return url
 
-def extract_m3u8_urls(driver, url, site_config):
-	logger.debug(f"Extracting M3U8 URLs from: {url}")
-	# URL is already loaded (iframe or original) by process_video_page
-	driver.get(url)  # Redundant but ensures we're on the right page
-	
-	driver.execute_script("""
-		(function() {
-			let open = XMLHttpRequest.prototype.open;
-			XMLHttpRequest.prototype.open = function(method, url) {
-				if (url.includes(".m3u8")) {
-					console.log("🔥 Found M3U8 via XHR:", url);
-				}
-				return open.apply(this, arguments);
-			};
-		})();
-	""")
 
-	time.sleep(5)
-	
-	logs = driver.get_log("performance")
-	m3u8_urls = []
-	logger.debug(f"Analyzing {len(logs)} performance logs")
-	for log in logs:
-		try:
-			message = json.loads(log["message"])["message"]
-			if "Network.responseReceived" in message["method"]:
-				request_url = message["params"]["response"]["url"]
-				if ".m3u8" in request_url:
-					m3u8_urls.append(request_url)
-					logger.debug(f"Found M3U8 URL: {request_url}")
-		except KeyError:
-			continue
-	
-	if not m3u8_urls:
-		logger.warning("No M3U8 URLs detected in network traffic")
-		return None, None
-	
-	best_m3u8 = sorted(m3u8_urls, key=lambda u: "1920x1080" in u, reverse=True)[0]
-	cookies_list = driver.get_cookies()
-	cookies_str = "; ".join([f"{c['name']}={c['value']}" for c in cookies_list])
-	logger.debug(f"Cookies after load: {cookies_str if cookies_str else 'None'}")
-	logger.info(f"Selected best M3U8: {best_m3u8}")
-	return best_m3u8, cookies_str
-
-def extract_mp4_urls(driver, url, site_config):
-	logger.debug(f"Extracting MP4 URLs from: {url}")
-	driver.get(url)
-
-	driver.execute_script("""
-		(function() {
-			let open = XMLHttpRequest.prototype.open;
-			XMLHttpRequest.prototype.open = function(method, url) {
-				if (url.includes(".mp4")) {
-					console.log("🔥 Found MP4 via XHR:", url);
-				}
-				return open.apply(this, arguments);
-			};
-		})();
-	""")
-
-	time.sleep(5) # Wait for network requests
-
-	logs = driver.get_log("performance")
-	mp4_urls = []
-	logger.debug(f"Analyzing {len(logs)} performance logs for MP4s")
-	for log in logs:
-		try:
-			message = json.loads(log["message"])["message"]
-			if "Network.responseReceived" in message["method"]:
-				request_url = message["params"]["response"]["url"]
-				if ".mp4" in request_url:
-					# Basic quality check - prefer URLs with typical video resolution patterns
-					if re.search(r'(240|360|480|720|1080|1440|2160)p', request_url.lower()) or \
-					   re.search(r'(\d{3,4}x\d{3,4})', request_url.lower()):
-						mp4_urls.append(request_url)
-						logger.debug(f"Found MP4 URL (likely video): {request_url}")
-					else:
-						logger.debug(f"Found MP4 URL (potential non-video, logging only): {request_url}")
-
-		except KeyError:
-			continue
-	
-	if not mp4_urls:
-		logger.warning("No MP4 URLs detected in network traffic")
-		return None, None
-
-	# Prioritize higher resolution if discernible from URL, very basic sort
-	# This is a simple heuristic and might need refinement based on common URL patterns
-	def quality_key(url_str):
-		resolutions = {"2160p": 6, "1440p": 5, "1080p": 4, "720p": 3, "480p": 2, "360p": 1, "240p": 0}
-		for res, score in resolutions.items():
-			if res in url_str:
-				return score
-		# Try to extract resolution like 1920x1080
-		match = re.search(r'(\d+)x(\d+)', url_str)
-		if match:
-			try:
-				return int(match.group(2)) # Sort by height
-			except ValueError:
-				pass
-		return -1 # Lowest priority if no clear resolution
-
-	best_mp4 = sorted(mp4_urls, key=quality_key, reverse=True)[0]
-	cookies_list = driver.get_cookies()
-	cookies_str = "; ".join([f"{c['name']}={c['value']}" for c in cookies_list])
-	logger.debug(f"Cookies after MP4 detection: {cookies_str if cookies_str else 'None'}")
-	logger.info(f"Selected best MP4: {best_mp4}")
-	return best_mp4, cookies_str
 
 def fetch_page(url, user_agents, headers, use_selenium=False, driver=None, retry_count=0):
 	if not use_selenium:
@@ -1237,224 +956,11 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 	return data
 
 
-	
-def should_ignore_video(data, ignored_terms):
-	if not ignored_terms:
-		return False
-	ignored_terms_lower = [term.lower() for term in ignored_terms]
-	ignored_terms_encoded = [term.lower().replace(' ', '-') for term in ignored_terms]
-	
-	# Compile regex patterns with word boundaries for efficiency
-	term_patterns = [re.compile(r'\b' + re.escape(term) + r'\b') for term in ignored_terms_lower]
-	encoded_patterns = [re.compile(r'\b' + re.escape(encoded) + r'\b') for encoded in ignored_terms_encoded]
-	
-	for field, value in data.items():
-		if isinstance(value, str):
-			value_lower = value.lower()
-			for term, term_pattern, encoded_pattern in zip(ignored_terms_lower, term_patterns, encoded_patterns):
-				if term_pattern.search(value_lower) or encoded_pattern.search(value_lower):
-					logger.warning(f"Ignoring video due to term '{term}' in {field}: '{value}'")
-					return True
-		elif isinstance(value, list):
-			for item in value:
-				item_lower = item.lower()
-				for term, term_pattern, encoded_pattern in zip(ignored_terms_lower, term_patterns, encoded_patterns):
-					if term_pattern.search(item_lower) or encoded_pattern.search(item_lower):
-						logger.warning(f"Ignoring video due to term '{term}' in {field}: '{item}'")
-						return True
-	return False
-
-def apply_permissions(file_path, destination_config):
-	if 'permissions' not in destination_config:
-		return
-	permissions = destination_config['permissions']
-	try:
-		uid = pwd.getpwnam(permissions['owner']).pw_uid if 'owner' in permissions and permissions['owner'].isalpha() else int(permissions.get('uid', -1))
-		gid = grp.getgrnam(permissions['group']).gr_gid if 'group' in permissions and permissions['group'].isalpha() else int(permissions.get('gid', -1))
-		if uid != -1 or gid != -1:
-			current_uid = os.stat(file_path).st_uid if uid == -1 else uid
-			current_gid = os.stat(file_path).st_gid if gid == -1 else gid
-			os.chown(file_path, current_uid, current_gid)
-		if 'mode' in permissions:
-			os.chmod(file_path, int(permissions['mode'], 8))
-	except Exception as e:
-		logger.error(f"Failed to apply permissions to {file_path}: {e}")
-
-
-
-def upload_to_smb(local_path, smb_path, destination_config, overwrite=False):
-	logger.debug(f"Connecting to SMB for {os.path.basename(local_path)} -> {smb_path}")
-	conn = SMBConnection(destination_config['username'], destination_config['password'], "videoscraper", destination_config['server'])
-	connected = False
-	try:
-		connected = conn.connect(destination_config['server'], 445)
-		if not connected:
-			logger.error(f"Failed to connect to SMB share for {smb_path}.")
-			return False
-
-		if not overwrite and file_exists_on_smb(destination_config, smb_path):
-			logger.info(f"File '{os.path.basename(smb_path)}' exists on SMB share '{destination_config['share']}' at '{smb_path}'. Skipping upload.")
-			return True
-		
-		file_size = os.path.getsize(local_path)
-		with open(local_path, 'rb') as file:
-			with tqdm(total=file_size, unit='B', unit_scale=True, desc=f"Uploading {os.path.basename(local_path)} to SMB") as pbar:
-				progress_file = ProgressFile(file, pbar)
-				conn.storeFile(destination_config['share'], smb_path, progress_file)
-		logger.debug(f"Successfully stored file on SMB: {smb_path}")
-		return True
-
-	except Exception as e:
-		logger.error(f"Error during SMB operation for {os.path.basename(local_path)} to {smb_path}: {e}")
-		return False
-	finally:
-		if connected and conn.sock: # Only close if connection was successful and socket exists
-			conn.close()
-			logger.debug(f"SMB connection closed for {smb_path}")
-
-def file_exists_on_smb(destination_config, path):
-    # logger.debug("Connecting to SMB...")
-    conn = SMBConnection(destination_config['username'], destination_config['password'], "videoscraper", destination_config['server'])
-    try:
-        if not conn.connect(destination_config['server'], 445):
-            raise ConnectionError(f"Failed to connect to SMB server {destination_config['server']}")
-            
-        logger.debug(f"Successfully connected to SMB")
-        try:
-            conn.getAttributes(destination_config['share'], path)
-            return True
-        except:
-            return False
-    finally:
-        conn.close()
-
-
-
-
-def process_fallback_download(url, general_config, overwrite=False):
-	# Ensure download_manager is initialized
-	global download_manager
-	if download_manager is None:
-		download_manager = DownloadManager(general_config)
-		
-	destination_config = general_config['download_destinations'][0]
-	temp_dir = os.path.join(tempfile.gettempdir(), f"download_{uuid.uuid4().hex[:8]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
-	os.makedirs(temp_dir, exist_ok=True)
-	logger.info(f"Fallback download for: {url}")
-	success, downloaded_files = download_with_ytdlp_fallback(url, temp_dir, general_config)
-	
-	if not success or not downloaded_files:
-		logger.warning(f"yt-dlp fallback failed for {url}. Attempting direct detection fallback.")
-		if _fallback_detect_and_download(url, general_config, overwrite):
-			logger.info(f"Direct detection fallback succeeded for {url}")
-			# If _fallback_detect_and_download created the temp_dir or used it, 
-			# it should clean up its own specific temp files.
-			# We only try to remove temp_dir if ytdlp might have created it and left it empty.
-			if os.path.exists(temp_dir) and not os.listdir(temp_dir):
-				shutil.rmtree(temp_dir, ignore_errors=True)
-			return True
-		else:
-			logger.error(f"Both yt-dlp and direct detection fallbacks failed for {url}.")
-			shutil.rmtree(temp_dir, ignore_errors=True) # Clean up ytdlp's temp_dir if both failed
-			return False
-	
-	# This part below only runs if yt-dlp succeeded initially
-	logger.info(f"yt-dlp fallback succeeded for {url}, processing {len(downloaded_files)} files.")
-	for downloaded_file in downloaded_files:
-		source_path = os.path.join(temp_dir, downloaded_file)
-		if destination_config['type'] == 'smb':
-			smb_destination_path = os.path.join(destination_config['path'], downloaded_file)
-			if not overwrite and file_exists_on_smb(destination_config, smb_destination_path):
-				logger.info(f"File '{downloaded_file}' exists on SMB. Skipping.")
-				continue
-			upload_to_smb(source_path, smb_destination_path, destination_config)
-		elif destination_config['type'] == 'local':
-			final_path = os.path.join(destination_config['path'], downloaded_file)
-			if not overwrite and os.path.exists(final_path):
-				logger.info(f"File '{downloaded_file}' exists locally. Skipping.")
-				continue
-			os.makedirs(os.path.dirname(final_path), exist_ok=True)
-			shutil.move(source_path, final_path)
-			apply_permissions(final_path, destination_config)
-	shutil.rmtree(temp_dir, ignore_errors=True)
-	return True
 
 # Moved to downloaders.py - imported at top of file
 
 
-def parse_url_pattern(pattern):
-	components = []
-	current_segment = ""
-	
-	i = 0
-	while i < len(pattern):
-		if pattern[i] == "{":
-			if current_segment:
-				components.append({"type": "static", "value": current_segment})
-				current_segment = ""
-			j = i + 1
-			while j < len(pattern) and pattern[j] != "}":
-				j += 1
-			if j < len(pattern):
-				placeholder = pattern[i+1:j]
-				components.append({"type": "wildcard", "name": placeholder, "numeric": placeholder == "page"})
-				i = j + 1
-			else:
-				raise ValueError(f"Unclosed placeholder in pattern: {pattern}")
-		else:
-			current_segment += pattern[i]
-			i += 1
-	
-	if current_segment:
-		components.append({"type": "static", "value": current_segment})
-	
-	logger.debug(f"Parsed pattern '{pattern}' into components: {components}")
-	return components
-
-
-def pattern_to_regex(pattern):
-	regex = ""
-	static_count = 0
-	static_length = 0
-	in_wildcard = False
-	current_static = ""
-	numeric_wildcards = {"page"}
-	
-	for char in pattern.rstrip("/"):
-		if char == "{":
-			if current_static:
-				regex += re.escape(current_static)
-				static_count += 1
-				static_length += len(current_static)
-				current_static = ""
-			in_wildcard = True
-			wildcard_name = ""
-		elif char == "}":
-			if in_wildcard:
-				if wildcard_name in numeric_wildcards:
-					regex += f"(?P<{wildcard_name}>\\d+)"
-				else:
-					regex += f"(?P<{wildcard_name}>[^/?&#]+)"
-				in_wildcard = False
-			else:
-				current_static += char
-		elif in_wildcard:
-			wildcard_name += char
-		else:
-			current_static += char
-	
-	if current_static:
-		regex += re.escape(current_static)
-		static_count += 1
-		static_length += len(current_static)
-	
-	if "?" not in pattern and "&" not in pattern:
-		regex = f"^{regex}$"
-	else:
-		regex = f"^{regex}(?:$|&.*)"
-	
-	# logger.debug(f"Converted pattern '{pattern}' to regex: '{regex}', static_count={static_count}, static_length={static_length}")
-	return re.compile(regex, re.IGNORECASE), static_count, static_length  # Add IGNORECASE
+# parse_url_pattern and pattern_to_regex moved to utilities.py
 
 def match_url_to_mode(url, site_config):
 	parsed_url = urlparse(url)
@@ -1542,140 +1048,13 @@ def has_metadata_selectors(site_config, return_fields=False):
 		return sorted(metadata_fields) if metadata_fields else []
 	return bool(metadata_fields)
 
-
-def custom_title_case(text, uppercase_list=None, preserve_mixed_case=False):
-	"""Apply custom title casing with exact match overrides from uppercase_list."""
-	if not text:
-		return text
-	uppercase_list = uppercase_list or []
-	# If preserving mixed case (e.g., "McFly") and not in uppercase_list, return as-is
-	if preserve_mixed_case and re.search(r'[a-z][A-Z]|[A-Z][a-z]', text) and text.lower() not in {u.lower() for u in uppercase_list}:
-		return text
-	
-	# Build a case-insensitive mapping of overrides to their exact form
-	override_map = {term.lower(): term for term in uppercase_list}
-	
-	# Split into words
-	words = text.split()
-	if not words:
-		# Single word: check for override match
-		text_lower = text.lower()
-		return override_map.get(text_lower, text.title())
-	
-	# Process each word
-	result = []
-	for word in words:
-		word_lower = word.lower()
-		if word_lower in override_map:
-			result.append(override_map[word_lower])  # Use exact form (e.g., "BrutalX")
-		else:
-			result.append(word.title() if not preserve_mixed_case or len(words) > 1 else word)
-	
-	final_text = ' '.join(result)
-	return final_text
-	
-def finalize_metadata(metadata, general_config):
-    """Finalize metadata: deduplicate across fields, apply capitalization rules."""
-    case_overrides = general_config.get('case_overrides', [])
-    tag_case_overrides = general_config.get('tag_case_overrides', [])
-    tag_overrides = case_overrides + tag_case_overrides  # Combine for tags
-    
-    final_metadata = metadata.copy()
-    
-    # Normalize fields to lists and strip '#'
-    actors = [actor.lstrip('#') for actor in final_metadata.get('actors', []) if actor and actor.strip() != "and"]
-    studios = [studio.lstrip('#') for studio in final_metadata.get('studios', []) if studio and studio.strip() != "and"]
-    tags = [tag.lstrip('#') for tag in final_metadata.get('tags', []) if tag and tag.strip() != "and"]
-    
-    # Deduplicate: Actors > Studios > Tags
-    actors_lower = set(a.lower() for a in actors)
-    studios = [s for s in studios if s.lower() not in actors_lower]
-    studios_lower = set(s.lower() for s in studios)
-    tags = [t for t in tags if t.lower() not in actors_lower and t.lower() not in studios_lower]
-    
-    # Apply capitalization
-    final_metadata['actors'] = [custom_title_case(a, case_overrides, preserve_mixed_case=True) for a in actors]
-    final_metadata['studios'] = [custom_title_case(s, case_overrides, preserve_mixed_case=True) for s in studios]
-    final_metadata['tags'] = [custom_title_case(t, tag_overrides) for t in tags]
-    if 'title' in final_metadata and final_metadata['title']:
-        final_metadata['title'] = custom_title_case(final_metadata['title'].strip(), case_overrides)
-    if 'studio' in final_metadata and final_metadata['studio']:
-        final_metadata['studio'] = custom_title_case(final_metadata['studio'].lstrip('#'), case_overrides, preserve_mixed_case=True)
-    
-    # Log the final values for each field in the metadata
-    for field in final_metadata:
-        logger.debug(f"Final value for '{field}': {final_metadata[field]}")
-    
-    return final_metadata
-
-
-
-
-def generate_nfo(destination_path, metadata, overwrite=False):
-	"""Generate an NFO file alongside the video.
-
-	Args:
-		destination_path (str): Path to the video file.
-		metadata (dict): Metadata to include in the NFO file.
-		overwrite (bool): If True, overwrite existing NFO file. Defaults to False.
-
-	Returns:
-		bool: True if NFO generation succeeded, False otherwise.
-	"""
-	# Compute NFO file path
-	nfo_path = f"{destination_path.rsplit('.', 1)[0]}.nfo"
-
-	# Check if NFO exists and respect overwrite flag
-	if os.path.exists(nfo_path) and not overwrite:
-		logger.debug(f"NFO exists at {nfo_path}. Skipping generation.")
-		return True
-
-	try:
-		# Write the NFO file
-		with open(nfo_path, 'w', encoding='utf-8') as f:
-			f.write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n')
-			f.write('<movie>\n')
-			if 'title' in metadata and metadata['title']:
-				f.write(f"  <title>{metadata['title']}</title>\n")
-			if 'url' in metadata and metadata['url']:
-				f.write(f"  <url>{metadata['url']}</url>\n")
-			if 'date' in metadata and metadata['date']:
-				f.write(f"  <premiered>{metadata['date']}</premiered>\n")
-			if 'Code' in metadata and metadata['Code']:
-				f.write(f"  <uniqueid>{metadata['Code']}</uniqueid>\n")
-			if 'tags' in metadata and metadata['tags']:
-				for tag in metadata['tags']:
-					f.write(f"  <tag>{tag}</tag>\n")
-			if 'actors' in metadata and metadata['actors']:
-				for i, performer in enumerate(metadata['actors'], 1):
-					f.write(f"  <actor>\n    <name>{performer}</name>\n    <order>{i}</order>\n  </actor>\n")
-			if 'Image' in metadata and metadata['Image']:
-				f.write(f"  <thumb aspect=\"poster\">{metadata['Image']}</thumb>\n")
-			if 'studios' in metadata and metadata['studios']:
-				for studio in metadata['studios']:
-					f.write(f"  <studio>{studio}</studio>\n")
-			elif 'studio' in metadata and metadata['studio']:
-				f.write(f"  <studio>{metadata['studio']}</studio>\n")
-			if 'description' in metadata and metadata['description']:
-				f.write(f"  <plot>{metadata['description']}</plot>\n")
-			f.write('</movie>\n')
-
-		# Log success
-		logger.success(f"{'Replaced' if os.path.exists(nfo_path) else 'Generated'} NFO at {nfo_path}")
-		return True
-
-	except Exception as e:
-		logger.error(f"Failed to generate NFO at {nfo_path}: {e}", exc_info=True)
-		return False
-
-
 def download_video(video_url, destination_path, site_config, general_config, headers=None, metadata=None, overwrite=False):
 	"""Download a video file to a temporary or final path."""
 	download_method = site_config.get('download', {}).get('method', 'curl')
 	origin = urllib.parse.urlparse(video_url).scheme + "://" + urllib.parse.urlparse(video_url).netloc
 	
 	if os.path.exists(destination_path) and not overwrite:
-		video_info = download_manager.get_video_metadata(destination_path)
+		video_info = get_config_manager().download_manager.get_video_metadata(destination_path)
 		if video_info:
 			logger.info(f"Valid video exists at {destination_path}. Skipping download.")
 			return True
@@ -1684,7 +1063,7 @@ def download_video(video_url, destination_path, site_config, general_config, hea
 			os.remove(destination_path)
 	
 	logger.info(f"Downloading to {destination_path}")
-	success = download_manager.download_file(
+	success = get_config_manager().download_manager.download_file(
 		video_url, destination_path, download_method, site_config,
 		headers=headers, metadata=metadata, origin=origin, overwrite=overwrite
 	)
@@ -1694,324 +1073,24 @@ def download_video(video_url, destination_path, site_config, general_config, hea
 		logger.error(f"Failed to download video to {destination_path}")
 	return success
 
-
-def manage_file(destination_path, destination_config, overwrite=False, video_url=None, state_set=None):
-	"""Move or upload the video (and NFO) to the final destination."""
-	smb_upload_successful = False
-	
-	if destination_config['type'] == 'smb':
-		smb_path = os.path.join(destination_config['path'], os.path.basename(destination_path))
-		smb_nfo_path = os.path.join(destination_config['path'], f"{os.path.basename(destination_path).rsplit('.', 1)[0]}.nfo")
-		
-		# Attempt to upload the main video file
-		smb_upload_successful = upload_to_smb(destination_path, smb_path, destination_config, overwrite)
-		
-		if smb_upload_successful:
-			logger.success(f"Successfully processed video for SMB: {smb_path}")
-			os.remove(destination_path) # Remove video file only if upload was successful
-			logger.debug(f"Removed temporary video file: {destination_path}")
-			
-			# Handle NFO file upload if video upload was successful
-			temp_nfo_path = f"{destination_path.rsplit('.', 1)[0]}.nfo"
-			if os.path.exists(temp_nfo_path):
-				nfo_upload_successful = upload_to_smb(temp_nfo_path, smb_nfo_path, destination_config, overwrite)
-				if nfo_upload_successful:
-					os.remove(temp_nfo_path) # Remove NFO file only if its upload was successful
-					logger.debug(f"Removed temporary NFO file: {temp_nfo_path}")
-				else:
-					logger.error(f"Failed to upload NFO file {os.path.basename(temp_nfo_path)} to SMB. It remains at {temp_nfo_path}")
-			else:
-				logger.debug(f"No NFO file found at {temp_nfo_path} to upload.")
-		else:
-			logger.error(f"Failed to upload video {os.path.basename(destination_path)} to SMB. It remains at {destination_path}")
-			# Also check if an NFO exists and warn that it wasn't uploaded due to video failure
-			temp_nfo_path_on_failure = f"{destination_path.rsplit('.', 1)[0]}.nfo"
-			if os.path.exists(temp_nfo_path_on_failure):
-				logger.warning(f"NFO file {os.path.basename(temp_nfo_path_on_failure)} was not uploaded due to video upload failure. It remains at {temp_nfo_path_on_failure}")
-		return smb_upload_successful # Return the success status of the main video file processing
-	else: # Local destination type
-		final_path = os.path.join(destination_config['path'], os.path.basename(destination_path))
-		os.makedirs(os.path.dirname(final_path), exist_ok=True)
-		if not overwrite and os.path.exists(final_path):
-			logger.info(f"File exists locally at {final_path}. Skipping move.")
-			# If original destination_path was temporary and different, it might need removal
-			if destination_path != final_path and os.path.exists(destination_path):
-				os.remove(destination_path)
-				logger.debug(f"Removed original file at {destination_path} as final already exists.")
-			return True
-		else:
-			try:
-				shutil.move(destination_path, final_path)
-				apply_permissions(final_path, destination_config)
-				logger.success(f"Moved to local destination: {final_path}")
-				# Handle NFO for local move
-				temp_nfo_path = f"{destination_path.rsplit('.', 1)[0]}.nfo"
-				final_nfo_path = f"{final_path.rsplit('.', 1)[0]}.nfo"
-				if os.path.exists(temp_nfo_path):
-					if not overwrite and os.path.exists(final_nfo_path):
-						logger.info(f"NFO file exists locally at {final_nfo_path}. Skipping move.")
-						if temp_nfo_path != final_nfo_path and os.path.exists(temp_nfo_path):
-							os.remove(temp_nfo_path)
-					else:
-						shutil.move(temp_nfo_path, final_nfo_path)
-						apply_permissions(final_nfo_path, destination_config)
-						logger.debug(f"Moved NFO to {final_nfo_path}")
-				return True
-			except Exception as e:
-				logger.error(f"Failed to move {destination_path} to {final_path}: {e}")
-				return False
-	return False # Should not be reached in local path scenario if logic is correct
-
-
+# Backward compatibility cleanup function - now uses config manager
 def cleanup(general_config):
 	"""Clean up resources like Selenium driver."""
-	if 'selenium_driver' in general_config and general_config['selenium_driver']:
-		try:
-			general_config['selenium_driver'].quit()
-			logger.info("Selenium driver closed.")
-		except Exception as e:
-			logger.warning(f"Failed to close Selenium driver: {e}")
+	get_config_manager().cleanup()
 	print()
 
 
-def _fallback_detect_and_download(url, general_config, overwrite=False):
-	"""Helper function for fallback: tries to detect MP4 then M3U8 and download."""
-	# Ensure download_manager is initialized
-	global download_manager
-	if download_manager is None:
-		download_manager = DownloadManager(general_config)
-	
-	logger.info(f"Fallback: Attempting direct detection for {url}")
-	driver = None
-	video_url_detected = None
-	download_method = None
-	detection_headers = general_config.get("headers", {}).copy()
-	detection_headers["User-Agent"] = random.choice(general_config["user_agents"])
-
-	if SELENIUM_AVAILABLE:
-		driver = get_selenium_driver(general_config) # Ensure driver is fetched/reused via general_config
-		if not driver:
-			logger.error("Fallback: Failed to initialize Selenium driver for detection.")
-			return False
-		
-		current_url_for_scan = url
-		# Simplified iframe check for fallback
-		try:
-			driver.get(url) # Load the initial URL first
-			time.sleep(random.uniform(2,4)) # Allow page to load and scripts to potentially run
-			iframes = driver.find_elements(By.TAG_NAME, "iframe")
-			if iframes:
-				# Try to find a visible, reasonably sized iframe, or just the first one with a src
-				best_iframe_src = None
-				for iframe_element in iframes:
-					iframe_src_attr = iframe_element.get_attribute("src")
-					if iframe_src_attr and is_url(iframe_src_attr):
-						# Basic check, could be improved with size/visibility checks
-						best_iframe_src = iframe_src_attr
-						logger.debug(f"Fallback: Potential iframe found with src: {best_iframe_src}")
-						break # Take the first valid one for simplicity in fallback
-				if best_iframe_src:
-					logger.info(f"Fallback: Scanning inside iframe: {best_iframe_src}")
-					current_url_for_scan = best_iframe_src
-					# driver.get(current_url_for_scan) # extract_mp4/m3u8_urls will navigate
-			else:
-				logger.debug(f"Fallback: No iframes found on {url} or no suitable src attributes.")
-		except Exception as e:
-			logger.warning(f"Fallback: Error during simplified iframe check for {url}: {e}")
-
-		# Try MP4 detection
-		logger.debug(f"Fallback: Attempting MP4 detection on {current_url_for_scan}")
-		mp4_found_url, mp4_cookies = extract_mp4_urls(driver, current_url_for_scan, {}) # Pass empty site_config
-		if mp4_found_url:
-			video_url_detected = mp4_found_url
-			download_method = 'requests'
-			detection_headers.update({"Cookie": mp4_cookies, "Referer": current_url_for_scan,
-								 "User-Agent": general_config.get('selenium_user_agent', detection_headers["User-Agent"])})
-			logger.info(f"Fallback: Detected MP4: {video_url_detected}")
-		else:
-			logger.info(f"Fallback: MP4 not found via direct detection for {current_url_for_scan}, trying M3U8.")
-			# Try M3U8 detection
-			m3u8_found_url, m3u8_cookies = extract_m3u8_urls(driver, current_url_for_scan, {}) # Pass empty site_config
-			if m3u8_found_url:
-				video_url_detected = m3u8_found_url
-				download_method = 'ffmpeg'
-				detection_headers.update({"Cookie": m3u8_cookies, "Referer": current_url_for_scan,
-									 "User-Agent": general_config.get('selenium_user_agent', detection_headers["User-Agent"])})
-				logger.info(f"Fallback: Detected M3U8: {video_url_detected}")
-			else:
-				logger.warning(f"Fallback: Direct detection failed for MP4 and M3U8 on {current_url_for_scan}.")
-				# Selenium driver is managed globally, no quit here for fallback.
-				return False
-	else:
-		logger.warning("Fallback: Selenium not available, cannot perform direct MP4/M3U8 detection.")
-		return False
-
-	if not video_url_detected or not download_method:
-		logger.debug("Fallback: video_url_detected or download_method is missing after detection attempts.")
-		return False
-
-	title_from_url_path = url.split('/')[-1].split('?')[0] if '/' in url else url
-	title = re.sub(r'[^a-zA-Z0-9_.-]', '_', title_from_url_path) or "fallback_video"
-	invalid_chars = general_config['file_naming']['invalid_chars']
-	processed_title = process_title(title, invalid_chars)
-	extension = ".mp4" # Default to .mp4; ffmpeg handles m3u8 to mp4
-	
-	filename = construct_filename(processed_title, {}, general_config) # Use empty site_config for basic construction
-
-	destination_config = general_config['download_destinations'][0]
-	temp_storage_path = destination_config.get('temporary_storage', os.path.join(tempfile.gettempdir(), 'smutscrape'))
-	os.makedirs(temp_storage_path, exist_ok=True)
-	# Use a unique name for the temporary download to avoid collision
-	temp_filename_for_download = str(uuid.uuid4().hex[:8]) + "_" + filename
-	local_temp_path = os.path.join(temp_storage_path, temp_filename_for_download)
-
-	logger.info(f"Fallback: Downloading detected video {video_url_detected} as {temp_filename_for_download} using {download_method}")
-	# Pass an empty site_config as it's not strictly needed for download_video when method/URL are explicit
-	success = download_video(video_url_detected, local_temp_path, {"download": {"method": download_method}}, general_config, headers=detection_headers, overwrite=overwrite)
-
-	if success:
-		final_filename_at_destination = filename # This is the desired final name, not the temp one.
-		if destination_config['type'] == 'smb':
-			smb_final_path = os.path.join(destination_config['path'], final_filename_at_destination)
-			if not overwrite and file_exists_on_smb(destination_config, smb_final_path):
-				logger.info(f"Fallback: File '{final_filename_at_destination}' exists on SMB. Skipping upload.")
-				os.remove(local_temp_path) # Clean up temp file
-				return True
-			upload_to_smb(local_temp_path, smb_final_path, destination_config, overwrite)
-			os.remove(local_temp_path)
-			logger.success(f"Fallback: Uploaded detected video to SMB: {smb_final_path}")
-			return True
-		elif destination_config['type'] == 'local':
-			local_final_storage_path = os.path.join(destination_config['path'], final_filename_at_destination)
-			if not overwrite and os.path.exists(local_final_storage_path):
-				logger.info(f"Fallback: File '{final_filename_at_destination}' exists locally. Skipping move.")
-				os.remove(local_temp_path) # Clean up temp file
-				return True
-			os.makedirs(os.path.dirname(local_final_storage_path), exist_ok=True)
-			shutil.move(local_temp_path, local_final_storage_path)
-			apply_permissions(local_final_storage_path, destination_config)
-			logger.success(f"Fallback: Moved detected video to local destination: {local_final_storage_path}")
-			return True
-	else:
-		logger.error(f"Fallback: Download of detected video failed for {video_url_detected}")
-		if os.path.exists(local_temp_path):
-			os.remove(local_temp_path)
-	return False
 
 
 
-def generate_global_table(term_width, output_path=None):
-	"""Generate the global sites table, optionally saving as Markdown to output_path."""
-	table = Table(show_edge=True, expand=True, width=term_width)
-	table.add_column("[bold][magenta]code[/magenta][/bold]", width=6, justify="left")
-	table.add_column("[bold][magenta]site[/magenta][/bold]", width=12, justify="left")
-	table.add_column("[bold][yellow]modes[/yellow][/bold]", width=(term_width-8)//3)
-	table.add_column("[bold][green]metadata[/green][/bold]", width=(term_width-8)//3)
-	
-	supported_sites = []
-	selenium_sites = set()
-	encoding_rule_sites = set()
-	pagination_modes = set()
-	
-	for site_config_file in os.listdir(SITE_DIR):
-		if site_config_file.endswith(".yaml"):
-			try:
-				with open(os.path.join(SITE_DIR, site_config_file), 'r') as f:
-					site_config = yaml.safe_load(f)
-				site_name = site_config.get("name", "Unknown")
-				site_code = site_config.get("shortcode", "??")
-				use_selenium = site_config.get("use_selenium", False)
-				
-				if use_selenium:
-					selenium_sites.add(site_code)
-				
-				modes = site_config.get("modes", {})
-				modes_display_list = []
-				for mode, config in modes.items():
-					supports_pagination = "url_pattern_pages" in config
-					mode_url_rules = config.get("url_encoding_rules", {})
-					has_special_encoding = " & " in mode_url_rules or "&" in mode_url_rules
-					footnotes = []
-					if supports_pagination:
-						footnotes.append("*")
-						pagination_modes.add(mode)
-					if has_special_encoding:
-						footnotes.append("‡")
-						if site_code not in encoding_rule_sites:
-							encoding_rule_sites.add(site_code)
-					mode_display = f"[yellow][bold]{mode}[/bold][/yellow]" + (f" {''.join(footnotes)}" if footnotes else "")
-					modes_display_list.append(mode_display)
-				
-				metadata = has_metadata_selectors(site_config, return_fields=True)
-				supported_sites.append((site_code, site_name, modes_display_list, metadata, use_selenium))
-			except Exception as e:
-				logger.warning(f"Failed to load config '{site_config_file}': {e}")
-	
-	if supported_sites:
-		for site_code, site_name, modes_display_list, metadata, use_selenium in sorted(supported_sites, key=lambda x: x[0]):
-			code_display = f"[magenta][bold]{site_code}[/bold][/magenta]"
-			site_display = f"[magenta]{site_name}[/magenta]" + (f" †" if use_selenium else "")
-			modes_display = " · ".join(modes_display_list) if modes_display_list else "[gray]None[/gray]"
-			metadata_display = " · ".join(f"[green][bold]{field}[/bold][/green]" for field in metadata) if metadata else "None"
-			table.add_row(code_display, site_display, modes_display, metadata_display)
-	else:
-		logger.warning("No valid site configs found in 'configs' folder.")
-		table.add_row("[magenta][bold]??[/bold][/magenta]", "[magenta]No sites loaded[/magenta]", "[gray]None[/gray]", "None")
-	
-	# Prepare footnotes
-	footnotes = []
-	if pagination_modes:
-		footnotes.append("[italic]* supports [bold][green]pagination[/green][/bold]; see [bold][yellow]optional arguments[/yellow][/bold] below.[/italic]")
-	if selenium_sites:
-		footnotes.append("[italic]† [yellow][bold]selenium[/bold][/yellow] and [yellow][bold]chromedriver[/bold][/yellow] required.[/italic]")
-	if encoding_rule_sites:
-		footnotes.append("[italic]‡ combine terms with \'&\' to search them together.[/italic]")
 
-	if output_path:
-		md_lines = [
-			"| code   | site                          | modes                          | metadata                       |\n",
-			"| ------ | ----------------------------- | ------------------------------ | ------------------------------ |\n"
-		]
-		
-		for site_code, site_name, modes_display_list, metadata, use_selenium in sorted(supported_sites, key=lambda x: x[0]):
-			code_str = f"`{site_code}`"
-			site_str = f"**_{site_name}_**" + (f" †" if use_selenium else "")
-			# Strip Rich formatting and keep only mode name + footnotes
-			modes_str = " · ".join(
-				mode.replace("[yellow][bold]", "").replace("[/bold][/yellow]", "") 
-				for mode in modes_display_list
-			) if modes_display_list else "None"
-			metadata_str = " · ".join(metadata) if metadata else "None"
-			md_lines.append(f"| {code_str:<6} | {site_str:<29} | {modes_str:<30} | {metadata_str:<30} |\n")
-		
-		if pagination_modes:
-			md_lines.append("\n* _Supports pagination; see optional arguments below._\n")
-		if selenium_sites:
-			md_lines.append("\n† _Selenium required._\n")
-		if encoding_rule_sites:
-			md_lines.append("\n‡ _Combine terms with \"&\"._\n")
-		
-		
-		try:
-			with open(output_path, 'w', encoding='utf-8') as f:
-				f.writelines(md_lines)
-			logger.info(f"Saved site table to '{output_path}' in Markdown format.")
-		except Exception as e:
-			logger.error(f"Failed to write Markdown table to '{output_path}': {e}")
-		return None
-	
-	from rich.console import Group
-	return Group(table, *footnotes) if footnotes else table
 
 
 
 	
 
 def handle_single_arg(arg, general_config, args, term_width, state_set):
-	# Ensure download_manager is initialized
-	global download_manager
-	if download_manager is None:
-		download_manager = DownloadManager(general_config)
+	# Download manager is available via config manager
 	
 	is_url_flag = is_url(arg)
 	config = load_configuration('site', arg)
@@ -2038,16 +1117,13 @@ def handle_single_arg(arg, general_config, args, term_width, state_set):
 	else:
 		if is_url_flag:
 			logger.warning(f"No site config matched for URL '{arg}'. Falling back to yt-dlp.")
-			process_fallback_download(arg, general_config, args.overwrite)
+			get_config_manager().download_manager.process_fallback_download(arg, args.overwrite)
 		else:
 			logger.error(f"Could not match the provided argument '{arg}' to a site configuration.")
 			sys.exit(1)
 			
 def handle_multi_arg(args, general_config, args_obj, state_set):
-	# Ensure download_manager is initialized
-	global download_manager
-	if download_manager is None:
-		download_manager = DownloadManager(general_config)
+	# Download manager is available via config manager
 	
 	site_config = load_configuration('site', args[0])
 	if not site_config:
@@ -2215,10 +1291,6 @@ def handle_multi_arg(args, general_config, args_obj, state_set):
 			if current_url_to_process:
 				time.sleep(general_config['sleep']['between_pages'])
 
-
-
-
-
 def main():
 	parser = argparse.ArgumentParser(
 		description="Smutscrape: Scrape and download adult content with metadata in .nfo files."
@@ -2301,25 +1373,21 @@ def main():
 		logger.error("Failed to load general configuration. Please check 'config/general.yml'.")
 		sys.exit(1)
 	
-	# Initialize download manager with general config
-	global download_manager
-	download_manager = DownloadManager(general_config)
-	
-	# Load state once at startup
-	state_set = load_state()
+	# Load state once at startup using session manager
+	state_set = get_session_manager().processed_urls
 	logger.debug(f"Loaded {len(state_set)} URLs from state file")
 	
 	print()
 	render_ascii("Smutscrape", general_config, term_width)
 	
 	if args.table:
-		generate_global_table(term_width, output_path=args.table)
+		get_site_manager().generate_global_table(term_width, output_path=args.table)
 		logger.info(f"Generated site table at '{args.table}'")
 		sys.exit(0)
 	
 	if not args.args:
 		print()
-		global_table = generate_global_table(term_width)
+		global_table = get_site_manager().generate_global_table(term_width)
 		display_usage(term_width, global_table)
 		display_global_examples(SITE_DIR)
 		display_options()
@@ -2337,7 +1405,7 @@ def main():
 			handle_multi_arg(args.args, general_config, args, state_set)
 		else:
 			logger.error("Invalid arguments. Use: scrape {site} {mode} {query} or scrape {url}")
-			global_table = generate_global_table(term_width)
+			global_table = get_site_manager().generate_global_table(term_width)
 			display_usage(term_width, global_table)
 			display_global_examples(SITE_DIR)
 			display_options()

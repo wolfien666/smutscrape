@@ -11,7 +11,9 @@ import re
 import random
 import subprocess
 import time
-from typing import Tuple, Optional, Dict, Any
+import string
+from urllib.parse import urlparse
+from typing import Tuple, Optional, Dict, Any, List
 from loguru import logger
 from termcolor import colored
 from rich.console import Console
@@ -341,6 +343,230 @@ def display_usage(term_width: int, global_table):
     console.print()
     # Note: display_global_examples and display_options need to be called separately
 
+
+# ============================================================================
+# URL and Text Processing Utilities
+# ============================================================================
+
+def is_url(string: str) -> bool:
+    """Check if a string is a URL by parsing it with urlparse."""
+    parsed = urlparse(string)
+    # A string is considered a URL if it has a netloc (domain) or a scheme
+    return bool(parsed.netloc) or bool(parsed.scheme)
+
+
+def process_title(title: str, invalid_chars: List[str]) -> str:
+    """Process title by removing invalid characters."""
+    logger.debug(f"Processing {title} for invalid chars...")
+    for char in invalid_chars:
+        title = title.replace(char, "")
+    logger.debug(f"Processed title: {title}")
+    return title
+
+
+def custom_title_case(text: str, uppercase_list: Optional[List[str]] = None, 
+                     preserve_mixed_case: bool = False) -> str:
+    """Apply custom title casing with exact match overrides from uppercase_list."""
+    if not text:
+        return text
+    uppercase_list = uppercase_list or []
+    
+    # If preserving mixed case (e.g., "McFly") and not in uppercase_list, return as-is
+    if preserve_mixed_case and re.search(r'[a-z][A-Z]|[A-Z][a-z]', text) and text.lower() not in {u.lower() for u in uppercase_list}:
+        return text
+    
+    # Build a case-insensitive mapping of overrides to their exact form
+    override_map = {term.lower(): term for term in uppercase_list}
+    
+    # Split into words
+    words = text.split()
+    if not words:
+        # Single word: check for override match
+        text_lower = text.lower()
+        return override_map.get(text_lower, text.title())
+    
+    # Process each word
+    result = []
+    for word in words:
+        word_lower = word.lower()
+        if word_lower in override_map:
+            result.append(override_map[word_lower])  # Use exact form (e.g., "BrutalX")
+        else:
+            result.append(word.title() if not preserve_mixed_case or len(words) > 1 else word)
+    
+    final_text = ' '.join(result)
+    return final_text
+
+
+def construct_filename(title: str, site_config: Dict[str, Any], 
+                      general_config: Dict[str, Any]) -> str:
+    """Construct a filename from title and configuration parameters."""
+    prefix = site_config.get('name_prefix', '')
+    suffix = site_config.get('name_suffix', '')
+    extension = general_config['file_naming']['extension']
+    invalid_chars = general_config['file_naming']['invalid_chars']
+    max_chars = general_config['file_naming'].get('max_chars', 255)  # Default to 255 if not specified
+    
+    # Get unique name settings - use boolean values to handle YAML's various ways of representing true/false
+    unique_name = bool(site_config.get("unique_name", False))
+    make_unique = bool(general_config['file_naming'].get('make_unique', False))
+    
+    # Process title by removing invalid characters
+    processed_title = process_title(title, invalid_chars)
+    
+    # Generate a unique ID if needed (6 random characters)
+    unique_id = '_' + ''.join(random.choices(string.ascii_lowercase + string.ascii_uppercase + string.digits, k=6)) if unique_name or make_unique else ''
+    
+    # Calculate available length for the title, accounting for the unique ID if present
+    fixed_length = len(prefix) + len(suffix) + len(extension) + len(unique_id)
+    max_title_chars = min(max_chars, 255) - fixed_length  # Hard cap at 255 chars total
+    
+    if max_title_chars <= 0:
+        logger.warning(f"Fixed filename parts ({fixed_length} chars) exceed max_chars ({max_chars}); truncating to fit.")
+        max_title_chars = max(1, 255 - fixed_length)  # Ensure at least 1 char for title if possible
+    
+    # Truncate title if necessary
+    if len(processed_title) > max_title_chars:
+        processed_title = processed_title[:max_title_chars].rstrip()
+        logger.debug(f"Truncated title to {max_title_chars} chars: {processed_title}")
+    
+    # Construct final filename with unique ID before extension
+    if unique_id:
+        filename = f"{prefix}{processed_title}{suffix}{unique_id}{extension}"
+    else:
+        filename = f"{prefix}{processed_title}{suffix}{extension}"
+    
+    # Double-check byte length (Linux limit is 255 bytes, not chars)
+    while len(filename.encode('utf-8')) > 255:
+        excess = len(filename.encode('utf-8')) - 255
+        trim_chars = excess // 4 + 1  # Rough estimate for UTF-8; adjust conservatively
+        processed_title = processed_title[:-trim_chars].rstrip()
+        
+        # Reconstruct the filename with the trimmed title
+        if unique_id:
+            filename = f"{prefix}{processed_title}{suffix}{unique_id}{extension}"
+        else:
+            filename = f"{prefix}{processed_title}{suffix}{extension}"
+            
+        logger.debug(f"Filename exceeded 255 bytes; trimmed to: {filename}")
+
+    logger.debug(f"Generated filename: {filename}")
+    return filename
+
+
+def should_ignore_video(data: Dict[str, Any], ignored_terms: List[str]) -> bool:
+    """Check if video should be ignored based on metadata and ignored terms."""
+    if not ignored_terms:
+        return False
+    ignored_terms_lower = [term.lower() for term in ignored_terms]
+    ignored_terms_encoded = [term.lower().replace(' ', '-') for term in ignored_terms]
+    
+    # Compile regex patterns with word boundaries for efficiency
+    term_patterns = [re.compile(r'\b' + re.escape(term) + r'\b') for term in ignored_terms_lower]
+    encoded_patterns = [re.compile(r'\b' + re.escape(encoded) + r'\b') for encoded in ignored_terms_encoded]
+    
+    for field, value in data.items():
+        if isinstance(value, str):
+            value_lower = value.lower()
+            for term, term_pattern, encoded_pattern in zip(ignored_terms_lower, term_patterns, encoded_patterns):
+                if term_pattern.search(value_lower) or encoded_pattern.search(value_lower):
+                    logger.warning(f"Ignoring video due to term '{term}' in {field}: '{value}'")
+                    return True
+        elif isinstance(value, list):
+            for item in value:
+                item_lower = item.lower()
+                for term, term_pattern, encoded_pattern in zip(ignored_terms_lower, term_patterns, encoded_patterns):
+                    if term_pattern.search(item_lower) or encoded_pattern.search(item_lower):
+                        logger.warning(f"Ignoring video due to term '{term}' in {field}: '{item}'")
+                        return True
+    return False
+
+
+# ============================================================================
+# URL Pattern Processing Utilities
+# ============================================================================
+
+def parse_url_pattern(pattern: str) -> List[Dict[str, Any]]:
+    """Parse URL pattern into components."""
+    components = []
+    current_segment = ""
+    
+    i = 0
+    while i < len(pattern):
+        if pattern[i] == "{":
+            if current_segment:
+                components.append({"type": "static", "value": current_segment})
+                current_segment = ""
+            j = i + 1
+            while j < len(pattern) and pattern[j] != "}":
+                j += 1
+            if j < len(pattern):
+                placeholder = pattern[i+1:j]
+                components.append({"type": "wildcard", "name": placeholder, "numeric": placeholder == "page"})
+                i = j + 1
+            else:
+                raise ValueError(f"Unclosed placeholder in pattern: {pattern}")
+        else:
+            current_segment += pattern[i]
+            i += 1
+    
+    if current_segment:
+        components.append({"type": "static", "value": current_segment})
+    
+    logger.debug(f"Parsed pattern '{pattern}' into components: {components}")
+    return components
+
+
+def pattern_to_regex(pattern: str) -> Tuple[re.Pattern, int, int]:
+    """Convert URL pattern to regex with static count and length."""
+    regex = ""
+    static_count = 0
+    static_length = 0
+    in_wildcard = False
+    current_static = ""
+    numeric_wildcards = {"page"}
+    
+    for char in pattern.rstrip("/"):
+        if char == "{":
+            if current_static:
+                regex += re.escape(current_static)
+                static_count += 1
+                static_length += len(current_static)
+                current_static = ""
+            in_wildcard = True
+            wildcard_name = ""
+        elif char == "}":
+            if in_wildcard:
+                if wildcard_name in numeric_wildcards:
+                    regex += f"(?P<{wildcard_name}>\\d+)"
+                else:
+                    regex += f"(?P<{wildcard_name}>[^/?&#]+)"
+                in_wildcard = False
+            else:
+                current_static += char
+        elif in_wildcard:
+            wildcard_name += char
+        else:
+            current_static += char
+    
+    if current_static:
+        regex += re.escape(current_static)
+        static_count += 1
+        static_length += len(current_static)
+    
+    if "?" not in pattern and "&" not in pattern:
+        regex = f"^{regex}$"
+    else:
+        regex = f"^{regex}(?:$|&.*)"
+    
+    return re.compile(regex, re.IGNORECASE), static_count, static_length
+
+
+#
+
+# ============================================================================
+# VPN Management
+# ============================================================================
 
 def handle_vpn(general_config: Dict[str, Any], action: str = 'start') -> Optional[float]:
     """Handle VPN operations (start, stop, new_node).

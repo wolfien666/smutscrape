@@ -13,6 +13,8 @@ from typing import Dict, List, Optional, Any, Union
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 from loguru import logger
+from rich.table import Table
+from rich.console import Group
 
 
 @dataclass
@@ -387,4 +389,103 @@ class SiteManager:
     def reload(self):
         """Reload all site configurations"""
         self.sites.clear()
-        self._load_sites() 
+        self._load_sites()
+    
+    def generate_global_table(self, term_width: int, output_path: Optional[str] = None):
+        """Generate the global sites table, optionally saving as Markdown to output_path."""
+        table = Table(show_edge=True, expand=True, width=term_width)
+        table.add_column("[bold][magenta]code[/magenta][/bold]", width=6, justify="left")
+        table.add_column("[bold][magenta]site[/magenta][/bold]", width=12, justify="left")
+        table.add_column("[bold][yellow]modes[/yellow][/bold]", width=(term_width-8)//3)
+        table.add_column("[bold][green]metadata[/green][/bold]", width=(term_width-8)//3)
+        
+        supported_sites = []
+        selenium_sites = set()
+        encoding_rule_sites = set()
+        pagination_modes = set()
+        
+        # Use loaded sites instead of manually loading YAML files
+        for site in self.sites.values():
+            try:
+                site_name = site.name
+                site_code = site.shortcode
+                use_selenium = site.use_selenium
+                
+                if use_selenium:
+                    selenium_sites.add(site_code)
+                
+                modes_display_list = []
+                for mode_name, mode_config in site.modes.items():
+                    supports_pagination = mode_config.supports_pagination()
+                    mode_url_rules = mode_config.url_encoding_rules
+                    has_special_encoding = " & " in str(mode_url_rules) or "&" in str(mode_url_rules)
+                    footnotes = []
+                    if supports_pagination:
+                        footnotes.append("*")
+                        pagination_modes.add(mode_name)
+                    if has_special_encoding:
+                        footnotes.append("‡")
+                        if site_code not in encoding_rule_sites:
+                            encoding_rule_sites.add(site_code)
+                    mode_display = f"[yellow][bold]{mode_name}[/bold][/yellow]" + (f" {''.join(footnotes)}" if footnotes else "")
+                    modes_display_list.append(mode_display)
+                
+                metadata = site.get_metadata_fields()
+                supported_sites.append((site_code, site_name, modes_display_list, metadata, use_selenium))
+            except Exception as e:
+                logger.warning(f"Failed to process site '{site.shortcode}': {e}")
+        
+        if supported_sites:
+            for site_code, site_name, modes_display_list, metadata, use_selenium in sorted(supported_sites, key=lambda x: x[0]):
+                code_display = f"[magenta][bold]{site_code}[/bold][/magenta]"
+                site_display = f"[magenta]{site_name}[/magenta]" + (f" †" if use_selenium else "")
+                modes_display = " · ".join(modes_display_list) if modes_display_list else "[gray]None[/gray]"
+                metadata_display = " · ".join(f"[green][bold]{field}[/bold][/green]" for field in metadata) if metadata else "None"
+                table.add_row(code_display, site_display, modes_display, metadata_display)
+        else:
+            logger.warning("No valid site configs found in sites directory.")
+            table.add_row("[magenta][bold]??[/bold][/magenta]", "[magenta]No sites loaded[/magenta]", "[gray]None[/gray]", "None")
+        
+        # Prepare footnotes
+        footnotes = []
+        if pagination_modes:
+            footnotes.append("[italic]* supports [bold][green]pagination[/green][/bold]; see [bold][yellow]optional arguments[/yellow][/bold] below.[/italic]")
+        if selenium_sites:
+            footnotes.append("[italic]† [yellow][bold]selenium[/bold][/yellow] and [yellow][bold]chromedriver[/bold][/yellow] required.[/italic]")
+        if encoding_rule_sites:
+            footnotes.append("[italic]‡ combine terms with \'&\' to search them together.[/italic]")
+
+        if output_path:
+            md_lines = [
+                "| code   | site                          | modes                          | metadata                       |\n",
+                "| ------ | ----------------------------- | ------------------------------ | ------------------------------ |\n"
+            ]
+            
+            for site_code, site_name, modes_display_list, metadata, use_selenium in sorted(supported_sites, key=lambda x: x[0]):
+                code_str = f"`{site_code}`"
+                site_str = f"**_{site_name}_**" + (f" †" if use_selenium else "")
+                # Strip Rich formatting and keep only mode name + footnotes
+                modes_str = " · ".join(
+                    mode.replace("[yellow][bold]", "").replace("[/bold][/yellow]", "") 
+                    for mode in modes_display_list
+                ) if modes_display_list else "None"
+                metadata_str = " · ".join(metadata) if metadata else "None"
+                md_lines.append(f"| {code_str:<6} | {site_str:<29} | {modes_str:<30} | {metadata_str:<30} |\n")
+            
+            if pagination_modes:
+                md_lines.append("\n* _Supports pagination; see optional arguments below._\n")
+            if selenium_sites:
+                md_lines.append("\n† _Selenium required._\n")
+            if encoding_rule_sites:
+                md_lines.append("\n‡ _Combine terms with \"&\"._\n")
+            
+            try:
+                with open(output_path, 'w', encoding='utf-8') as f:
+                    f.writelines(md_lines)
+                logger.info(f"Saved site table to '{output_path}' in Markdown format.")
+            except Exception as e:
+                logger.error(f"Failed to write Markdown table to '{output_path}': {e}")
+            return None
+        
+        return Group(table, *footnotes) if footnotes else table
+

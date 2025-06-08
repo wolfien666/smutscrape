@@ -15,6 +15,11 @@ import subprocess
 import shlex
 import cloudscraper
 import urllib.parse
+import tempfile
+import shutil
+import uuid
+import time
+from datetime import datetime
 from abc import ABC, abstractmethod
 from typing import Dict, Optional, Tuple, Any
 from tqdm import tqdm
@@ -530,6 +535,316 @@ class DownloadManager:
         except Exception as e:
             logger.error(f"Error extracting metadata for {file_path}: {e}")
             return None
+    
+    def process_fallback_download(self, url: str, overwrite: bool = False):
+        """
+        Fallback download using yt-dlp and direct detection for unsupported sites.
+        
+        Args:
+            url: URL to download
+            overwrite: Whether to overwrite existing files
+            
+        Returns:
+            bool: True if download succeeded, False otherwise
+        """
+        destination_config = self.general_config['download_destinations'][0]
+        temp_dir = os.path.join(tempfile.gettempdir(), f"download_{uuid.uuid4().hex[:8]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+        os.makedirs(temp_dir, exist_ok=True)
+        logger.info(f"Fallback download for: {url}")
+        
+        success, downloaded_files = download_with_ytdlp_fallback(url, temp_dir, self.general_config)
+        
+        if not success or not downloaded_files:
+            logger.warning(f"yt-dlp fallback failed for {url}. Attempting direct detection fallback.")
+            if self._fallback_detect_and_download(url, overwrite):
+                logger.info(f"Direct detection fallback succeeded for {url}")
+                # If _fallback_detect_and_download created the temp_dir or used it, 
+                # it should clean up its own specific temp files.
+                # We only try to remove temp_dir if ytdlp might have created it and left it empty.
+                if os.path.exists(temp_dir) and not os.listdir(temp_dir):
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                return True
+            else:
+                logger.error(f"Both yt-dlp and direct detection fallbacks failed for {url}.")
+                shutil.rmtree(temp_dir, ignore_errors=True) # Clean up ytdlp's temp_dir if both failed
+                return False
+        
+        # This part below only runs if yt-dlp succeeded initially
+        logger.info(f"yt-dlp fallback succeeded for {url}, processing {len(downloaded_files)} files.")
+        # Import storage manager here to avoid circular imports
+        from smutscrape.storage import get_storage_manager
+        
+        for downloaded_file in downloaded_files:
+            source_path = os.path.join(temp_dir, downloaded_file)
+            if destination_config['type'] == 'smb':
+                smb_destination_path = os.path.join(destination_config['path'], downloaded_file)
+                if not overwrite and get_storage_manager().file_exists_on_smb(destination_config, smb_destination_path):
+                    logger.info(f"File '{downloaded_file}' exists on SMB. Skipping.")
+                    continue
+                get_storage_manager().upload_to_smb(source_path, smb_destination_path, destination_config)
+            elif destination_config['type'] == 'local':
+                final_path = os.path.join(destination_config['path'], downloaded_file)
+                if not overwrite and os.path.exists(final_path):
+                    logger.info(f"File '{downloaded_file}' exists locally. Skipping.")
+                    continue
+                os.makedirs(os.path.dirname(final_path), exist_ok=True)
+                shutil.move(source_path, final_path)
+                get_storage_manager().apply_permissions(final_path, destination_config)
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return True
+    
+    def _fallback_detect_and_download(self, url: str, overwrite: bool = False) -> bool:
+        """Helper function for fallback: tries to detect MP4 then M3U8 and download."""
+        logger.info(f"Fallback: Attempting direct detection for {url}")
+        driver = None
+        video_url_detected = None
+        download_method = None
+        detection_headers = self.general_config.get("headers", {}).copy()
+        detection_headers["User-Agent"] = random.choice(self.general_config["user_agents"])
+
+        # Import here to avoid circular imports
+        try:
+            from config import get_config_manager
+            from smutscrape.utilities import is_url
+            from smutscrape.storage import get_storage_manager
+        except ImportError as e:
+            logger.error(f"Fallback: Failed to import required modules: {e}")
+            return False
+
+        try:
+            from selenium.webdriver.common.by import By
+            driver = get_config_manager().get_selenium_driver()
+            if not driver:
+                logger.error("Fallback: Failed to initialize Selenium driver for detection.")
+                return False
+            
+            current_url_for_scan = url
+            # Simplified iframe check for fallback
+            try:
+                driver.get(url) # Load the initial URL first
+                time.sleep(random.uniform(2,4)) # Allow page to load and scripts to potentially run
+                iframes = driver.find_elements(By.TAG_NAME, "iframe")
+                if iframes:
+                    # Try to find a visible, reasonably sized iframe, or just the first one with a src
+                    best_iframe_src = None
+                    for iframe_element in iframes:
+                        iframe_src_attr = iframe_element.get_attribute("src")
+                        if iframe_src_attr and is_url(iframe_src_attr):
+                            # Basic check, could be improved with size/visibility checks
+                            best_iframe_src = iframe_src_attr
+                            logger.debug(f"Fallback: Potential iframe found with src: {best_iframe_src}")
+                            break # Take the first valid one for simplicity in fallback
+                    if best_iframe_src:
+                        logger.info(f"Fallback: Scanning inside iframe: {best_iframe_src}")
+                        current_url_for_scan = best_iframe_src
+                        # driver.get(current_url_for_scan) # extract_mp4/m3u8_urls will navigate
+                else:
+                    logger.debug(f"Fallback: No iframes found on {url} or no suitable src attributes.")
+            except Exception as e:
+                logger.warning(f"Fallback: Error during simplified iframe check for {url}: {e}")
+
+            # Try MP4 detection
+            logger.debug(f"Fallback: Attempting MP4 detection on {current_url_for_scan}")
+            mp4_found_url, mp4_cookies = self._extract_mp4_urls(driver, current_url_for_scan)
+            if mp4_found_url:
+                video_url_detected = mp4_found_url
+                download_method = 'requests'
+                detection_headers.update({"Cookie": mp4_cookies, "Referer": current_url_for_scan,
+                                     "User-Agent": get_config_manager().selenium_user_agent or detection_headers["User-Agent"]})
+                logger.info(f"Fallback: Detected MP4: {video_url_detected}")
+            else:
+                logger.info(f"Fallback: MP4 not found via direct detection for {current_url_for_scan}, trying M3U8.")
+                # Try M3U8 detection
+                m3u8_found_url, m3u8_cookies = self._extract_m3u8_urls(driver, current_url_for_scan)
+                if m3u8_found_url:
+                    video_url_detected = m3u8_found_url
+                    download_method = 'ffmpeg'
+                    detection_headers.update({"Cookie": m3u8_cookies, "Referer": current_url_for_scan,
+                                         "User-Agent": get_config_manager().selenium_user_agent or detection_headers["User-Agent"]})
+                    logger.info(f"Fallback: Detected M3U8: {video_url_detected}")
+                else:
+                    logger.warning(f"Fallback: Direct detection failed for MP4 and M3U8 on {current_url_for_scan}.")
+                    return False
+        except Exception as e:
+            logger.warning(f"Fallback: Selenium not available or failed, cannot perform direct MP4/M3U8 detection: {e}")
+            return False
+
+        if not video_url_detected or not download_method:
+            logger.debug("Fallback: video_url_detected or download_method is missing after detection attempts.")
+            return False
+
+        title_from_url_path = url.split('/')[-1].split('?')[0] if '/' in url else url
+        title = re.sub(r'[^a-zA-Z0-9_.-]', '_', title_from_url_path) or "fallback_video"
+        invalid_chars = self.general_config['file_naming']['invalid_chars']
+        
+        # Import process_title here to avoid circular imports
+        from smutscrape.utilities import process_title, construct_filename
+        processed_title = process_title(title, invalid_chars)
+        
+        filename = construct_filename(processed_title, {}, self.general_config) # Use empty site_config for basic construction
+
+        destination_config = self.general_config['download_destinations'][0]
+        temp_storage_path = destination_config.get('temporary_storage', os.path.join(tempfile.gettempdir(), 'smutscrape'))
+        os.makedirs(temp_storage_path, exist_ok=True)
+        # Use a unique name for the temporary download to avoid collision
+        temp_filename_for_download = str(uuid.uuid4().hex[:8]) + "_" + filename
+        local_temp_path = os.path.join(temp_storage_path, temp_filename_for_download)
+
+        logger.info(f"Fallback: Downloading detected video {video_url_detected} as {temp_filename_for_download} using {download_method}")
+        # Download using the detected method
+        success = self.download_file(
+            url=video_url_detected,
+            destination_path=local_temp_path,
+            method=download_method,
+            site_config={"download": {"method": download_method}},
+            headers=detection_headers,
+            overwrite=overwrite
+        )
+
+        if success:
+            final_filename_at_destination = filename # This is the desired final name, not the temp one.
+            if destination_config['type'] == 'smb':
+                smb_final_path = os.path.join(destination_config['path'], final_filename_at_destination)
+                if not overwrite and get_storage_manager().file_exists_on_smb(destination_config, smb_final_path):
+                    logger.info(f"Fallback: File '{final_filename_at_destination}' exists on SMB. Skipping upload.")
+                    os.remove(local_temp_path) # Clean up temp file
+                    return True
+                get_storage_manager().upload_to_smb(local_temp_path, smb_final_path, destination_config, overwrite)
+                os.remove(local_temp_path)
+                logger.success(f"Fallback: Uploaded detected video to SMB: {smb_final_path}")
+                return True
+            elif destination_config['type'] == 'local':
+                local_final_storage_path = os.path.join(destination_config['path'], final_filename_at_destination)
+                if not overwrite and os.path.exists(local_final_storage_path):
+                    logger.info(f"Fallback: File '{final_filename_at_destination}' exists locally. Skipping move.")
+                    os.remove(local_temp_path) # Clean up temp file
+                    return True
+                os.makedirs(os.path.dirname(local_final_storage_path), exist_ok=True)
+                shutil.move(local_temp_path, local_final_storage_path)
+                get_storage_manager().apply_permissions(local_final_storage_path, destination_config)
+                logger.success(f"Fallback: Moved detected video to local destination: {local_final_storage_path}")
+                return True
+        else:
+            logger.error(f"Fallback: Download of detected video failed for {video_url_detected}")
+            if os.path.exists(local_temp_path):
+                os.remove(local_temp_path)
+        return False
+    
+    def _extract_mp4_urls(self, driver, url):
+        """Extract MP4 URLs from network traffic"""
+        logger.debug(f"Extracting MP4 URLs from: {url}")
+        driver.get(url)
+
+        driver.execute_script("""
+            (function() {
+                let open = XMLHttpRequest.prototype.open;
+                XMLHttpRequest.prototype.open = function(method, url) {
+                    if (url.includes(".mp4")) {
+                        console.log("🔥 Found MP4 via XHR:", url);
+                    }
+                    return open.apply(this, arguments);
+                };
+            })();
+        """)
+
+        time.sleep(5) # Wait for network requests
+
+        logs = driver.get_log("performance")
+        mp4_urls = []
+        logger.debug(f"Analyzing {len(logs)} performance logs for MP4s")
+        for log in logs:
+            try:
+                message = json.loads(log["message"])["message"]
+                if "Network.responseReceived" in message["method"]:
+                    request_url = message["params"]["response"]["url"]
+                    if ".mp4" in request_url:
+                        # Basic quality check - prefer URLs with typical video resolution patterns
+                        if re.search(r'(240|360|480|720|1080|1440|2160)p', request_url.lower()) or \
+                           re.search(r'(\d{3,4}x\d{3,4})', request_url.lower()):
+                            mp4_urls.append(request_url)
+                            logger.debug(f"Found MP4 URL (likely video): {request_url}")
+                        else:
+                            logger.debug(f"Found MP4 URL (potential non-video, logging only): {request_url}")
+            except KeyError:
+                continue
+        
+        if not mp4_urls:
+            logger.warning("No MP4 URLs detected in network traffic")
+            return None, None
+
+        # Prioritize higher resolution if discernible from URL
+        def quality_key(url_str):
+            resolutions = {"2160p": 6, "1440p": 5, "1080p": 4, "720p": 3, "480p": 2, "360p": 1, "240p": 0}
+            for res, score in resolutions.items():
+                if res in url_str:
+                    return score
+            # Try to extract resolution like 1920x1080
+            match = re.search(r'(\d+)x(\d+)', url_str)
+            if match:
+                try:
+                    return int(match.group(2)) # Sort by height
+                except ValueError:
+                    pass
+            return -1 # Lowest priority if no clear resolution
+
+        best_mp4 = sorted(mp4_urls, key=quality_key, reverse=True)[0]
+        cookies_list = driver.get_cookies()
+        cookies_str = "; ".join([f"{c['name']}={c['value']}" for c in cookies_list])
+        logger.debug(f"Cookies after MP4 detection: {cookies_str if cookies_str else 'None'}")
+        logger.info(f"Selected best MP4: {best_mp4}")
+        return best_mp4, cookies_str
+    
+    def _extract_m3u8_urls(self, driver, url):
+        """Extract M3U8 URLs from network traffic"""
+        logger.debug(f"Extracting M3U8 URLs from: {url}")
+        driver.get(url)  # Redundant but ensures we're on the right page
+        
+        driver.execute_script("""
+            (function() {
+                let open = XMLHttpRequest.prototype.open;
+                XMLHttpRequest.prototype.open = function(method, url) {
+                    if (url.includes(".m3u8")) {
+                        console.log("🔥 Found M3U8 via XHR:", url);
+                    }
+                    return open.apply(this, arguments);
+                };
+            })();
+        """)
+
+        time.sleep(5)
+        
+        logs = driver.get_log("performance")
+        m3u8_urls = []
+        logger.debug(f"Analyzing {len(logs)} performance logs")
+        for log in logs:
+            try:
+                message = json.loads(log["message"])["message"]
+                if "Network.responseReceived" in message["method"]:
+                    request_url = message["params"]["response"]["url"]
+                    if ".m3u8" in request_url:
+                        m3u8_urls.append(request_url)
+                        logger.debug(f"Found M3U8 URL: {request_url}")
+            except KeyError:
+                continue
+        
+        if not m3u8_urls:
+            logger.warning("No M3U8 URLs detected in network traffic")
+            return None, None
+        
+        best_m3u8 = sorted(m3u8_urls, key=lambda u: "1920x1080" in u, reverse=True)[0]
+        cookies_list = driver.get_cookies()
+        cookies_str = "; ".join([f"{c['name']}={c['value']}" for c in cookies_list])
+        logger.debug(f"Cookies after load: {cookies_str if cookies_str else 'None'}")
+        logger.info(f"Selected best M3U8: {best_m3u8}")
+        return best_m3u8, cookies_str
+    
+    def extract_mp4_urls(self, driver, url, site_config=None):
+        """Public method to extract MP4 URLs from network traffic"""
+        return self._extract_mp4_urls(driver, url)
+    
+    def extract_m3u8_urls(self, driver, url, site_config=None):
+        """Public method to extract M3U8 URLs from network traffic"""
+        return self._extract_m3u8_urls(driver, url)
 
 
 def download_with_ytdlp_fallback(url: str, temp_dir: str, general_config: Dict[str, Any]) -> Tuple[bool, list]:

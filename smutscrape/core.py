@@ -36,14 +36,14 @@ from smutscrape.sites import SiteConfiguration
 
 
 def get_config_manager():
-    """Get or create the configuration manager instance."""
-    from config import get_config_manager as _get_config_manager
+    """Get or create the configuration manager instance via CLI module."""
+    from smutscrape.cli import get_config_manager as _get_config_manager
     return _get_config_manager()
 
 
 def get_session_manager():
-    """Get or create the session manager instance."""
-    from config import get_session_manager as _get_session_manager
+    """Get or create the session manager instance via CLI module."""
+    from smutscrape.cli import get_session_manager as _get_session_manager
     return _get_session_manager()
 
 

@@ -15,8 +15,8 @@ def main():
         from smutscrape.api import main as api_main
         api_main()
     else:
-        from smutscrape.cli import main as cli_main  
+        from smutscrape.cli import main as cli_main
         cli_main()
 
 if __name__ == "__main__":
-    main()
+	main()

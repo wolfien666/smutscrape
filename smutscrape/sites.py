@@ -300,7 +300,7 @@ class SiteConfiguration:
                 has_special_encoding = " & " in mode.url_encoding_rules or "&" in mode.url_encoding_rules
                 footnotes = []
                 if supports_pagination:
-                    footnotes.append("⸸")
+                    footnotes.append("✦")
                     has_pagination_footnote = True
                 if has_special_encoding:
                     footnotes.append("‡")
@@ -310,12 +310,12 @@ class SiteConfiguration:
             
             # Add all applicable footnotes
             footnotes = []
+            if has_pagination_footnote:
+                footnotes.append("[italic]✦ supports [bold][green]pagination[/green][/bold]; see [bold][yellow]optional arguments[/yellow][/bold] below.[/italic]")
             if self.use_selenium:
                 footnotes.append("[italic]† [yellow][bold]selenium[/bold][/yellow] and [yellow][bold]chromedriver[/bold][/yellow] required.[/italic]")
             if has_encoding_footnote:
                 footnotes.append("[italic]‡ combine terms with \'&\' to search them together.[/italic]")
-            if has_pagination_footnote:
-                footnotes.append("[italic]⸸ supports [bold][green]pagination[/green][/bold]; see [bold][yellow]optional arguments[/yellow][/bold] below.[/italic]")
             
             from rich.console import Group
             console.print(Group(mode_table, *footnotes) if footnotes else mode_table)
@@ -421,7 +421,7 @@ class SiteManager:
                     has_special_encoding = " & " in str(mode_url_rules) or "&" in str(mode_url_rules)
                     footnotes = []
                     if supports_pagination:
-                        footnotes.append("*")
+                        footnotes.append("✦")
                         pagination_modes.add(mode_name)
                     if has_special_encoding:
                         footnotes.append("‡")
@@ -449,7 +449,7 @@ class SiteManager:
         # Prepare footnotes
         footnotes = []
         if pagination_modes:
-            footnotes.append("[italic]* supports [bold][green]pagination[/green][/bold]; see [bold][yellow]optional arguments[/yellow][/bold] below.[/italic]")
+            footnotes.append("[italic]✦ supports [bold][green]pagination[/green][/bold]; see [bold][yellow]optional arguments[/yellow][/bold] below.[/italic]")
         if selenium_sites:
             footnotes.append("[italic]† [yellow][bold]selenium[/bold][/yellow] and [yellow][bold]chromedriver[/bold][/yellow] required.[/italic]")
         if encoding_rule_sites:
@@ -473,7 +473,7 @@ class SiteManager:
                 md_lines.append(f"| {code_str:<6} | {site_str:<29} | {modes_str:<30} | {metadata_str:<30} |\n")
             
             if pagination_modes:
-                md_lines.append("\n* _Supports pagination; see optional arguments below._\n")
+                md_lines.append("\n✦ _Supports pagination; see optional arguments below._\n")
             if selenium_sites:
                 md_lines.append("\n† _Selenium required._\n")
             if encoding_rule_sites:

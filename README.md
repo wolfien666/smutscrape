@@ -114,7 +114,7 @@ Refer to this table of supported sites with available modes and metadata, or see
 | `fs`   | **_Family Sex_** †            | video · tag ✦ · search · model ✦ | actors · description · studios · tags |
 | `fsv`  | **_FamilySexVideos_** †       | video · search                 | None                           |
 | `fsx`  | **_ForcedSex_**               | video · all ✦                  | None                           |
-| `if`   | **_IncestFlix_**              | video · tag *‡                 | actors · studios · tags        |
+| `if`   | **_IncestFlix_**              | video · tag ✦‡                 | actors · studios · tags        |
 | `ig`   | **_IncestGuru_**              | video · tag ✦                  | actors · studios · tags        |
 | `lf`   | **_LoneFun_**                 | video · search ✦               | description · tags             |
 | `lux`  | **_Luxure_**                  | video · search ✦ · channel     | description · tags             |
@@ -134,7 +134,9 @@ Refer to this table of supported sites with available modes and metadata, or see
 | `xv`   | **_XVideos_** †               | video · search ✦ · studio ✦ · model ✦ · tag ✦ · playlist · profile | actors · studios · tags        |
 
 ✦ _Supports pagination; see optional arguments below._
+
 † _Selenium required._
+
 ‡ _Combine terms with "&"._
 
 ---

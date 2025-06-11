@@ -12,6 +12,7 @@ download:
 url_encoding_rules:
   " ": "-"
   "%20": "-"
+note: "Don't let the generic name fool you - this site has a surprisingly eclectic mix. Navigation is a bit wonky and video IDs look like someone smashed their keyboard, but there's gold in them thar hills if you're patient enough to dig."
 
 modes:
   video:

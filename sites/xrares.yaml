@@ -13,6 +13,7 @@ download:
 url_encoding_rules:
   " ": "-"
   "%20": "-"
+note: "Xrares positions itself as the curator of 'rare' content, but half the time it's just reposts from other tubes. Still in development according to this config, which explains why everything feels half-baked. Might find some gems, might find nothing. It's porn roulette with worse odds."
 
 modes:
   video:

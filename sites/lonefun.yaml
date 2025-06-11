@@ -9,7 +9,7 @@ no_overwrite: true
 download:
   method: "requests"
 name_suffix: " - LONEFUN"
-note: ""
+note: "LoneFun tries to be the YouTube of taboo content but ends up more like early 2000s video hosting. Lots of 'real' amateur content mixed with obvious fakes. The search actually works though, which puts it ahead of half the sites on this list. Just don't expect HD quality - most videos look like they were filmed on a calculator."
 
 modes:
   video:

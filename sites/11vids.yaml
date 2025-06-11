@@ -1,0 +1,88 @@
+# sites/11vids.yaml
+
+name: 11Vids
+shortcode: 11v
+domain: 11vids.com
+base_url: "https://11vids.com"
+selector_style: css
+no_overwrite: true
+use_selenium: true
+download:
+  method: "requests"
+url_encoding_rules:
+  " ": "-"
+  "%20": "-"
+note: "11vids.com specializes in taboo/incest content with a focus on amateur and homemade videos."
+
+modes:
+  video:
+    url_pattern: "/video/{any}/{video}/"
+    scraper: video_scraper
+    tip: "Download video with identifier and slug"
+    examples:
+      - "amateur-daughter-with-her-real-parents-in-family-incest-sex"
+      - "real-sister-loves-rubbing-his-sisters-cunt-with-his-finger"
+      - "real-brother-sister-real-incest-on-webcam"
+  search:
+    url_pattern: "/search/{search}/"
+    max_pages: 999
+    scraper: list_scraper
+    tip: "Download videos from search results"
+    examples:
+      - "real sister"
+      - "family incest"
+      - "amateur daughter"
+  tag:
+    url_pattern: "/tags/{tag}/"
+    url_pattern_pages: "/tags/{tag}/;from_videos:{(page - 1) * 3}"
+    max_pages: 999
+    scraper: list_scraper
+    tip: "Download videos with tag"
+    examples:
+      - "amateur"
+      - "homemade"
+      - "family-sex"
+      - "incest"
+  category:
+    url_pattern: "/categories/{category}/"
+    max_pages: 999
+    scraper: list_scraper
+    tip: "Download videos from category"
+    examples:
+      - "incest"
+
+scrapers:
+  video_scraper:
+    title:
+      selector: "title"
+    description:
+      selector: "meta[name='description']"
+      attribute: "content"
+    download_url:
+      selector: "#kt_player video.fp-engine"
+      attribute: "src"
+    tags:
+      selector: "div.info div.item:contains('Tags:') a"
+    categories:
+      selector: "div.info div.item i.icon.icon-categories ~ a"
+    actors:
+      selector: "div.info div.item:contains('Models:') a"
+    studios:
+      selector: "div.info div.item:contains('Sponsor:') a"
+
+  list_scraper:
+    video_container:
+      selector:
+        - "div#list_videos_videos_list_search_result_items"
+        - "div#list_videos_common_videos_list_items"
+        - "div.list-videos div.margin-fix"
+    video_item:
+      selector: "div.item"
+      fields:
+        url:
+          selector: "a"
+          attribute: "href"
+    pagination:
+      next_page:
+        selector: "li.next a[data-action='ajax']"
+        attribute: "data-parameters"

@@ -1,0 +1,92 @@
+# sites/leakvids.yaml
+
+name: LeakVids
+shortcode: lv
+domain: leakvids.com
+base_url: "https://leakvids.com"
+selector_style: css
+no_overwrite: true
+use_selenium: true
+download:
+  method: "requests"
+url_encoding_rules:
+  " ": "-"
+  "%20": "-"
+note: "LeakVids hosts taboo and extreme content including incest and CNC themes, often with amateur/darkweb origins."
+
+modes:
+  video:
+    url_pattern: "/video/{any}/{video}/"
+    scraper: video_scraper
+    tip: "Download video with identifier and slug"
+    examples:
+      - "23/19yo-teen-brother-skinny-sister-hardcore-fuck-darkweb-video"
+      - "595/bullying-guy-rape-the-new-comer-at-classroom"
+  search:
+    url_pattern: "/search/{search}/"
+    max_pages: 999
+    scraper: list_scraper
+    tip: "Download videos from search results"
+    examples:
+      - "skinny-rape"
+      - "brother-sister"
+      - "real-incest"
+      - "darkweb"
+  tag:
+    url_pattern: "/tags/{tag}/"
+    max_pages: 999
+    scraper: list_scraper
+    tip: "Download videos with tag"
+    examples:
+      - "hardcore"
+      - "teen"
+      - "sister"
+      - "brother"
+      - "family-sex"
+      - "family-incest"
+      - "real-incest"
+      - "teen-incest"
+      - "amateur-incest"
+      - "darkweb"
+  category:
+    url_pattern: "/categories/{category}/"
+    max_pages: 999
+    scraper: list_scraper
+    tip: "Download videos from category"
+    examples:
+      - "incest"
+
+scrapers:
+  video_scraper:
+    title:
+      selector: "title"
+    description:
+      selector: "div.info div.item p"
+    download_url:
+      selector: "#kt_player video.fp-engine"
+      attribute: "src"
+    tags:
+      selector: 
+        - "div.info div.item:contains('Tags:') a"
+        - "div.info div.item i.icon.icon-categories ~ a"
+    actors:
+      selector: "div.info div.item:contains('Models:') a"
+    studios:
+      selector: "div.info div.item:contains('Sponsor:') a"
+
+  list_scraper:
+    video_container:
+      selector:
+        - "div#list_videos_videos_list_search_result_items"
+        - "div#list_videos_common_videos_list_items"
+        - "div.list-videos div.margin-fix"
+    video_item:
+      selector: "div.item"
+      fields:
+        url:
+          selector: "a"
+          attribute: "href"
+    pagination:
+      next_page:
+        selector: "li.next a"
+        attribute: "href"

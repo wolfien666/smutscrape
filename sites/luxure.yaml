@@ -38,14 +38,16 @@ scrapers:
   video_scraper:
     title:
       selector: "h1.title-right"
-      # Using text extraction
     
     download_url:
       selector: "video#thisPlayer_html5_api source"
       attribute: "src"
-      # OR alternative options:
-      # selector: "video#thisPlayer_html5_api"
-      # attribute: "src"
+    
+    tags:
+      selector: "span.channelLinks a.link12, span.tagLinks a"
+    
+    description:
+      selector: "div.player-desc:not(:has(strong))"
   
   list_scraper:
     video_container:

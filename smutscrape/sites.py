@@ -252,7 +252,7 @@ class SiteConfiguration:
     
     def display_details(self, term_width: int, general_config: Dict[str, Any]):
         """Display a detailed readout for this site config with domain-based ASCII art."""
-        from utilities import render_ascii, console
+        from smutscrape.utilities import render_ascii, console
         from rich.table import Table
         
         console.print()

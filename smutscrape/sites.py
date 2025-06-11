@@ -311,11 +311,11 @@ class SiteConfiguration:
             # Add all applicable footnotes
             footnotes = []
             if has_pagination_footnote:
-                footnotes.append("[italic]✦ supports [bold][green]pagination[/green][/bold]; see [bold][yellow]optional arguments[/yellow][/bold] below.[/italic]")
+                footnotes.append("✦ [italic]supports [bold][green]pagination[/green][/bold]; see [bold][yellow]optional arguments[/yellow][/bold] below.[/italic]")
             if self.use_selenium:
-                footnotes.append("[italic]† [yellow][bold]selenium[/bold][/yellow] and [yellow][bold]chromedriver[/bold][/yellow] required.[/italic]")
+                footnotes.append("† [italic][yellow][bold]selenium[/bold][/yellow] and [yellow][bold]chromedriver[/bold][/yellow] required.[/italic]")
             if has_encoding_footnote:
-                footnotes.append("[italic]‡ combine terms with \'&\' to search them together.[/italic]")
+                footnotes.append("‡ [italic]combine terms with \'&\' to search them together.[/italic]")
             
             from rich.console import Group
             console.print(Group(mode_table, *footnotes) if footnotes else mode_table)
@@ -449,11 +449,11 @@ class SiteManager:
         # Prepare footnotes
         footnotes = []
         if pagination_modes:
-            footnotes.append("[italic]✦ supports [bold][green]pagination[/green][/bold]; see [bold][yellow]optional arguments[/yellow][/bold] below.[/italic]")
+            footnotes.append("✦ [italic]supports [bold][green]pagination[/green][/bold]; see [bold][yellow]optional arguments[/yellow][/bold] below.[/italic]")
         if selenium_sites:
-            footnotes.append("[italic]† [yellow][bold]selenium[/bold][/yellow] and [yellow][bold]chromedriver[/bold][/yellow] required.[/italic]")
+            footnotes.append("† [italic][yellow][bold]selenium[/bold][/yellow] and [yellow][bold]chromedriver[/bold][/yellow] required.[/italic]")
         if encoding_rule_sites:
-            footnotes.append("[italic]‡ combine terms with \'&\' to search them together.[/italic]")
+            footnotes.append("‡ [italic]combine terms with \'&\' to search them together.[/italic]")
 
         if output_path:
             md_lines = [

@@ -1,5 +1,6 @@
 | code   | site                          | modes                          | metadata                       |
 | ------ | ----------------------------- | ------------------------------ | ------------------------------ |
+| `11v`  | **_11Vids_** †                | video · search · tag * · category | actors · categories · description · studios · tags |
 | `9v`   | **_9Vids_** †                 | video · search · tag           | description · tags             |
 | `bsip` | **_BrotherSisterIncestPorn_** | video · all *                  | None                           |
 | `fdpis` | **_FatherDaughterPornIncestSex_** | video · all *                  | None                           |
@@ -11,7 +12,8 @@
 | `if`   | **_IncestFlix_**              | video · tag *‡                 | actors · studios · tags        |
 | `ig`   | **_IncestGuru_**              | video · tag *                  | actors · studios · tags        |
 | `lf`   | **_LoneFun_**                 | video · search *               | description · tags             |
-| `lux`  | **_Luxure_**                  | video · search * · channel     | None                           |
+| `lux`  | **_Luxure_**                  | video · search * · channel     | description · tags             |
+| `lv`   | **_LeakVids_** †              | video · search · tag · category | actors · description · studios · tags |
 | `ml`   | **_Motherless_** †            | video · search * · tag * · user * · group * · group_code * | tags                           |
 | `msip` | **_MomSonIncestPorn_**        | video · all *                  | None                           |
 | `ph`   | **_PornHub_** †               | video · model * · category * · tag * · studio * · search * · pornstar * | actors · code · date · studios · tags |

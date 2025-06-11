@@ -46,8 +46,23 @@ echo -e "${GREEN}✅ Backup created: README.md.backup${NC}"
 # Read the sites.md content
 SITES_CONTENT=$(cat sites.md)
 
+# Extract the table and footnotes separately
+# The table ends at the first empty line after the table rows
+SITES_TABLE=$(awk '
+    /^\| code/ { in_table = 1 }
+    in_table && /^$/ { exit }
+    in_table { print }
+' sites.md)
+
+# Extract footnotes (lines starting with * † ‡ after the table)
+SITES_FOOTNOTES=$(awk '
+    /^\| code/ { in_table = 1 }
+    in_table && /^$/ { found_empty = 1; next }
+    found_empty && /^[*†‡]/ { print }
+' sites.md)
+
 # Use awk to replace the sites table section in README.md
-awk -v sites_content="$SITES_CONTENT" '
+awk -v sites_table="$SITES_TABLE" -v sites_footnotes="$SITES_FOOTNOTES" '
 BEGIN { 
     in_sites_section = 0
     table_started = 0
@@ -61,28 +76,44 @@ BEGIN {
     next
 }
 
+# When in sites section, skip empty lines immediately after the heading
+in_sites_section && !table_started && /^$/ {
+    next
+}
+
+# Skip the explanatory line
+in_sites_section && !table_started && /^Refer to this table/ {
+    next
+}
+
 # When in sites section, look for the table start
 in_sites_section && /^\| code/ {
     if (!replacement_done) {
         print ""
         print "Refer to this table of supported sites with available modes and metadata, or see the current configuration with latest updates by simply running `scrape` without arguments."
         print ""
-        print sites_content
+        print sites_table
+        if (sites_footnotes != "") {
+            print ""
+            print "```"
+            print sites_footnotes
+            print "```"
+        }
         replacement_done = 1
         table_started = 1
     }
     next
 }
 
-# Skip lines until we find the end of the table section
-in_sites_section && table_started && /^```/ {
+# Look for the next section header to end the sites section
+/^#/ && in_sites_section && table_started {
     print $0
     in_sites_section = 0
     table_started = 0
     next
 }
 
-# Skip table content and footnotes while in table section
+# Skip all content while we're in the sites table section
 in_sites_section && table_started {
     next
 }

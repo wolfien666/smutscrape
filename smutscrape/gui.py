@@ -38,7 +38,7 @@ C = dict(
     entry_bg    = "#0a1a0a",
     entry_dis   = "#1a1a1a",
     btn_start   = "#1a5c1a",
-    btn_stop    = "#3d0000",    # fix 1: darker bg so red text pops
+    btn_stop    = "#3d0000",
     btn_clear   = "#2a2a2a",
     cb_select   = "#1f3d1f",
     prog_trough = "#1a1a1a",
@@ -133,13 +133,10 @@ def _format_duration(raw):
 
 
 def _get_after_date(yyyy, mm, dd):
-    """Assemble date string from 3 fields; return None if all empty."""
     y = yyyy.strip(); mo = mm.strip(); d = dd.strip()
-    if not y:
-        return None
+    if not y: return None
     if mo:
-        if d:
-            return f"{y}-{mo.zfill(2)}-{d.zfill(2)}"
+        if d: return f"{y}-{mo.zfill(2)}-{d.zfill(2)}"
         return f"{y}-{mo.zfill(2)}"
     return y
 
@@ -213,7 +210,7 @@ class SmutscrapeGUI:
         self._filter_caps    = _audit_site_filter_caps(self.sites)
         self._cat_db         = _load_category_db()
         self._cat_vars       = {}
-        self._log_visible    = True   # fix 5: log shown by default
+        self._log_visible    = True
 
         self._build_ui()
         self._bind_mousewheel()
@@ -224,7 +221,6 @@ class SmutscrapeGUI:
     # -------------------------------------------------------------------------
 
     def _lf(self, parent, text, borderless=False, **kw):
-        """LabelFrame. borderless=True removes the box outline entirely."""
         bd = 0 if borderless else 1
         ht = 0 if borderless else 1
         return tk.LabelFrame(
@@ -283,37 +279,68 @@ class SmutscrapeGUI:
         )
 
     # -------------------------------------------------------------------------
-    # Mousewheel binding  (fix 4)
+    # Smart mousewheel routing
     # -------------------------------------------------------------------------
 
     def _bind_mousewheel(self):
-        """Bind mousewheel to scroll the main window via the outer canvas."""
-        def _on_wheel(event):
-            # Scroll the category canvas if the cursor is over it
-            widget = event.widget
-            # Walk up to see if we're inside _cat_canvas
-            w = widget
+        """
+        Route mousewheel events to exactly one target:
+          1. If widget (or any ancestor) is a Combobox/Listbox/Text — let Tk handle it natively.
+          2. Else if widget is inside _cat_canvas — scroll _cat_canvas only.
+          3. Else scroll _main_canvas, BUT only when content is taller than viewport.
+        """
+        # Widget class names that should handle their own scrolling
+        _NATIVE_SCROLL = {"TCombobox", "Combobox", "Listbox", "Text", "ScrolledText"}
+
+        def _is_native(w):
             while w:
-                if w is self._cat_canvas:
-                    delta = -1 if (event.num == 5 or event.delta < 0) else 1
-                    self._cat_canvas.yview_scroll(-delta, "units")
-                    return
+                cls = w.winfo_class()
+                if cls in _NATIVE_SCROLL:
+                    return True
                 try: w = w.master
                 except AttributeError: break
-            # Otherwise scroll the main scrollable area
-            delta = -1 if (event.num == 5 or event.delta < 0) else 1
-            self._main_canvas.yview_scroll(-delta, "units")
+            return False
 
-        self.root.bind_all("<MouseWheel>",    _on_wheel)
-        self.root.bind_all("<Button-4>",      _on_wheel)  # Linux scroll up
-        self.root.bind_all("<Button-5>",      _on_wheel)  # Linux scroll down
+        def _is_in_cat_canvas(w):
+            while w:
+                if w is self._cat_canvas:
+                    return True
+                try: w = w.master
+                except AttributeError: break
+            return False
+
+        def _main_can_scroll():
+            """Return True only when inner content is taller than the canvas viewport."""
+            inner_h  = self._inner.winfo_reqheight()
+            canvas_h = self._main_canvas.winfo_height()
+            return inner_h > canvas_h
+
+        def _on_wheel(event):
+            widget = event.widget
+            delta  = -1 if (event.num == 5 or getattr(event, 'delta', 1) < 0) else 1
+
+            # 1. Native scrollable widget — do nothing, let Tk handle it
+            if _is_native(widget):
+                return
+
+            # 2. Inside category canvas — scroll only that canvas
+            if _is_in_cat_canvas(widget):
+                self._cat_canvas.yview_scroll(-delta, "units")
+                return
+
+            # 3. Main canvas — only when there is actually overflow
+            if _main_can_scroll():
+                self._main_canvas.yview_scroll(-delta, "units")
+
+        self.root.bind_all("<MouseWheel>", _on_wheel)
+        self.root.bind_all("<Button-4>",   _on_wheel)   # Linux up
+        self.root.bind_all("<Button-5>",   _on_wheel)   # Linux down
 
     # -------------------------------------------------------------------------
     # UI construction
     # -------------------------------------------------------------------------
 
     def _build_ui(self):
-        # Outer canvas + scrollbar for whole-window scroll  (fix 4)
         self._main_canvas = tk.Canvas(self.root, bg=C["bg"],
                                       highlightthickness=0, bd=0)
         self._main_vsb    = ttk.Scrollbar(self.root, orient="vertical",
@@ -322,7 +349,6 @@ class SmutscrapeGUI:
         self._main_vsb.pack(side="right", fill="y")
         self._main_canvas.pack(side="left", fill="both", expand=True)
 
-        # Inner frame that holds all widgets
         self._inner = tk.Frame(self._main_canvas, bg=C["bg"])
         self._inner_id = self._main_canvas.create_window(
             (0, 0), window=self._inner, anchor="nw"
@@ -370,7 +396,7 @@ class SmutscrapeGUI:
         self.query_entry.grid(row=2, column=1, columnspan=2, sticky="ew", padx=6, pady=3)
         top.columnconfigure(1, weight=1)
 
-        # ── CATEGORIES (no box outline  —  fix 3) ────────────────────────────
+        # ── CATEGORIES ────────────────────────────────────────────────────────
         self.cat_frame = self._lf(
             self._inner,
             "  CATEGORIES  (check one or more \u2014 each scraped in sequence)",
@@ -408,7 +434,6 @@ class SmutscrapeGUI:
         filters = self._lf(self._inner, "  FILTERS ")
         filters.pack(fill="x", padx=10, pady=4)
 
-        # After Date — three separate boxes  (fix 2)
         self._label(filters, "After Date:", width=20, anchor="e").grid(
             row=0, column=0, sticky="e", pady=3)
         date_row = tk.Frame(filters, bg=C["panel"])
@@ -425,16 +450,18 @@ class SmutscrapeGUI:
         self.date_dd.pack(side="left")
         self._label(date_row, "DD", fg=C["fg_dim"], font=("Courier", 7),
                     bg=C["panel"]).pack(side="left", padx=(2, 0))
-        self.after_hint = self._label(filters, "all optional — fill only YYYY for year filter",
-                                      fg=C["fg_dim"])
+        self.after_hint = self._label(
+            filters, "all optional \u2014 fill only YYYY for year filter", fg=C["fg_dim"]
+        )
         self.after_hint.grid(row=0, column=2, sticky="w", padx=6)
 
         self._label(filters, "Min Duration (min):", width=20, anchor="e").grid(
             row=1, column=0, sticky="e", pady=3)
         self.min_dur_entry = self._entry(filters, width=8)
         self.min_dur_entry.grid(row=1, column=1, sticky="w", padx=6)
-        self.dur_hint = self._label(filters, "e.g. 10  (skip videos shorter than this)",
-                                    fg=C["fg_dim"])
+        self.dur_hint = self._label(
+            filters, "e.g. 10  (skip videos shorter than this)", fg=C["fg_dim"]
+        )
         self.dur_hint.grid(row=1, column=2, sticky="w")
 
         self._label(filters, "Start Page:", width=20, anchor="e").grid(
@@ -445,7 +472,7 @@ class SmutscrapeGUI:
         self._label(filters, "Begin scraping from this page",
                     fg=C["fg_dim"]).grid(row=2, column=2, sticky="w")
 
-        # ── OPTIONS (no box outline  —  fix 3) ───────────────────────────────
+        # ── OPTIONS ───────────────────────────────────────────────────────────
         opts = self._lf(self._inner, "  OPTIONS ", borderless=True, pady=4)
         opts.pack(fill="x", padx=10, pady=4)
         self.overwrite_var  = tk.BooleanVar()
@@ -468,7 +495,6 @@ class SmutscrapeGUI:
         )
         self.run_button.pack(side="left", padx=8)
 
-        # fix 1: stop button  —  dark-red bg, bright red text, white on hover
         self.stop_button = self._button(
             btn_frame, "\u23f9  STOP", self._stop_scraping,
             bg=C["btn_stop"], fg="#ff4444", padx=18, pady=6, state="disabled"
@@ -480,7 +506,6 @@ class SmutscrapeGUI:
             bg=C["btn_clear"], fg=C["fg_dim"], padx=14, pady=6
         ).pack(side="left", padx=8)
 
-        # fix 5: toggle log button
         self.log_toggle_btn = self._button(
             btn_frame, "\u25bc  Hide Log", self._toggle_log,
             bg=C["btn_clear"], fg=C["accent"], padx=14, pady=6
@@ -536,7 +561,7 @@ class SmutscrapeGUI:
                  font=("Courier", 9), padx=8
                  ).pack(fill="x", padx=10, pady=(0, 2))
 
-        # ── LOG (fix 5: collapsible, shown by default) ────────────────────────
+        # ── LOG ───────────────────────────────────────────────────────────────
         self.log_outer = tk.Frame(self._inner, bg=C["bg"])
         self.log_outer.pack(fill="both", expand=True, padx=10, pady=(2, 10))
 
@@ -560,19 +585,32 @@ class SmutscrapeGUI:
         self.log_text.tag_config("info",    foreground=C["log_info"])
 
     # -------------------------------------------------------------------------
-    # Main canvas resize helpers  (fix 4)
+    # Main canvas resize helpers
     # -------------------------------------------------------------------------
 
     def _on_inner_configure(self, event):
-        self._main_canvas.configure(
-            scrollregion=self._main_canvas.bbox("all")
-        )
+        """Update scrollregion, but clamp it so it never goes above y=0."""
+        bbox = self._main_canvas.bbox("all")
+        if bbox:
+            # Never let scroll region start above 0 (prevents black-space drift)
+            self._main_canvas.configure(
+                scrollregion=(0, 0, bbox[2], bbox[3])
+            )
 
     def _on_canvas_configure(self, event):
         self._main_canvas.itemconfig(self._inner_id, width=event.width)
+        # Reset scroll to top whenever window is resized and content fits
+        self.root.after(10, self._reset_scroll_if_fits)
+
+    def _reset_scroll_if_fits(self):
+        """If all content fits in the viewport, snap view back to top."""
+        inner_h  = self._inner.winfo_reqheight()
+        canvas_h = self._main_canvas.winfo_height()
+        if inner_h <= canvas_h:
+            self._main_canvas.yview_moveto(0)
 
     # -------------------------------------------------------------------------
-    # Log toggle  (fix 5)
+    # Log toggle
     # -------------------------------------------------------------------------
 
     def _toggle_log(self):
@@ -610,9 +648,7 @@ class SmutscrapeGUI:
             self._checkbutton(
                 self._cat_inner_frame, label, var, bg=C["panel2"], anchor="w", padx=4
             ).grid(row=idx // cols, column=idx % cols, sticky="w", padx=4, pady=1)
-        # Insert after separator (index 2 in _inner pack order)
         slaves = self._inner.pack_slaves()
-        # find the filters frame and insert before it
         target = None
         for w in slaves:
             if hasattr(w, '_is_filters'):
@@ -655,8 +691,8 @@ class SmutscrapeGUI:
         date_state = "normal" if caps['date'] else "disabled"
         date_bg    = C["entry_bg"] if caps['date'] else C["entry_dis"]
         hint_fg    = C["fg_dim"]   if caps['date'] else C["fg_disabled"]
-        hint_txt   = "all optional \u2014 fill only YYYY for year filter" if caps['date'] \
-                     else "not available for this site"
+        hint_txt   = "all optional \u2014 fill only YYYY for year filter" \
+                     if caps['date'] else "not available for this site"
         for e in (self.date_yyyy, self.date_mm, self.date_dd):
             e.config(state=date_state, bg=date_bg)
         self.after_hint.config(fg=hint_fg, text=hint_txt)
@@ -872,7 +908,7 @@ class SmutscrapeGUI:
                 from loguru import logger as _logger
                 _logger.debug(f"[GUI] URL: {constructed_url}")
 
-                current_url = constructed_url
+                current_url  = constructed_url
                 current_page = start_page
                 while current_url:
                     if self._stop_event.is_set(): break

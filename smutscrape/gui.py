@@ -11,7 +11,6 @@ import re as _re
 import queue
 import datetime
 import yaml
-import math
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
@@ -27,32 +26,31 @@ _SITES_DIR = os.path.join(
 # ===========================================================================
 
 C = dict(
-    bg          = "#0d0d0d",   # root background — near-black
-    panel       = "#141414",   # LabelFrame bg
-    panel2      = "#1c1c1c",   # slightly lighter panels (cat, inner)
-    border      = "#2a2a2a",   # subtle borders
-    fg          = "#39ff14",   # terminal green  (main text)
-    fg_dim      = "#1f8c0b",   # dimmed green for hints / labels
-    fg_disabled = "#3a3a3a",   # greyed-out text
-    accent      = "#00e5ff",   # cyan — titles, current video
-    accent2     = "#7fff00",   # chartreuse — success / finished
-    entry_bg    = "#0a1a0a",   # dark green-tinted entry fields
-    entry_dis   = "#1a1a1a",   # disabled entry bg
-    btn_start   = "#1a5c1a",   # start button
-    btn_stop    = "#7a0000",   # stop button
-    btn_clear   = "#2a2a2a",   # clear button
-    cb_select   = "#1f3d1f",   # checkbox select bg
-    prog_trough = "#1a1a1a",   # progressbar trough
-    prog_bar    = "#39ff14",   # progressbar fill
-    # log colours
+    bg          = "#0d0d0d",
+    panel       = "#141414",
+    panel2      = "#1c1c1c",
+    border      = "#2a2a2a",
+    fg          = "#39ff14",
+    fg_dim      = "#1f8c0b",
+    fg_disabled = "#3a3a3a",
+    accent      = "#00e5ff",
+    accent2     = "#7fff00",
+    entry_bg    = "#0a1a0a",
+    entry_dis   = "#1a1a1a",
+    btn_start   = "#1a5c1a",
+    btn_stop    = "#3d0000",    # fix 1: darker bg so red text pops
+    btn_clear   = "#2a2a2a",
+    cb_select   = "#1f3d1f",
+    prog_trough = "#1a1a1a",
+    prog_bar    = "#39ff14",
     log_bg      = "#050f05",
     log_fg      = "#39ff14",
-    log_filter  = "#00e5ff",   # cyan  — skipped / filter
-    log_success = "#7fff00",   # chartreuse — success
-    log_error   = "#ff3333",   # red   — errors  (MUST)
-    log_warn    = "#ff8c00",   # orange — warnings (MUST)
-    log_stopped = "#ff6600",   # orange-red — stopped
-    log_info    = "#39ff14",   # default green
+    log_filter  = "#00e5ff",
+    log_success = "#7fff00",
+    log_error   = "#ff3333",
+    log_warn    = "#ff8c00",
+    log_stopped = "#ff6600",
+    log_info    = "#39ff14",
 )
 
 
@@ -134,77 +132,62 @@ def _format_duration(raw):
         return raw
 
 
+def _get_after_date(yyyy, mm, dd):
+    """Assemble date string from 3 fields; return None if all empty."""
+    y = yyyy.strip(); mo = mm.strip(); d = dd.strip()
+    if not y:
+        return None
+    if mo:
+        if d:
+            return f"{y}-{mo.zfill(2)}-{d.zfill(2)}"
+        return f"{y}-{mo.zfill(2)}"
+    return y
+
+
 # ===========================================================================
-# TTK dark theme setup
+# TTK dark theme
 # ===========================================================================
 
 def _apply_dark_ttk(root):
     style = ttk.Style(root)
     style.theme_use("clam")
-
-    # Generic
     style.configure(".",
-        background    = C["panel"],
-        foreground    = C["fg"],
-        fieldbackground = C["entry_bg"],
-        bordercolor   = C["border"],
-        troughcolor   = C["prog_trough"],
-        selectbackground = C["cb_select"],
-        selectforeground = C["fg"],
-        insertcolor   = C["fg"],
-        font          = ("Courier", 9),
+        background=C["panel"], foreground=C["fg"],
+        fieldbackground=C["entry_bg"], bordercolor=C["border"],
+        troughcolor=C["prog_trough"],
+        selectbackground=C["cb_select"], selectforeground=C["fg"],
+        insertcolor=C["fg"], font=("Courier", 9),
     )
-
-    # Combobox
     style.configure("TCombobox",
-        fieldbackground = C["entry_bg"],
-        background    = C["panel2"],
-        foreground    = C["fg"],
-        arrowcolor    = C["fg"],
-        selectbackground = C["cb_select"],
-        selectforeground = C["fg"],
-        bordercolor   = C["border"],
+        fieldbackground=C["entry_bg"], background=C["panel2"],
+        foreground=C["fg"], arrowcolor=C["fg"],
+        selectbackground=C["cb_select"], selectforeground=C["fg"],
+        bordercolor=C["border"],
     )
     style.map("TCombobox",
-        fieldbackground = [("readonly", C["entry_bg"])],
-        foreground      = [("readonly", C["fg"])],
-        selectbackground= [("readonly", C["cb_select"])],
+        fieldbackground=[("readonly", C["entry_bg"])],
+        foreground=[("readonly", C["fg"])],
+        selectbackground=[("readonly", C["cb_select"])],
     )
-    # Force the dropdown listbox colour via option_add
-    root.option_add("*TCombobox*Listbox.background",  C["panel2"])
-    root.option_add("*TCombobox*Listbox.foreground",  C["fg"])
+    root.option_add("*TCombobox*Listbox.background",       C["panel2"])
+    root.option_add("*TCombobox*Listbox.foreground",       C["fg"])
     root.option_add("*TCombobox*Listbox.selectBackground", C["cb_select"])
     root.option_add("*TCombobox*Listbox.selectForeground", C["accent"])
-
-    # Progressbar
     style.configure("green.Horizontal.TProgressbar",
-        troughcolor = C["prog_trough"],
-        background  = C["prog_bar"],
-        bordercolor = C["border"],
-        lightcolor  = C["prog_bar"],
-        darkcolor   = C["prog_bar"],
+        troughcolor=C["prog_trough"], background=C["prog_bar"],
+        bordercolor=C["border"], lightcolor=C["prog_bar"], darkcolor=C["prog_bar"],
     )
-
-    # Scrollbar
     style.configure("TScrollbar",
-        background  = C["panel2"],
-        troughcolor = C["bg"],
-        arrowcolor  = C["fg_dim"],
-        bordercolor = C["border"],
+        background=C["panel2"], troughcolor=C["bg"],
+        arrowcolor=C["fg_dim"], bordercolor=C["border"],
     )
-    style.map("TScrollbar",
-        background = [("active", C["cb_select"])],
-    )
-
-    # LabelFrame
+    style.map("TScrollbar", background=[("active", C["cb_select"])])
     style.configure("TLabelframe",
-        background  = C["panel"],
-        bordercolor = C["border"],
+        background=C["panel"], bordercolor=C["border"],
     )
     style.configure("TLabelframe.Label",
-        background  = C["panel"],
-        foreground  = C["accent"],
-        font        = ("Courier", 9, "bold"),
+        background=C["panel"], foreground=C["accent"],
+        font=("Courier", 9, "bold"),
     )
 
 
@@ -216,10 +199,9 @@ class SmutscrapeGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Smutscrape")
-        self.root.geometry("940x920")
+        self.root.geometry("960x860")
         self.root.resizable(True, True)
         self.root.configure(bg=C["bg"])
-
         _apply_dark_ttk(root)
 
         self.log_queue       = queue.Queue()
@@ -231,33 +213,34 @@ class SmutscrapeGUI:
         self._filter_caps    = _audit_site_filter_caps(self.sites)
         self._cat_db         = _load_category_db()
         self._cat_vars       = {}
+        self._log_visible    = True   # fix 5: log shown by default
+
         self._build_ui()
+        self._bind_mousewheel()
         self._poll_log_queue()
 
     # -------------------------------------------------------------------------
-    # Theming shorthands
+    # Widget factories
     # -------------------------------------------------------------------------
 
-    def _lf(self, parent, text, **kw):
-        """Dark LabelFrame."""
-        f = tk.LabelFrame(
+    def _lf(self, parent, text, borderless=False, **kw):
+        """LabelFrame. borderless=True removes the box outline entirely."""
+        bd = 0 if borderless else 1
+        ht = 0 if borderless else 1
+        return tk.LabelFrame(
             parent, text=text,
             bg=C["panel"], fg=C["accent"],
             font=("Courier", 9, "bold"),
-            bd=1, relief="flat",
+            bd=bd, relief="flat",
             highlightbackground=C["border"],
-            highlightthickness=1,
+            highlightthickness=ht,
             padx=kw.pop("padx", 8),
             pady=kw.pop("pady", 6),
             **kw
         )
-        return f
 
     def _label(self, parent, text="", textvariable=None, fg=None, font=None, **kw):
-        kwargs = dict(
-            bg=C["panel"], fg=fg or C["fg"],
-            font=font or ("Courier", 9),
-        )
+        kwargs = dict(bg=C["panel"], fg=fg or C["fg"], font=font or ("Courier", 9))
         if textvariable: kwargs["textvariable"] = textvariable
         else:            kwargs["text"]          = text
         kwargs.update(kw)
@@ -280,14 +263,11 @@ class SmutscrapeGUI:
     def _button(self, parent, text, command, bg, fg="#ffffff", state="normal", **kw):
         return tk.Button(
             parent, text=text, command=command,
-            bg=bg, fg=fg, activebackground=bg,
-            activeforeground=fg,
+            bg=bg, fg=fg, activebackground=bg, activeforeground=fg,
             disabledforeground=C["fg_disabled"],
             relief="flat", bd=0,
             font=("Courier", 9, "bold"),
-            cursor="hand2",
-            state=state,
-            **kw
+            cursor="hand2", state=state, **kw
         )
 
     def _checkbutton(self, parent, text, variable, bg=None, **kw):
@@ -295,8 +275,7 @@ class SmutscrapeGUI:
         return tk.Checkbutton(
             parent, text=text, variable=variable,
             bg=bg, fg=C["fg"],
-            activebackground=C["cb_select"],
-            activeforeground=C["accent"],
+            activebackground=C["cb_select"], activeforeground=C["accent"],
             selectcolor=C["bg"],
             font=("Courier", 9),
             bd=0, relief="flat",
@@ -304,38 +283,72 @@ class SmutscrapeGUI:
         )
 
     # -------------------------------------------------------------------------
+    # Mousewheel binding  (fix 4)
+    # -------------------------------------------------------------------------
+
+    def _bind_mousewheel(self):
+        """Bind mousewheel to scroll the main window via the outer canvas."""
+        def _on_wheel(event):
+            # Scroll the category canvas if the cursor is over it
+            widget = event.widget
+            # Walk up to see if we're inside _cat_canvas
+            w = widget
+            while w:
+                if w is self._cat_canvas:
+                    delta = -1 if (event.num == 5 or event.delta < 0) else 1
+                    self._cat_canvas.yview_scroll(-delta, "units")
+                    return
+                try: w = w.master
+                except AttributeError: break
+            # Otherwise scroll the main scrollable area
+            delta = -1 if (event.num == 5 or event.delta < 0) else 1
+            self._main_canvas.yview_scroll(-delta, "units")
+
+        self.root.bind_all("<MouseWheel>",    _on_wheel)
+        self.root.bind_all("<Button-4>",      _on_wheel)  # Linux scroll up
+        self.root.bind_all("<Button-5>",      _on_wheel)  # Linux scroll down
+
+    # -------------------------------------------------------------------------
     # UI construction
     # -------------------------------------------------------------------------
 
     def _build_ui(self):
+        # Outer canvas + scrollbar for whole-window scroll  (fix 4)
+        self._main_canvas = tk.Canvas(self.root, bg=C["bg"],
+                                      highlightthickness=0, bd=0)
+        self._main_vsb    = ttk.Scrollbar(self.root, orient="vertical",
+                                          command=self._main_canvas.yview)
+        self._main_canvas.configure(yscrollcommand=self._main_vsb.set)
+        self._main_vsb.pack(side="right", fill="y")
+        self._main_canvas.pack(side="left", fill="both", expand=True)
+
+        # Inner frame that holds all widgets
+        self._inner = tk.Frame(self._main_canvas, bg=C["bg"])
+        self._inner_id = self._main_canvas.create_window(
+            (0, 0), window=self._inner, anchor="nw"
+        )
+        self._inner.bind("<Configure>", self._on_inner_configure)
+        self._main_canvas.bind("<Configure>", self._on_canvas_configure)
+
         # ── Title bar ────────────────────────────────────────────────────────
-        title_bar = tk.Frame(self.root, bg=C["bg"])
+        title_bar = tk.Frame(self._inner, bg=C["bg"])
         title_bar.pack(fill="x", padx=10, pady=(8, 2))
-        tk.Label(
-            title_bar,
-            text="▓▒░  S M U T S C R A P E  ░▒▓",
-            bg=C["bg"], fg=C["fg"],
-            font=("Courier", 13, "bold")
-        ).pack(side="left")
-        tk.Label(
-            title_bar, text="dark reaper edition",
-            bg=C["bg"], fg=C["fg_dim"],
-            font=("Courier", 8)
-        ).pack(side="left", padx=10)
+        tk.Label(title_bar, text="\u2593\u2592\u2591  S M U T S C R A P E  \u2591\u2592\u2593",
+                 bg=C["bg"], fg=C["fg"], font=("Courier", 13, "bold")
+                 ).pack(side="left")
+        tk.Label(title_bar, text="dark reaper edition",
+                 bg=C["bg"], fg=C["fg_dim"], font=("Courier", 8)
+                 ).pack(side="left", padx=10)
+        tk.Frame(self._inner, bg=C["border"], height=1).pack(fill="x", padx=10, pady=(0, 6))
 
-        # Thin separator
-        tk.Frame(self.root, bg=C["border"], height=1).pack(fill="x", padx=10, pady=(0, 6))
-
-        # ── Target ───────────────────────────────────────────────────────────
-        top = self._lf(self.root, "  TARGET ")
+        # ── TARGET ───────────────────────────────────────────────────────────
+        top = self._lf(self._inner, "  TARGET ")
         top.pack(fill="x", padx=10, pady=(0, 4))
 
         self._label(top, "Site:", width=16, anchor="e").grid(row=0, column=0, sticky="e", pady=3)
         self.site_var   = tk.StringVar()
-        self.site_combo = ttk.Combobox(
-            top, textvariable=self.site_var,
-            values=self.site_names, width=30, state="readonly"
-        )
+        self.site_combo = ttk.Combobox(top, textvariable=self.site_var,
+                                       values=self.site_names, width=30, state="readonly")
         self.site_combo.grid(row=0, column=1, sticky="w", padx=6, pady=3)
         self.site_combo.bind("<<ComboboxSelected>>", self._on_site_selected)
 
@@ -357,26 +370,25 @@ class SmutscrapeGUI:
         self.query_entry.grid(row=2, column=1, columnspan=2, sticky="ew", padx=6, pady=3)
         top.columnconfigure(1, weight=1)
 
-        # ── Category picker (hidden until relevant mode) ──────────────────────
+        # ── CATEGORIES (no box outline  —  fix 3) ────────────────────────────
         self.cat_frame = self._lf(
-            self.root,
-            "  CATEGORIES  (check one or more — each scraped in sequence)",
-            padx=6, pady=6
+            self._inner,
+            "  CATEGORIES  (check one or more \u2014 each scraped in sequence)",
+            borderless=True, padx=6, pady=4
         )
-        self._cat_canvas = tk.Canvas(
-            self.cat_frame, height=140,
-            bg=C["panel2"], highlightthickness=0
-        )
-        self._cat_scrollbar = ttk.Scrollbar(
-            self.cat_frame, orient="vertical", command=self._cat_canvas.yview
-        )
+        self._cat_canvas = tk.Canvas(self.cat_frame, height=140,
+                                     bg=C["panel2"], highlightthickness=0)
+        self._cat_scrollbar = ttk.Scrollbar(self.cat_frame, orient="vertical",
+                                            command=self._cat_canvas.yview)
         self._cat_inner_frame = tk.Frame(self._cat_canvas, bg=C["panel2"])
         self._cat_inner_id = self._cat_canvas.create_window(
             (0, 0), window=self._cat_inner_frame, anchor="nw"
         )
         self._cat_inner_frame.bind(
             "<Configure>",
-            lambda e: self._cat_canvas.configure(scrollregion=self._cat_canvas.bbox("all"))
+            lambda e: self._cat_canvas.configure(
+                scrollregion=self._cat_canvas.bbox("all")
+            )
         )
         self._cat_canvas.configure(yscrollcommand=self._cat_scrollbar.set)
         self._cat_canvas.pack(side="left", fill="both", expand=True)
@@ -385,133 +397,193 @@ class SmutscrapeGUI:
         btn_cat = tk.Frame(self.cat_frame, bg=C["panel"])
         btn_cat.pack(fill="x", pady=(4, 0))
         self._button(btn_cat, "Select All", self._cat_select_all,
-                     bg=C["btn_start"], padx=10, pady=3
-                     ).pack(side="left", padx=4)
+                     bg=C["btn_start"], padx=10, pady=3).pack(side="left", padx=4)
         self._button(btn_cat, "Clear All", self._cat_clear_all,
-                     bg=C["btn_clear"], padx=10, pady=3
-                     ).pack(side="left", padx=4)
-        self._label(btn_cat,
-                    "← leave all unchecked to use the Query field instead",
+                     bg=C["btn_clear"], padx=10, pady=3).pack(side="left", padx=4)
+        self._label(btn_cat, "\u2190 leave all unchecked to use the Query field",
                     fg=C["fg_dim"], font=("Courier", 8)
                     ).pack(side="left", padx=10)
 
-        # ── Filters ──────────────────────────────────────────────────────────
-        filters = self._lf(self.root, "  FILTERS ")
+        # ── FILTERS ──────────────────────────────────────────────────────────
+        filters = self._lf(self._inner, "  FILTERS ")
         filters.pack(fill="x", padx=10, pady=4)
 
-        self._label(filters, "After Date:", width=20, anchor="e").grid(row=0, column=0, sticky="e", pady=3)
-        self.after_entry = self._entry(filters, width=18)
-        self.after_entry.grid(row=0, column=1, sticky="w", padx=6)
-        self.after_hint = self._label(filters, "YYYY-MM  or  YYYY-MM-DD", fg=C["fg_dim"])
-        self.after_hint.grid(row=0, column=2, sticky="w")
+        # After Date — three separate boxes  (fix 2)
+        self._label(filters, "After Date:", width=20, anchor="e").grid(
+            row=0, column=0, sticky="e", pady=3)
+        date_row = tk.Frame(filters, bg=C["panel"])
+        date_row.grid(row=0, column=1, sticky="w", padx=6)
+        self.date_yyyy = self._entry(date_row, width=6)
+        self.date_yyyy.pack(side="left")
+        self._label(date_row, "YYYY", fg=C["fg_dim"], font=("Courier", 7),
+                    bg=C["panel"]).pack(side="left", padx=(2, 8))
+        self.date_mm = self._entry(date_row, width=4)
+        self.date_mm.pack(side="left")
+        self._label(date_row, "MM", fg=C["fg_dim"], font=("Courier", 7),
+                    bg=C["panel"]).pack(side="left", padx=(2, 8))
+        self.date_dd = self._entry(date_row, width=4)
+        self.date_dd.pack(side="left")
+        self._label(date_row, "DD", fg=C["fg_dim"], font=("Courier", 7),
+                    bg=C["panel"]).pack(side="left", padx=(2, 0))
+        self.after_hint = self._label(filters, "all optional — fill only YYYY for year filter",
+                                      fg=C["fg_dim"])
+        self.after_hint.grid(row=0, column=2, sticky="w", padx=6)
 
-        self._label(filters, "Min Duration (min):", width=20, anchor="e").grid(row=1, column=0, sticky="e", pady=3)
+        self._label(filters, "Min Duration (min):", width=20, anchor="e").grid(
+            row=1, column=0, sticky="e", pady=3)
         self.min_dur_entry = self._entry(filters, width=8)
         self.min_dur_entry.grid(row=1, column=1, sticky="w", padx=6)
-        self.dur_hint = self._label(filters, "e.g. 10  (skip videos shorter than this)", fg=C["fg_dim"])
+        self.dur_hint = self._label(filters, "e.g. 10  (skip videos shorter than this)",
+                                    fg=C["fg_dim"])
         self.dur_hint.grid(row=1, column=2, sticky="w")
 
-        self._label(filters, "Start Page:", width=20, anchor="e").grid(row=2, column=0, sticky="e", pady=3)
+        self._label(filters, "Start Page:", width=20, anchor="e").grid(
+            row=2, column=0, sticky="e", pady=3)
         self.page_entry = self._entry(filters, width=8)
         self.page_entry.insert(0, "1")
         self.page_entry.grid(row=2, column=1, sticky="w", padx=6)
-        self._label(filters, "Begin scraping from this page", fg=C["fg_dim"]).grid(row=2, column=2, sticky="w")
+        self._label(filters, "Begin scraping from this page",
+                    fg=C["fg_dim"]).grid(row=2, column=2, sticky="w")
 
-        # ── Options ───────────────────────────────────────────────────────────
-        opts = self._lf(self.root, "  OPTIONS ", pady=4)
+        # ── OPTIONS (no box outline  —  fix 3) ───────────────────────────────
+        opts = self._lf(self._inner, "  OPTIONS ", borderless=True, pady=4)
         opts.pack(fill="x", padx=10, pady=4)
         self.overwrite_var  = tk.BooleanVar()
         self.renfo_var      = tk.BooleanVar()
         self.applystate_var = tk.BooleanVar()
-        self._checkbutton(opts, "Overwrite existing files",        self.overwrite_var ).grid(row=0, column=0, sticky="w", padx=10)
-        self._checkbutton(opts, "Regenerate .nfo files",           self.renfo_var     ).grid(row=0, column=1, sticky="w", padx=10)
-        self._checkbutton(opts, "Apply state (skip already seen)", self.applystate_var).grid(row=0, column=2, sticky="w", padx=10)
+        self._checkbutton(opts, "Overwrite existing files",
+                          self.overwrite_var).grid(row=0, column=0, sticky="w", padx=10)
+        self._checkbutton(opts, "Regenerate .nfo files",
+                          self.renfo_var).grid(row=0, column=1, sticky="w", padx=10)
+        self._checkbutton(opts, "Apply state (skip already seen)",
+                          self.applystate_var).grid(row=0, column=2, sticky="w", padx=10)
 
-        # ── Buttons ───────────────────────────────────────────────────────────
-        btn_frame = tk.Frame(self.root, bg=C["bg"])
+        # ── BUTTONS ───────────────────────────────────────────────────────────
+        btn_frame = tk.Frame(self._inner, bg=C["bg"])
         btn_frame.pack(pady=6)
+
         self.run_button = self._button(
-            btn_frame, "▶  Start Scraping", self._start_scraping,
+            btn_frame, "\u25b6  Start Scraping", self._start_scraping,
             bg=C["btn_start"], fg=C["fg"], padx=18, pady=6
         )
         self.run_button.pack(side="left", padx=8)
+
+        # fix 1: stop button  —  dark-red bg, bright red text, white on hover
         self.stop_button = self._button(
-            btn_frame, "⏹  Stop", self._stop_scraping,
-            bg=C["btn_stop"], fg="#ff6666", padx=18, pady=6, state="disabled"
+            btn_frame, "\u23f9  STOP", self._stop_scraping,
+            bg=C["btn_stop"], fg="#ff4444", padx=18, pady=6, state="disabled"
         )
         self.stop_button.pack(side="left", padx=8)
+
         self._button(
-            btn_frame, "⌫  Clear Log", self._clear_log,
+            btn_frame, "\u232b  Clear Log", self._clear_log,
             bg=C["btn_clear"], fg=C["fg_dim"], padx=14, pady=6
         ).pack(side="left", padx=8)
 
-        # ── Progress ─────────────────────────────────────────────────────────
-        prog = self._lf(self.root, "  PROGRESS ")
+        # fix 5: toggle log button
+        self.log_toggle_btn = self._button(
+            btn_frame, "\u25bc  Hide Log", self._toggle_log,
+            bg=C["btn_clear"], fg=C["accent"], padx=14, pady=6
+        )
+        self.log_toggle_btn.pack(side="left", padx=8)
+
+        # ── PROGRESS ──────────────────────────────────────────────────────────
+        prog = self._lf(self._inner, "  PROGRESS ")
         prog.pack(fill="x", padx=10, pady=(2, 4))
         prog.columnconfigure(1, weight=1)
 
-        self._label(prog, "Current video:", width=16, anchor="e").grid(row=0, column=0, sticky="e", pady=2)
-        self.video_title_var = tk.StringVar(value="—")
+        self._label(prog, "Current video:", width=16, anchor="e").grid(
+            row=0, column=0, sticky="e", pady=2)
+        self.video_title_var = tk.StringVar(value="\u2014")
         self._label(prog, textvariable=self.video_title_var, anchor="w",
                     fg=C["accent"], font=("Courier", 9, "bold")
                     ).grid(row=0, column=1, columnspan=3, sticky="ew", padx=4)
 
-        self._label(prog, "Date / Duration:", width=16, anchor="e").grid(row=1, column=0, sticky="e", pady=2)
-        self.video_meta_var = tk.StringVar(value="—")
+        self._label(prog, "Date / Duration:", width=16, anchor="e").grid(
+            row=1, column=0, sticky="e", pady=2)
+        self.video_meta_var = tk.StringVar(value="\u2014")
         self._label(prog, textvariable=self.video_meta_var, anchor="w",
                     fg=C["fg_dim"]
                     ).grid(row=1, column=1, columnspan=3, sticky="ew", padx=4)
 
-        self._label(prog, "Download:", width=16, anchor="e").grid(row=2, column=0, sticky="e", pady=2)
-        self.dl_bar = ttk.Progressbar(
-            prog, orient="horizontal", length=400, mode="determinate",
-            maximum=100, style="green.Horizontal.TProgressbar"
-        )
+        self._label(prog, "Download:", width=16, anchor="e").grid(
+            row=2, column=0, sticky="e", pady=2)
+        self.dl_bar = ttk.Progressbar(prog, orient="horizontal", length=400,
+                                      mode="determinate", maximum=100,
+                                      style="green.Horizontal.TProgressbar")
         self.dl_bar.grid(row=2, column=1, sticky="ew", padx=4)
         self.dl_pct_var = tk.StringVar(value="")
         self._label(prog, textvariable=self.dl_pct_var, width=20, anchor="w",
                     fg=C["fg"], font=("Courier", 9)
                     ).grid(row=2, column=2, sticky="w", padx=4)
 
-        self._label(prog, "Query progress:", width=16, anchor="e").grid(row=3, column=0, sticky="e", pady=2)
-        self.global_bar = ttk.Progressbar(
-            prog, orient="horizontal", length=400, mode="determinate",
-            maximum=100, style="green.Horizontal.TProgressbar"
-        )
+        self._label(prog, "Query progress:", width=16, anchor="e").grid(
+            row=3, column=0, sticky="e", pady=2)
+        self.global_bar = ttk.Progressbar(prog, orient="horizontal", length=400,
+                                          mode="determinate", maximum=100,
+                                          style="green.Horizontal.TProgressbar")
         self.global_bar.grid(row=3, column=1, sticky="ew", padx=4)
         self.global_pct_var = tk.StringVar(value="")
         self._label(prog, textvariable=self.global_pct_var, width=20, anchor="w",
                     fg=C["fg"], font=("Courier", 9)
                     ).grid(row=3, column=2, sticky="w", padx=4)
 
-        # ── Status bar ───────────────────────────────────────────────────────
+        # ── STATUS BAR ────────────────────────────────────────────────────────
         self.status_var = tk.StringVar(value="Ready")
-        tk.Label(
-            self.root, textvariable=self.status_var,
-            anchor="w", relief="flat",
-            bg=C["panel2"], fg=C["accent"],
-            font=("Courier", 9), padx=8
-        ).pack(fill="x", padx=10, pady=(0, 2))
+        tk.Label(self._inner, textvariable=self.status_var,
+                 anchor="w", relief="flat",
+                 bg=C["panel2"], fg=C["accent"],
+                 font=("Courier", 9), padx=8
+                 ).pack(fill="x", padx=10, pady=(0, 2))
 
-        # ── Log output ───────────────────────────────────────────────────────
-        log_lf = self._lf(self.root, "  LOG ", padx=4, pady=4)
-        log_lf.pack(fill="both", expand=True, padx=10, pady=(2, 10))
+        # ── LOG (fix 5: collapsible, shown by default) ────────────────────────
+        self.log_outer = tk.Frame(self._inner, bg=C["bg"])
+        self.log_outer.pack(fill="both", expand=True, padx=10, pady=(2, 10))
+
+        log_lf = self._lf(self.log_outer, "  LOG ", padx=4, pady=4)
+        log_lf.pack(fill="both", expand=True)
+
         self.log_text = scrolledtext.ScrolledText(
             log_lf, state="disabled", wrap="word",
             bg=C["log_bg"], fg=C["log_fg"],
             insertbackground=C["fg"],
             selectbackground=C["cb_select"],
-            font=("Courier", 9), height=12,
+            font=("Courier", 9), height=14,
             relief="flat", bd=0,
         )
         self.log_text.pack(fill="both", expand=True)
-        # Colour tags
         self.log_text.tag_config("filter",  foreground=C["log_filter"])
         self.log_text.tag_config("success", foreground=C["log_success"])
         self.log_text.tag_config("error",   foreground=C["log_error"])
         self.log_text.tag_config("warn",    foreground=C["log_warn"])
         self.log_text.tag_config("stopped", foreground=C["log_stopped"])
         self.log_text.tag_config("info",    foreground=C["log_info"])
+
+    # -------------------------------------------------------------------------
+    # Main canvas resize helpers  (fix 4)
+    # -------------------------------------------------------------------------
+
+    def _on_inner_configure(self, event):
+        self._main_canvas.configure(
+            scrollregion=self._main_canvas.bbox("all")
+        )
+
+    def _on_canvas_configure(self, event):
+        self._main_canvas.itemconfig(self._inner_id, width=event.width)
+
+    # -------------------------------------------------------------------------
+    # Log toggle  (fix 5)
+    # -------------------------------------------------------------------------
+
+    def _toggle_log(self):
+        if self._log_visible:
+            self.log_outer.pack_forget()
+            self.log_toggle_btn.config(text="\u25b2  Show Log")
+            self._log_visible = False
+        else:
+            self.log_outer.pack(fill="both", expand=True, padx=10, pady=(2, 10))
+            self.log_toggle_btn.config(text="\u25bc  Hide Log")
+            self._log_visible = True
 
     # =========================================================================
     # Category panel helpers
@@ -538,8 +610,18 @@ class SmutscrapeGUI:
             self._checkbutton(
                 self._cat_inner_frame, label, var, bg=C["panel2"], anchor="w", padx=4
             ).grid(row=idx // cols, column=idx % cols, sticky="w", padx=4, pady=1)
-        self.cat_frame.pack(fill="x", padx=10, pady=4,
-                            before=self.root.pack_slaves()[2])  # after Target + separator
+        # Insert after separator (index 2 in _inner pack order)
+        slaves = self._inner.pack_slaves()
+        # find the filters frame and insert before it
+        target = None
+        for w in slaves:
+            if hasattr(w, '_is_filters'):
+                target = w
+                break
+        if target:
+            self.cat_frame.pack(fill="x", padx=10, pady=4, before=target)
+        else:
+            self.cat_frame.pack(fill="x", padx=10, pady=4)
 
     def _cat_select_all(self):
         for v in self._cat_vars.values(): v.set(True)
@@ -557,8 +639,7 @@ class SmutscrapeGUI:
     def _on_site_selected(self, event=None):
         site_name = self.site_var.get()
         site_obj  = next((s for s in self.sites.values() if s.name == site_name), None)
-        if not site_obj:
-            return
+        if not site_obj: return
         modes = [m for m in site_obj.modes.keys() if m != 'video']
         self.mode_combo['values'] = modes
         if modes: self.mode_combo.current(0)
@@ -567,17 +648,18 @@ class SmutscrapeGUI:
         badges = []
         if not caps['date']:     badges.append("no date filter")
         if not caps['duration']: badges.append("no duration filter")
-        if badges:
-            self.filter_badge_var.set("⚠ " + ", ".join(badges))
-        else:
-            self.filter_badge_var.set("✔ date & duration supported")
+        self.filter_badge_var.set(
+            ("\u26a0 " + ", ".join(badges)) if badges else "\u2714 date & duration supported"
+        )
 
-        if not caps['date']:
-            self.after_entry.config(state="disabled", bg=C["entry_dis"])
-            self.after_hint.config(fg=C["fg_disabled"], text="not available for this site")
-        else:
-            self.after_entry.config(state="normal", bg=C["entry_bg"])
-            self.after_hint.config(fg=C["fg_dim"], text="YYYY-MM  or  YYYY-MM-DD")
+        date_state = "normal" if caps['date'] else "disabled"
+        date_bg    = C["entry_bg"] if caps['date'] else C["entry_dis"]
+        hint_fg    = C["fg_dim"]   if caps['date'] else C["fg_disabled"]
+        hint_txt   = "all optional \u2014 fill only YYYY for year filter" if caps['date'] \
+                     else "not available for this site"
+        for e in (self.date_yyyy, self.date_mm, self.date_dd):
+            e.config(state=date_state, bg=date_bg)
+        self.after_hint.config(fg=hint_fg, text=hint_txt)
 
         if not caps['duration']:
             self.min_dur_entry.config(state="disabled", bg=C["entry_dis"])
@@ -592,9 +674,7 @@ class SmutscrapeGUI:
         mode      = self.mode_var.get()
         site_name = self.site_var.get()
         sc        = self._get_shortcode_for_site(site_name)
-        slugs     = []
-        if sc and mode:
-            slugs = self._cat_db.get(sc, {}).get(mode, [])
+        slugs     = self._cat_db.get(sc, {}).get(mode, []) if sc and mode else []
         if mode in ('category', 'tag'):
             self.query_label_var.set("Keyword (opt):" if slugs else "Category:")
         else:
@@ -629,12 +709,12 @@ class SmutscrapeGUI:
         self.global_pct_var.set(f"{done} / {total}  ({pct:.0f}%)")
 
     def _set_video_info(self, title, date, duration):
-        self.video_title_var.set(title or "—")
+        self.video_title_var.set(title or "\u2014")
         parts = []
-        if date: parts.append(f"📅 {date}")
+        if date: parts.append(f"\U0001f4c5 {date}")
         dur_fmt = _format_duration(duration)
-        if dur_fmt: parts.append(f"⏱ {dur_fmt}")
-        self.video_meta_var.set("   ".join(parts) if parts else "—")
+        if dur_fmt: parts.append(f"\u23f1 {dur_fmt}")
+        self.video_meta_var.set("   ".join(parts) if parts else "\u2014")
         self.dl_bar["value"] = 0
         self.dl_pct_var.set("")
 
@@ -646,12 +726,12 @@ class SmutscrapeGUI:
                 if kind == "log":
                     msg = item[1]
                     low = msg.lower()
-                    if   "[filter]" in low or "skip" in low:         tag = "filter"
-                    elif "success"  in low or "finished" in low:     tag = "success"
-                    elif "stopped"  in low or "abort"    in low:     tag = "stopped"
-                    elif "error"    in low or "failed"   in low:     tag = "error"
-                    elif "warn"     in low:                           tag = "warn"
-                    else:                                             tag = "info"
+                    if   "[filter]" in low or "skip" in low:     tag = "filter"
+                    elif "success"  in low or "finished" in low: tag = "success"
+                    elif "stopped"  in low or "abort"    in low: tag = "stopped"
+                    elif "error"    in low or "failed"   in low: tag = "error"
+                    elif "warn"     in low:                       tag = "warn"
+                    else:                                         tag = "info"
                     self._log(msg.rstrip(), tag)
                 elif kind == "dl_progress":
                     _, pct, speed, eta = item
@@ -693,14 +773,13 @@ class SmutscrapeGUI:
     # =========================================================================
 
     def _start_scraping(self):
-        site_name    = self.site_var.get()
-        mode         = self.mode_var.get()
+        site_name = self.site_var.get()
+        mode      = self.mode_var.get()
         if not site_name: messagebox.showwarning("Input Error", "Please select a site.");  return
         if not mode:      messagebox.showwarning("Input Error", "Please select a mode.");  return
 
         checked_cats = self._get_checked_categories()
         free_query   = self.query_entry.get().strip()
-
         if checked_cats:
             targets = checked_cats
         elif free_query:
@@ -712,8 +791,7 @@ class SmutscrapeGUI:
 
         self.dl_bar["value"] = self.global_bar["value"] = 0
         self.dl_pct_var.set(""); self.global_pct_var.set("")
-        self.video_title_var.set("—"); self.video_meta_var.set("—")
-
+        self.video_title_var.set("\u2014"); self.video_meta_var.set("\u2014")
         self._stop_event.clear()
         self.run_button.config(state="disabled")
         self.stop_button.config(state="normal")
@@ -724,19 +802,16 @@ class SmutscrapeGUI:
             f"Starting: site={site_name}  mode={mode}  targets={targets}",
             "success"
         )
-        threading.Thread(
-            target=self._run_task,
-            args=(site_name, mode, targets),
-            daemon=True
-        ).start()
+        threading.Thread(target=self._run_task,
+                         args=(site_name, mode, targets), daemon=True).start()
 
     def _stop_scraping(self):
         self._stop_event.set()
-        self.status_var.set("Stop requested — finishing current video...")
+        self.status_var.set("Stop requested \u2014 finishing current video...")
         self.stop_button.config(state="disabled")
         self._log(
             f"[{datetime.datetime.now().strftime('%H:%M:%S')}] "
-            "Stop requested by user — will abort after current video.",
+            "Stop requested by user \u2014 will abort after current video.",
             "stopped"
         )
 
@@ -749,12 +824,15 @@ class SmutscrapeGUI:
             if not site_obj: raise ValueError(f"Site '{site_name}' not found.")
 
             general_config = load_configuration('general')
-            state_set      = get_session_manager().processed_urls if self.applystate_var.get() else set()
+            state_set      = get_session_manager().processed_urls \
+                             if self.applystate_var.get() else set()
             mode_config    = site_obj.modes.get(mode)
-            if not mode_config: raise ValueError(f"Mode '{mode}' not found for site '{site_name}'.")
+            if not mode_config: raise ValueError(f"Mode '{mode}' not found.")
 
             site_dict    = site_obj.to_dict()
-            after_date   = self.after_entry.get().strip()   or None
+            after_date   = _get_after_date(
+                self.date_yyyy.get(), self.date_mm.get(), self.date_dd.get()
+            )
             min_duration = self.min_dur_entry.get().strip() or None
             overwrite    = self.overwrite_var.get()
             re_nfo       = self.renfo_var.get()
@@ -765,9 +843,12 @@ class SmutscrapeGUI:
             if not caps['date']:     after_date   = None
             if not caps['duration']: min_duration = None
 
-            def dl_progress_cb(pct, speed="", eta=""):    self.log_queue.put(("dl_progress",     pct, speed, eta))
-            def video_info_cb(title, date, duration):      self.log_queue.put(("video_info",       title, date, duration))
-            def global_progress_cb(done, total):           self.log_queue.put(("global_progress",  done, total))
+            def dl_progress_cb(pct, speed="", eta=""):
+                self.log_queue.put(("dl_progress", pct, speed, eta))
+            def video_info_cb(title, date, duration):
+                self.log_queue.put(("video_info", title, date, duration))
+            def global_progress_cb(done, total):
+                self.log_queue.put(("global_progress", done, total))
 
             import time as _time
 
@@ -775,7 +856,7 @@ class SmutscrapeGUI:
                 if self._stop_event.is_set(): break
                 self.log_queue.put(("log",
                     f"[{datetime.datetime.now().strftime('%H:%M:%S')}] "
-                    f"─── category {target_idx+1}/{len(targets)}: '{query}' ───"
+                    f"\u2500\u2500\u2500 category {target_idx+1}/{len(targets)}: '{query}' \u2500\u2500\u2500"
                 ))
                 self.root.after(0, lambda q=query: self.status_var.set(
                     f"Scraping '{q}'  ({target_idx+1}/{len(targets)})..."
@@ -784,18 +865,15 @@ class SmutscrapeGUI:
                 url_pattern     = mode_config.url_pattern
                 ph_match        = _re.search(r'\{(\w+)\}', url_pattern)
                 placeholder_key = ph_match.group(1) if ph_match else mode
-
                 constructed_url = construct_url(
                     site_obj.base_url, url_pattern, site_dict,
                     mode=mode, **{placeholder_key: query}
                 )
-
                 from loguru import logger as _logger
                 _logger.debug(f"[GUI] URL: {constructed_url}")
 
-                current_url  = constructed_url
+                current_url = constructed_url
                 current_page = start_page
-
                 while current_url:
                     if self._stop_event.is_set(): break
                     next_url, next_page, ok = process_list_page(
@@ -817,19 +895,22 @@ class SmutscrapeGUI:
                     current_url = next_url
                     if next_page: current_page = next_page
                     if current_url and not self._stop_event.is_set():
-                        _time.sleep(general_config.get('sleep', {}).get('between_pages', 3))
+                        _time.sleep(
+                            general_config.get('sleep', {}).get('between_pages', 3)
+                        )
 
             if not self._stop_event.is_set():
                 self.log_queue.put(("log",
-                    f"[{datetime.datetime.now().strftime('%H:%M:%S')}] ✔ Finished successfully."))
-                self.root.after(0, lambda: self.status_var.set("✔ Finished!"))
+                    f"[{datetime.datetime.now().strftime('%H:%M:%S')}] "
+                    "\u2714 Finished successfully."))
+                self.root.after(0, lambda: self.status_var.set("\u2714 Finished!"))
             else:
-                self.root.after(0, lambda: self.status_var.set("⏹ Stopped by user."))
+                self.root.after(0, lambda: self.status_var.set("\u23f9 Stopped by user."))
 
         except Exception as exc:
             import traceback
             self.log_queue.put(("log", f"ERROR: {traceback.format_exc()}"))
-            self.root.after(0, lambda s=str(exc): self.status_var.set(f"✘ Error: {s}"))
+            self.root.after(0, lambda s=str(exc): self.status_var.set(f"\u2718 Error: {s}"))
         finally:
             sys.stdout, sys.stderr = old_out, old_err
             self._remove_loguru_sink()

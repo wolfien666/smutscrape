@@ -12,7 +12,7 @@ download:
 url_encoding_rules:
   " ": "+"
   "%20": "+"
-note: "One of the major free tube sites, owned by MindGeek/Aylo. Good library of both amateur and studio content. Search is reliable and pagination is stable. Date metadata is exposed in the page JSON-LD block."
+note: "One of the major free tube sites. Date metadata is exposed in the page JSON-LD block."
 
 modes:
   video:
@@ -29,7 +29,6 @@ modes:
     examples:
       - "amateur homemade"
       - "blonde milf"
-      - "college party"
   category:
     url_pattern: "/category/{category}/"
     url_pattern_pages: "/category/{category}/?page={page}"
@@ -38,7 +37,6 @@ modes:
     examples:
       - "amateur"
       - "milf"
-      - "lesbian"
   pornstar:
     url_pattern: "/pornstar/{pornstar}/"
     url_pattern_pages: "/pornstar/{pornstar}/?page={page}"
@@ -49,7 +47,6 @@ modes:
     tip: "Download videos featuring a pornstar"
     examples:
       - "Riley Reid"
-      - "Abella Danger"
   channel:
     url_pattern: "/channel/{channel}/"
     url_pattern_pages: "/channel/{channel}/?page={page}"
@@ -60,7 +57,6 @@ modes:
     tip: "Download videos from a specific channel"
     examples:
       - "bangbros"
-      - "brazzers"
 
 scrapers:
   video_scraper:

@@ -27,6 +27,51 @@ class QueueHandler:
         pass
 
 
+def _format_duration(raw):
+    """
+    Normalise any duration string to HH:MM:SS for display.
+
+    Handles:
+      - bare integer / float seconds:   "1385"  -> "00:23:05"
+      - ISO 8601:                        "PT23M5S" -> "00:23:05"
+      - already HH:MM:SS or MM:SS       passed through after normalisation
+    """
+    if not raw:
+        return ""
+    raw = str(raw).strip()
+
+    # ISO 8601  PT1H23M45S
+    m = _re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?$", raw, _re.IGNORECASE)
+    if m and any(m.groups()):
+        total_s = int(float(m.group(1) or 0)) * 3600 \
+                + int(float(m.group(2) or 0)) * 60 \
+                + int(float(m.group(3) or 0))
+        h, rem = divmod(total_s, 3600)
+        mn, s  = divmod(rem, 60)
+        return f"{h:02d}:{mn:02d}:{s:02d}"
+
+    # HH:MM:SS or MM:SS — already colon-delimited, just zero-pad
+    if ":" in raw:
+        parts = raw.split(":")
+        try:
+            parts = [int(p) for p in parts]
+            if len(parts) == 2:
+                return f"00:{parts[0]:02d}:{parts[1]:02d}"
+            if len(parts) == 3:
+                return f"{parts[0]:02d}:{parts[1]:02d}:{parts[2]:02d}"
+        except ValueError:
+            return raw
+
+    # Bare seconds (integer or float)
+    try:
+        total_s = int(float(raw))
+        h, rem  = divmod(total_s, 3600)
+        mn, s   = divmod(rem, 60)
+        return f"{h:02d}:{mn:02d}:{s:02d}"
+    except ValueError:
+        return raw
+
+
 class SmutscrapeGUI:
     def __init__(self, root):
         self.root = root
@@ -108,19 +153,16 @@ class SmutscrapeGUI:
         prog_frame.pack(fill="x", padx=10, pady=(2, 4))
         prog_frame.columnconfigure(1, weight=1)
 
-        # Row 0 – current video info
         tk.Label(prog_frame, text="Current video:", width=14, anchor="e").grid(row=0, column=0, sticky="e", pady=2)
         self.video_title_var = tk.StringVar(value="—")
         tk.Label(prog_frame, textvariable=self.video_title_var, anchor="w",
                  fg="#1a5276", font=("Helvetica", 9, "bold")).grid(row=0, column=1, columnspan=3, sticky="ew", padx=4)
 
-        # Row 1 – upload date + duration
         tk.Label(prog_frame, text="Date / Duration:", width=14, anchor="e").grid(row=1, column=0, sticky="e", pady=2)
         self.video_meta_var = tk.StringVar(value="—")
         tk.Label(prog_frame, textvariable=self.video_meta_var, anchor="w",
                  fg="#555", font=("Helvetica", 9)).grid(row=1, column=1, columnspan=3, sticky="ew", padx=4)
 
-        # Row 2 – per-video download progress bar
         tk.Label(prog_frame, text="Download:", width=14, anchor="e").grid(row=2, column=0, sticky="e", pady=2)
         self.dl_bar = ttk.Progressbar(prog_frame, orient="horizontal", length=400, mode="determinate", maximum=100)
         self.dl_bar.grid(row=2, column=1, sticky="ew", padx=4)
@@ -128,7 +170,6 @@ class SmutscrapeGUI:
         tk.Label(prog_frame, textvariable=self.dl_pct_var, width=18, anchor="w",
                  font=("Courier", 9)).grid(row=2, column=2, sticky="w", padx=4)
 
-        # Row 3 – global query progress bar
         tk.Label(prog_frame, text="Query progress:", width=14, anchor="e").grid(row=3, column=0, sticky="e", pady=2)
         self.global_bar = ttk.Progressbar(prog_frame, orient="horizontal", length=400, mode="determinate", maximum=100)
         self.global_bar.grid(row=3, column=1, sticky="ew", padx=4)
@@ -176,7 +217,6 @@ class SmutscrapeGUI:
         self.log_text.config(state="disabled")
 
     def _set_dl_progress(self, pct, speed="", eta=""):
-        """Called from worker thread via queue to update download bar."""
         self.dl_bar["value"] = pct
         label = f"{pct:.1f}%"
         if speed: label += f"  {speed}"
@@ -192,9 +232,9 @@ class SmutscrapeGUI:
         self.video_title_var.set(title or "—")
         parts = []
         if date:     parts.append(f"\U0001f4c5 {date}")
-        if duration: parts.append(f"\u23f1 {duration}")
+        dur_fmt = _format_duration(duration)
+        if dur_fmt:  parts.append(f"\u23f1 {dur_fmt}")
         self.video_meta_var.set("   ".join(parts) if parts else "—")
-        # Reset download bar for each new video
         self.dl_bar["value"] = 0
         self.dl_pct_var.set("")
 
@@ -262,8 +302,7 @@ class SmutscrapeGUI:
         if not mode:      messagebox.showwarning("Input Error", "Please select a mode.");  return
         if not query:     messagebox.showwarning("Input Error", "Please enter a query.");   return
 
-        # Reset all progress widgets
-        self.dl_bar["value"]  = 0
+        self.dl_bar["value"]     = 0
         self.dl_pct_var.set("")
         self.global_bar["value"] = 0
         self.global_pct_var.set("")
@@ -299,11 +338,8 @@ class SmutscrapeGUI:
             site_dict = site_obj.to_dict()
 
             constructed_url = construct_url(
-                site_obj.base_url,
-                url_pattern,
-                site_dict,
-                mode=mode,
-                **{placeholder_key: query}
+                site_obj.base_url, url_pattern, site_dict,
+                mode=mode, **{placeholder_key: query}
             )
 
             from loguru import logger as _logger
@@ -316,7 +352,6 @@ class SmutscrapeGUI:
             try:    start_page = int(self.page_entry.get().strip())
             except: start_page = 1
 
-            # ── callbacks passed down into core ───────────────────────────────
             def dl_progress_cb(pct, speed="", eta=""):
                 self.log_queue.put(("dl_progress", pct, speed, eta))
 
@@ -356,10 +391,8 @@ class SmutscrapeGUI:
 
         except Exception as exc:
             import traceback
-            err_tb    = traceback.format_exc()
-            err_short = str(exc)
-            self.log_queue.put(("log", f"ERROR: {err_tb}"))
-            self.root.after(0, lambda s=err_short: self.status_var.set(f"Error: {s}"))
+            self.log_queue.put(("log", f"ERROR: {traceback.format_exc()}"))
+            self.root.after(0, lambda s=str(exc): self.status_var.set(f"Error: {s}"))
         finally:
             sys.stdout, sys.stderr = old_out, old_err
             self._remove_loguru_sink()

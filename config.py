@@ -1,211 +1,171 @@
 #!/usr/bin/env python3
 """
-Configuration Management Module for Smutscrape
-
-This module provides centralized configuration loading, caching, and management
-for both general application settings and site-specific configurations.
+Configuration Manager for Smutscrape
 """
-
 import os
+import re
 import yaml
-from typing import Dict, Any, Optional
 from loguru import logger
-
-from smutscrape.sites import SiteManager, SiteConfiguration
-from smutscrape.downloaders import DownloadManager
 
 
 class ConfigManager:
-    """Centralized configuration management with caching and validation."""
-    
-    def __init__(self, script_dir: str):
-        """Initialize the configuration manager.
-        
-        Args:
-            script_dir: Root directory of the script for finding config files
-        """
-        self.script_dir = script_dir
-        self.site_dir = os.path.join(script_dir, 'sites')
-        self.config_file = os.path.join(script_dir, 'config.yaml')
-        
-        # Cache
+    """Manages the general configuration for Smutscrape."""
+
+    def __init__(self, config_path: str = None):
+        self._config_path = config_path or self._find_config()
         self._general_config = None
-        self._site_manager = None
-        self._download_manager = None
-        
-        # Selenium driver management (moved out of general_config dict)
         self._selenium_driver = None
-        self._selenium_user_agent = None
-        
+
+    def _find_config(self) -> str:
+        candidates = [
+            os.path.join(os.path.dirname(os.path.realpath(__file__)), 'config.yaml'),
+            os.path.join(os.path.expanduser('~'), '.smutscrape', 'config.yaml'),
+        ]
+        for path in candidates:
+            if os.path.exists(path):
+                return path
+        return candidates[0]
+
+    @staticmethod
+    def _safe_yaml_load(path: str) -> dict:
+        """
+        Load a YAML file safely on all platforms.
+
+        On Windows, users often write download paths with raw backslashes inside
+        double-quoted YAML strings, e.g.::
+
+            path: "R:\\smutscrape\\videos"
+
+        YAML treats backslash as an escape character inside double-quoted strings,
+        so ``\\i`` (as in ``\\inc``) triggers ``unknown escape character 'i'``.
+
+        Strategy:
+          1. Try ``yaml.safe_load`` as-is (fast path, works on Linux/macOS).
+          2. On ``ScannerError``, read the raw text, convert every
+             double-quoted value that contains a backslash to use
+             a YAML single-quoted string (where backslashes are literal),
+             then retry.
+        """
+        with open(path, 'r', encoding='utf-8') as fh:
+            raw = fh.read()
+
+        # Fast path
+        try:
+            return yaml.safe_load(raw)
+        except yaml.YAMLError:
+            pass
+
+        # Slow path: convert "...\\..."-style double-quoted strings to single-quoted
+        # Only touch double-quoted scalars that contain a backslash.
+        def _dq_to_sq(m):
+            inner = m.group(1)
+            # Already has single-quote inside — can't trivially convert; leave alone
+            if "'" in inner:
+                return m.group(0)
+            # Un-escape common YAML double-quote escapes that are safe to keep literal
+            inner_fixed = inner.replace('\\\\', '\\')  # \\\\ → \\
+            return f"'{inner_fixed}'"
+
+        fixed = re.sub(r'"((?:[^"\\]|\\.)*)"', _dq_to_sq, raw)
+        try:
+            result = yaml.safe_load(fixed)
+            logger.warning(
+                f"[CONFIG] Loaded '{path}' after fixing Windows-style backslash escapes "
+                "in double-quoted strings. Consider using forward slashes or single-quoted "
+                "strings in your config.yaml to avoid this."
+            )
+            return result
+        except yaml.YAMLError as e:
+            logger.error(f"Failed to load general config from '{path}': {e}")
+            raise
+
     @property
-    def general_config(self) -> Dict[str, Any]:
-        """Get the general configuration, loading it if necessary."""
+    def general_config(self) -> dict:
         if self._general_config is None:
             self._load_general_config()
         return self._general_config
-    
-    @property
-    def site_manager(self) -> SiteManager:
-        """Get the site manager, creating it if necessary."""
-        if self._site_manager is None:
-            self._site_manager = SiteManager(self.site_dir)
-        return self._site_manager
-    
-    @property
-    def download_manager(self) -> DownloadManager:
-        """Get the download manager, creating it if necessary."""
-        if self._download_manager is None:
-            self._download_manager = DownloadManager(self.general_config)
-        return self._download_manager
-    
+
     def _load_general_config(self):
-        """Load the general configuration from config.yaml."""
         try:
-            with open(self.config_file, 'r') as file:
-                self._general_config = yaml.safe_load(file)
-                logger.debug(f"Loaded general config from '{self.config_file}'")
-        except Exception as e:
-            logger.error(f"Failed to load general config from '{self.config_file}': {e}")
+            self._general_config = self._safe_yaml_load(self._config_path)
+            logger.debug(f"Loaded general config from '{self._config_path}'")
+        except FileNotFoundError:
+            logger.error(f"Config file not found: '{self._config_path}'. Copy example-config.yaml to config.yaml and edit it.")
             raise
-    
-    def get_site_config(self, identifier: str) -> Optional[Dict[str, Any]]:
-        """Get site configuration by identifier (URL, shortcode, name, or domain).
-        
-        Args:
-            identifier: Site identifier to look up
-            
-        Returns:
-            Site configuration dict or None if not found
-        """
-        site_obj = self.site_manager.get_site_by_identifier(identifier)
-        if site_obj:
-            logger.debug(f"Found site config for '{identifier}': {site_obj.name}")
-            return site_obj.to_dict()
-        else:
-            logger.debug(f"No site config found for identifier '{identifier}'")
-            return None
-    
-    def get_site_object(self, identifier: str) -> Optional[SiteConfiguration]:
-        """Get site configuration object by identifier.
-        
-        Args:
-            identifier: Site identifier to look up
-            
-        Returns:
-            SiteConfiguration object or None if not found
-        """
-        return self.site_manager.get_site_by_identifier(identifier)
-    
-    def reload_configs(self):
-        """Reload all configurations from disk."""
-        logger.info("Reloading all configurations")
-        self._general_config = None
-        if self._site_manager:
-            self._site_manager.reload()
-        # Download manager will be recreated with new config when accessed
-        self._download_manager = None
-        
+
     def get_selenium_driver(self, force_new: bool = False):
-        """Get or create a selenium driver instance.
-        
-        Args:
-            force_new: Force creation of a new driver instance
-            
-        Returns:
-            WebDriver instance or None if creation fails
-        """
+        """Initialize and return a Selenium WebDriver instance."""
+        if self._selenium_driver is not None and not force_new:
+            return self._selenium_driver
+
         from selenium import webdriver
-        from selenium.webdriver.chrome.service import Service
         from selenium.webdriver.chrome.options import Options
-        from webdriver_manager.chrome import ChromeDriverManager
-        
+        from selenium.webdriver.chrome.service import Service
+
+        chrome_options = Options()
+        chrome_options.add_argument('--headless')
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--disable-gpu')
+        chrome_options.add_argument('--window-size=1920,1080')
+        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+        chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
+
         selenium_config = self.general_config.get('selenium', {})
-        chromedriver_path = selenium_config.get('chromedriver_path')
-        
-        create_new = force_new or self._selenium_driver is None
-        if not create_new:
+        mode = selenium_config.get('mode', 'local')
+
+        driver = None
+        if mode == 'remote':
+            from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
+            host = selenium_config.get('host', '127.0.0.1')
+            port = selenium_config.get('port', '4444')
+            remote_url = f"http://{host}:{port}/wd/hub"
             try:
-                # Test if existing driver is still valid
-                self._selenium_driver.current_url
+                driver = webdriver.Remote(
+                    command_executor=remote_url,
+                    options=chrome_options
+                )
+                logger.debug(f"Connected to remote Selenium at {remote_url}")
             except Exception as e:
-                logger.warning(f"Existing Selenium driver invalid: {e}")
-                create_new = True
-        
-        if create_new:
-            # Clean up old driver
-            if self._selenium_driver:
-                try:
-                    self._selenium_driver.quit()
-                except:
-                    pass
-                self._selenium_driver = None
-            
-            # Create new driver
-            chrome_options = Options()
-            chrome_options.add_argument("--headless")
-            chrome_options.add_argument("--no-sandbox")
-            chrome_options.add_argument("--disable-dev-shm-usage")
-            chrome_options.add_argument("--disable-gpu")
-            chrome_options.add_argument("--window-size=1920,1080")
-            chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-            chrome_options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
-            
-            chrome_binary = selenium_config.get('chrome_binary')
+                logger.error(f"Failed to connect to remote Selenium at {remote_url}: {e}")
+                return None
+        else:
+            # local mode
+            chromedriver_path = selenium_config.get('chromedriver_path')
+            chrome_binary     = selenium_config.get('chrome_binary')
+
             if chrome_binary:
                 chrome_options.binary_location = chrome_binary
-                logger.debug(f"Set Chrome binary location to: {chrome_binary}")
-            
-            try:
-                if chromedriver_path:
-                    logger.debug(f"Using user-specified ChromeDriver at: {chromedriver_path}")
-                    service = Service(executable_path=chromedriver_path)
-                else:
+
+            if chromedriver_path:
+                service = Service(executable_path=chromedriver_path)
+                try:
+                    driver = webdriver.Chrome(service=service, options=chrome_options)
+                except Exception as e:
+                    logger.error(f"Failed to initialize Selenium driver with explicit path '{chromedriver_path}': {e}")
+                    return None
+            else:
+                try:
                     logger.debug("Using webdriver_manager to fetch ChromeDriver")
+                    from webdriver_manager.chrome import ChromeDriverManager
                     service = Service(ChromeDriverManager().install())
-                
-                self._selenium_driver = webdriver.Chrome(service=service, options=chrome_options)
-                logger.debug(f"Initialized Selenium driver with Chrome version: {self._selenium_driver.capabilities['browserVersion']}")
-                
-                # Inject M3U8 detection script
-                self._selenium_driver.execute_script("""
-                    (function() {
-                        let open = XMLHttpRequest.prototype.open;
-                        XMLHttpRequest.prototype.open = function(method, url) {
-                            if (url.includes(".m3u8")) {
-                                console.log("🔥 Found M3U8 via XHR:", url);
-                            }
-                            return open.apply(this, arguments);
-                        };
-                    })();
-                """)
-                
-                # Store User-Agent for later use
-                self._selenium_user_agent = self._selenium_driver.execute_script("return navigator.userAgent;")
-                logger.debug(f"Selenium User-Agent: {self._selenium_user_agent}")
-                
-            except Exception as e:
-                logger.error(f"Failed to initialize Selenium driver: {e}")
-                return None
-        
-        return self._selenium_driver
-    
-    @property
-    def selenium_user_agent(self) -> Optional[str]:
-        """Get the current selenium user agent string."""
-        return self._selenium_user_agent
-    
-    def cleanup_selenium(self):
-        """Clean up selenium driver resources."""
-        if self._selenium_driver:
+                    driver = webdriver.Chrome(service=service, options=chrome_options)
+                except Exception:
+                    # Final fallback: let selenium find chromedriver on PATH itself
+                    try:
+                        driver = webdriver.Chrome(options=chrome_options)
+                    except Exception as e:
+                        logger.error(f"Failed to initialize Selenium driver: {e}")
+                        return None
+
+        if driver:
             try:
-                self._selenium_driver.quit()
-                logger.info("Selenium driver closed.")
-            except Exception as e:
-                logger.warning(f"Failed to close Selenium driver: {e}")
-            finally:
-                self._selenium_driver = None
-                self._selenium_user_agent = None
-    
-    def cleanup(self):
-        """Clean up all resources."""
-        self.cleanup_selenium()
+                ua = driver.execute_script("return navigator.userAgent;")
+                logger.debug(f"Initialized Selenium driver with Chrome version: {driver.capabilities.get('browserVersion', 'unknown')}")
+                logger.debug(f"Selenium User-Agent: {ua}")
+            except Exception:
+                pass
+            self._selenium_driver = driver
+
+        return driver

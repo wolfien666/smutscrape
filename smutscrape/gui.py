@@ -186,13 +186,17 @@ class SmutscrapeGUI:
             text = ansi_escape.sub('', str(message)).rstrip()
             self.log_queue.put(text)
 
-        # Remove previous GUI sink if any, then add fresh one
         if self._loguru_sink_id is not None:
             try:
                 logger.remove(self._loguru_sink_id)
             except Exception:
                 pass
-        self._loguru_sink_id = logger.add(_gui_sink, format="{time:HH:mm:ss} | {level:<7} | {message}", level="DEBUG", colorize=False)
+        self._loguru_sink_id = logger.add(
+            _gui_sink,
+            format="{time:HH:mm:ss} | {level:<7} | {message}",
+            level="DEBUG",
+            colorize=False
+        )
 
     def _remove_loguru_sink(self):
         if self._loguru_sink_id is not None:
@@ -222,8 +226,11 @@ class SmutscrapeGUI:
 
         self.run_button.config(state="disabled")
         self.status_var.set("Scraping in progress...")
-        self._install_loguru_sink()  # Route all loguru output into GUI log widget
-        self._log(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Starting: site={site_name}  mode={mode}  query={query}", "success")
+        self._install_loguru_sink()
+        self._log(
+            f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Starting: site={site_name}  mode={mode}  query={query}",
+            "success"
+        )
 
         t = threading.Thread(
             target=self._run_task,
@@ -238,6 +245,8 @@ class SmutscrapeGUI:
         sys.stdout = handler
         sys.stderr = handler
 
+        error_msg = None  # captured outside try so the lambda below can always read it
+
         try:
             site_obj = next((s for s in self.sites.values() if s.name == site_name), None)
             if not site_obj:
@@ -250,15 +259,11 @@ class SmutscrapeGUI:
             if not mode_config:
                 raise ValueError(f"Mode '{mode}' not found for site '{site_name}'.")
 
-            # ── BUG FIX: use url_pattern (page 1), NOT url_pattern_pages ─────────────
-            # url_pattern_pages contains {page} placeholder — never use it for page 1.
-            # Also: the kwarg key MUST match the placeholder name in the pattern.
-            # e.g. /search/?query={search}  →  construct_url(..., search=query)
-            #      /pornstar/{pornstar}/     →  construct_url(..., pornstar=query)
-            url_pattern = mode_config.url_pattern  # e.g. "/search/?query={search}"
-
-            # Detect the placeholder name inside the pattern  (e.g. "search", "pornstar")
+            # Detect the placeholder name inside url_pattern
+            # e.g. "/search/?query={search}"  →  key="search"
+            #      "/pornstar/{pornstar}/"     →  key="pornstar"
             import re as _re
+            url_pattern = mode_config.url_pattern
             placeholder_match = _re.search(r'\{(\w+)\}', url_pattern)
             placeholder_key = placeholder_match.group(1) if placeholder_match else mode
 
@@ -268,23 +273,23 @@ class SmutscrapeGUI:
                 url_pattern,
                 site_dict,
                 mode=mode,
-                **{placeholder_key: query}   # ← correct key, not hardcoded mode name
+                **{placeholder_key: query}
             )
 
             from loguru import logger as _logger
             _logger.debug(f"[GUI] Constructed URL for page 1: {constructed_url}")
 
-            after_date = self.after_entry.get().strip() or None
-            min_duration = self.min_dur_entry.get().strip() or None
-            overwrite = self.overwrite_var.get()
-            re_nfo = self.renfo_var.get()
+            after_date     = self.after_entry.get().strip()   or None
+            min_duration   = self.min_dur_entry.get().strip() or None
+            overwrite      = self.overwrite_var.get()
+            re_nfo         = self.renfo_var.get()
 
             try:
                 start_page = int(self.page_entry.get().strip())
             except (ValueError, AttributeError):
                 start_page = 1
 
-            current_url = constructed_url
+            current_url  = constructed_url
             current_page = start_page
 
             import time as _time
@@ -312,14 +317,20 @@ class SmutscrapeGUI:
                     sleep_s = general_config.get('sleep', {}).get('between_pages', 3)
                     _time.sleep(sleep_s)
 
-            self.log_queue.put(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Finished successfully.")
+            self.log_queue.put(
+                f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Finished successfully."
+            )
             self.root.after(0, lambda: self.status_var.set("Finished!"))
 
         except Exception as exc:
             import traceback
-            err_msg = traceback.format_exc()
-            self.log_queue.put(f"ERROR: {err_msg}")
-            self.root.after(0, lambda: self.status_var.set(f"Error: {exc}"))
+            error_msg = traceback.format_exc()   # store in outer var ← safe for lambda
+            error_short = str(exc)               # short version for status bar
+            self.log_queue.put(f"ERROR: {error_msg}")
+            # Use the captured string variables in the lambda, NOT 'exc' directly.
+            # Capturing 'exc' via closure is unreliable in Python's except-scope.
+            self.root.after(0, lambda s=error_short: self.status_var.set(f"Error: {s}"))
+
         finally:
             sys.stdout = old_stdout
             sys.stderr = old_stderr

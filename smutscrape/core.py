@@ -294,6 +294,48 @@ def construct_url(base_url, pattern, site_config, mode=None, **kwargs):
 
 
 # ---------------------------------------------------------------------------
+# resolve_download_dir  (reads download_destinations from config.yaml)
+# ---------------------------------------------------------------------------
+
+def resolve_download_dir(general_config):
+    """
+    Return the first usable local download path from config.yaml.
+
+    Priority order:
+      1. download_destinations list — first entry with type==local whose path exists (or can be created)
+      2. Legacy flat key  download_dir
+      3. Hard fallback    <cwd>/downloads
+    """
+    destinations = general_config.get('download_destinations', [])
+    for dest in destinations:
+        if not isinstance(dest, dict):
+            continue
+        dtype = dest.get('type', 'local')
+        if dtype == 'local':
+            path = dest.get('path', '')
+            if path:
+                try:
+                    os.makedirs(path, exist_ok=True)
+                    logger.debug(f"[DOWNLOAD] Using destination path: {path}")
+                    return path
+                except OSError as e:
+                    logger.warning(f"[DOWNLOAD] Cannot use destination path '{path}': {e}")
+
+    # Legacy key
+    legacy = general_config.get('download_dir')
+    if legacy:
+        os.makedirs(legacy, exist_ok=True)
+        logger.debug(f"[DOWNLOAD] Using legacy download_dir: {legacy}")
+        return legacy
+
+    # Hard fallback
+    fallback = os.path.join(os.getcwd(), 'downloads')
+    os.makedirs(fallback, exist_ok=True)
+    logger.warning(f"[DOWNLOAD] No download_destinations configured — falling back to: {fallback}")
+    return fallback
+
+
+# ---------------------------------------------------------------------------
 # download_video  (yt-dlp wrapper)
 # ---------------------------------------------------------------------------
 
@@ -303,12 +345,13 @@ def download_video(page_url, site_config, general_config, output_dir=None):
     Returns True on success, False on failure.
     """
     if output_dir is None:
-        output_dir = general_config.get('download_dir') or os.path.join(os.getcwd(), 'downloads')
-    os.makedirs(output_dir, exist_ok=True)
+        output_dir = resolve_download_dir(general_config)
 
-    # Output template: download_dir / site_shortcode / %(title)s [%(id)s].%(ext)s
+    # Output template: output_dir / site_shortcode / %(title)s [%(id)s].%(ext)s
     shortcode = site_config.get('shortcode', 'dl')
-    out_template = os.path.join(output_dir, shortcode, '%(title)s [%(id)s].%(ext)s')
+    site_dir  = os.path.join(output_dir, shortcode)
+    os.makedirs(site_dir, exist_ok=True)
+    out_template = os.path.join(site_dir, '%(title)s [%(id)s].%(ext)s')
 
     cmd = [
         'yt-dlp',

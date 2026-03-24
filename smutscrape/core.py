@@ -242,7 +242,6 @@ def extract_data(soup, selectors, driver=None, site_config=None):
 
         if isinstance(config, dict) and 'attribute' in config:
             values = [el.get(config['attribute']) for el in elements if el.get(config['attribute'])]
-            # Always return a single string for 'url'-like fields, list only for multi-value fields
             if field in ('url', 'download_url', 'image', 'date', 'duration'):
                 value = values[0] if values else ''
             else:
@@ -321,14 +320,12 @@ def resolve_download_dir(general_config):
                 except OSError as e:
                     logger.warning(f"[DOWNLOAD] Cannot use destination path '{path}': {e}")
 
-    # Legacy key
     legacy = general_config.get('download_dir')
     if legacy:
         os.makedirs(legacy, exist_ok=True)
         logger.debug(f"[DOWNLOAD] Using legacy download_dir: {legacy}")
         return legacy
 
-    # Hard fallback
     fallback = os.path.join(os.getcwd(), 'downloads')
     os.makedirs(fallback, exist_ok=True)
     logger.warning(f"[DOWNLOAD] No download_destinations configured — falling back to: {fallback}")
@@ -336,20 +333,31 @@ def resolve_download_dir(general_config):
 
 
 # ---------------------------------------------------------------------------
-# download_video  (yt-dlp wrapper)
+# download_video  (yt-dlp wrapper, streams stdout for live progress)
 # ---------------------------------------------------------------------------
 
-def download_video(page_url, site_config, general_config, output_dir=None):
+# Pattern: [download]  42.3% of  1.23GiB at  3.50MiB/s ETA 00:20
+_DL_PROGRESS_RE = re.compile(
+    r'\[download\]\s+(\d+\.?\d*)%'
+    r'(?:.*?at\s+([\d.]+\s*\S+/s))?'
+    r'(?:.*?ETA\s+(\S+))?',
+    re.IGNORECASE
+)
+
+
+def download_video(page_url, site_config, general_config, output_dir=None,
+                   progress_callback=None):
     """
-    Download *page_url* using yt-dlp, selecting the best available quality.
+    Download *page_url* using yt-dlp.
+    *progress_callback(pct, speed, eta)* is called whenever yt-dlp prints a
+    progress line, allowing the GUI to update a progress bar in real time.
     Returns True on success, False on failure.
     """
     if output_dir is None:
         output_dir = resolve_download_dir(general_config)
 
-    # Output template: output_dir / site_shortcode / %(title)s [%(id)s].%(ext)s
-    shortcode = site_config.get('shortcode', 'dl')
-    site_dir  = os.path.join(output_dir, shortcode)
+    shortcode    = site_config.get('shortcode', 'dl')
+    site_dir     = os.path.join(output_dir, shortcode)
     os.makedirs(site_dir, exist_ok=True)
     out_template = os.path.join(site_dir, '%(title)s [%(id)s].%(ext)s')
 
@@ -358,17 +366,15 @@ def download_video(page_url, site_config, general_config, output_dir=None):
         '--format', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
         '--merge-output-format', 'mp4',
         '--no-playlist',
-        '--no-warnings',
+        '--newline',          # one progress line per line — needed for streaming parse
         '--output', out_template,
         page_url,
     ]
 
-    # Optional cookies file
     cookies = general_config.get('cookies_file') or site_config.get('cookies_file')
     if cookies and os.path.isfile(cookies):
         cmd += ['--cookies', cookies]
 
-    # Optional rate limit
     rate_limit = general_config.get('rate_limit')
     if rate_limit:
         cmd += ['--limit-rate', str(rate_limit)]
@@ -377,12 +383,35 @@ def download_video(page_url, site_config, general_config, output_dir=None):
     logger.debug(f"[DOWNLOAD] cmd: {' '.join(cmd)}")
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-        if result.returncode == 0:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        for line in proc.stdout:
+            line = line.rstrip()
+            if not line:
+                continue
+            m = _DL_PROGRESS_RE.search(line)
+            if m and progress_callback:
+                pct   = float(m.group(1))
+                speed = m.group(2) or ""
+                eta   = m.group(3) or ""
+                progress_callback(pct, speed, eta)
+            else:
+                # Forward non-progress lines to the logger
+                if line and not line.startswith('[download]'):
+                    logger.debug(f"[yt-dlp] {line}")
+        proc.wait(timeout=600)
+        if proc.returncode == 0:
+            if progress_callback:
+                progress_callback(100.0, "", "")
             logger.success(f"[DOWNLOAD] OK: {page_url}")
             return True
         else:
-            logger.error(f"[DOWNLOAD] yt-dlp failed (rc={result.returncode}): {result.stderr.strip()[-500:]}")
+            logger.error(f"[DOWNLOAD] yt-dlp failed (rc={proc.returncode})")
             return False
     except FileNotFoundError:
         logger.error("[DOWNLOAD] yt-dlp not found. Install it: pip install yt-dlp  or  sudo apt install yt-dlp")
@@ -441,7 +470,8 @@ def process_url(url, site_config, general_config, overwrite=False, re_nfo=False,
 def process_list_page(url, site_config, general_config, page_num=1, video_offset=0,
                       mode=None, identifier=None, overwrite=False, headers=None,
                       new_nfo=False, do_not_ignore=False, apply_state=False,
-                      state_set=None, after_date=None, min_duration=None):
+                      state_set=None, after_date=None, min_duration=None,
+                      dl_progress_cb=None, video_info_cb=None, global_progress_cb=None):
     after_threshold  = parse_after_threshold(after_date) if after_date else None
     min_dur_minutes  = float(min_duration) if min_duration else None
 
@@ -502,12 +532,14 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
     term_width = get_terminal_width()
     print()
     print(colored(f" page {page_num}, {site_config['name'].lower()} {mode}: \"{identifier}\" ".center(term_width, "═"), "yellow"))
-    logger.info(f"Found {len(video_elements)} video elements on page {page_num}")
+    total_items = len(video_elements)
+    logger.info(f"Found {total_items} video elements on page {page_num}")
     if after_threshold:  logger.info(f"[FILTER] Date filter: > {after_threshold}")
     if min_dur_minutes:  logger.info(f"[FILTER] Duration filter: > {min_dur_minutes} min")
 
     success        = False
     skipped_filter = 0
+    processed      = 0
 
     for i, video_element in enumerate(video_elements, 1):
         if video_offset > 0 and i < video_offset:
@@ -517,13 +549,13 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
 
         if not video_passes_filters(video_data, after_threshold, min_dur_minutes):
             skipped_filter += 1
+            processed += 1
+            if global_progress_cb:
+                global_progress_cb(processed, total_items)
             continue
 
         # ── Resolve URL ──────────────────────────────────────────────────────
         raw_url = video_data.get('url', '')
-
-        # extract_data may return a list for attribute fields when >1 element matches;
-        # always take the first string value.
         if isinstance(raw_url, list):
             raw_url = raw_url[0] if raw_url else ''
 
@@ -540,19 +572,38 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
             )
         else:
             logger.debug(f"[ITEMS] No URL for element {i}: {video_data}")
+            processed += 1
+            if global_progress_cb:
+                global_progress_cb(processed, total_items)
             continue
 
         print()
-        print(colored(f"┈┈┈ {i} of {len(video_elements)} ┈ {video_url} ".ljust(term_width, "┈"), "magenta"))
+        print(colored(f"┈┈┈ {i} of {total_items} ┈ {video_url} ".ljust(term_width, "┈"), "magenta"))
+
+        # Emit video info (title from list, date, duration) to GUI before download
+        if video_info_cb:
+            v_title    = video_data.get('title', '') or video_url.split('/')[-2] or video_url
+            v_date     = video_data.get('date', '')
+            v_duration = video_data.get('duration', '')
+            video_info_cb(v_title, v_date, v_duration)
 
         if is_url_processed(video_url, state_set) and not (overwrite or new_nfo):
             logger.info(f"Skipping already processed: {video_url}")
             success = True
+            processed += 1
+            if global_progress_cb:
+                global_progress_cb(processed, total_items)
             continue
 
         if process_video_page(video_url, site_config, general_config, overwrite, headers,
-                               new_nfo, do_not_ignore, apply_state=apply_state, state_set=state_set):
+                               new_nfo, do_not_ignore, apply_state=apply_state,
+                               state_set=state_set, dl_progress_cb=dl_progress_cb,
+                               video_info_cb=video_info_cb):
             success = True
+
+        processed += 1
+        if global_progress_cb:
+            global_progress_cb(processed, total_items)
 
     if skipped_filter:
         logger.info(f"[FILTER] Skipped {skipped_filter} videos due to filters.")
@@ -595,7 +646,8 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
 # ---------------------------------------------------------------------------
 
 def process_video_page(url, site_config, general_config, overwrite=False, headers=None,
-                       new_nfo=False, do_not_ignore=False, apply_state=False, state_set=None):
+                       new_nfo=False, do_not_ignore=False, apply_state=False,
+                       state_set=None, dl_progress_cb=None, video_info_cb=None):
     logger.info(f"Processing video page: {url}")
     use_selenium = site_config.get('use_selenium', False)
     driver = get_selenium_driver(general_config) if use_selenium else None
@@ -606,21 +658,27 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
     raw_data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config)
     title    = raw_data.get('title', 'Unknown')
 
-    # ── Determine download method ────────────────────────────────────────────
+    # Update GUI info panel with data from the actual video page (more accurate)
+    if video_info_cb:
+        v_date     = raw_data.get('date', '')
+        v_duration = raw_data.get('duration', '')
+        video_info_cb(title, v_date, v_duration)
+
     download_cfg = site_config.get('download', {})
     method = download_cfg.get('method', 'yt-dlp')
 
     if method == 'yt-dlp':
         logger.success(f"Successfully processed video: {title}")
-        ok = download_video(url, site_config, general_config)
+        ok = download_video(url, site_config, general_config,
+                            progress_callback=dl_progress_cb)
     else:
-        # Legacy / direct URL download fallback
         video_url = raw_data.get('download_url')
         if not video_url:
             logger.error("No download URL found")
             return False
         logger.success(f"Successfully processed video: {title}")
-        ok = download_video(video_url, site_config, general_config)
+        ok = download_video(video_url, site_config, general_config,
+                            progress_callback=dl_progress_cb)
 
     if ok and apply_state and state_set is not None:
         state_set.add(url)

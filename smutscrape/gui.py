@@ -7,6 +7,7 @@ from tkinter import ttk, messagebox, scrolledtext
 import threading
 import sys
 import os
+import re as _re
 import queue
 import datetime
 
@@ -21,7 +22,7 @@ class QueueHandler:
         self.log_queue = log_queue
     def write(self, msg):
         if msg and msg.strip():
-            self.log_queue.put(msg)
+            self.log_queue.put(("log", msg))
     def flush(self):
         pass
 
@@ -30,7 +31,7 @@ class SmutscrapeGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Smutscrape GUI")
-        self.root.geometry("750x640")
+        self.root.geometry("820x780")
         self.root.resizable(True, True)
         self.log_queue = queue.Queue()
         self._loguru_sink_id = None
@@ -38,6 +39,7 @@ class SmutscrapeGUI:
         self._poll_log_queue()
 
     def _build_ui(self):
+        # ── Target ────────────────────────────────────────────────────────────
         top = tk.LabelFrame(self.root, text="Target", padx=8, pady=6)
         top.pack(fill="x", padx=10, pady=(8, 4))
 
@@ -60,6 +62,7 @@ class SmutscrapeGUI:
         self.query_entry.grid(row=2, column=1, columnspan=2, sticky="ew", padx=6, pady=3)
         top.columnconfigure(1, weight=1)
 
+        # ── Filters ───────────────────────────────────────────────────────────
         filters = tk.LabelFrame(self.root, text="Filters", padx=8, pady=6)
         filters.pack(fill="x", padx=10, pady=4)
 
@@ -79,6 +82,7 @@ class SmutscrapeGUI:
         self.page_entry.grid(row=2, column=1, sticky="w", padx=6)
         tk.Label(filters, text="Begin scraping from this page number", fg="grey").grid(row=2, column=2, sticky="w")
 
+        # ── Options ───────────────────────────────────────────────────────────
         opts = tk.LabelFrame(self.root, text="Options", padx=8, pady=4)
         opts.pack(fill="x", padx=10, pady=4)
         self.overwrite_var = tk.BooleanVar()
@@ -88,20 +92,56 @@ class SmutscrapeGUI:
         self.applystate_var = tk.BooleanVar()
         tk.Checkbutton(opts, text="Apply state (skip already seen)", variable=self.applystate_var).grid(row=0, column=2, sticky="w", padx=10)
 
+        # ── Buttons ───────────────────────────────────────────────────────────
         btn_frame = tk.Frame(self.root)
         btn_frame.pack(pady=6)
         self.run_button = tk.Button(
-            btn_frame, text="▶  Start Scraping", command=self._start_scraping,
+            btn_frame, text="\u25b6  Start Scraping", command=self._start_scraping,
             bg="#2e7d32", fg="white", font=("Helvetica", 10, "bold"), padx=16, pady=4
         )
         self.run_button.pack(side="left", padx=8)
         tk.Button(btn_frame, text="Clear Log", command=self._clear_log,
                   bg="#555", fg="white", padx=10, pady=4).pack(side="left", padx=8)
 
+        # ── Progress panel ────────────────────────────────────────────────────
+        prog_frame = tk.LabelFrame(self.root, text="Progress", padx=8, pady=6)
+        prog_frame.pack(fill="x", padx=10, pady=(2, 4))
+        prog_frame.columnconfigure(1, weight=1)
+
+        # Row 0 – current video info
+        tk.Label(prog_frame, text="Current video:", width=14, anchor="e").grid(row=0, column=0, sticky="e", pady=2)
+        self.video_title_var = tk.StringVar(value="—")
+        tk.Label(prog_frame, textvariable=self.video_title_var, anchor="w",
+                 fg="#1a5276", font=("Helvetica", 9, "bold")).grid(row=0, column=1, columnspan=3, sticky="ew", padx=4)
+
+        # Row 1 – upload date + duration
+        tk.Label(prog_frame, text="Date / Duration:", width=14, anchor="e").grid(row=1, column=0, sticky="e", pady=2)
+        self.video_meta_var = tk.StringVar(value="—")
+        tk.Label(prog_frame, textvariable=self.video_meta_var, anchor="w",
+                 fg="#555", font=("Helvetica", 9)).grid(row=1, column=1, columnspan=3, sticky="ew", padx=4)
+
+        # Row 2 – per-video download progress bar
+        tk.Label(prog_frame, text="Download:", width=14, anchor="e").grid(row=2, column=0, sticky="e", pady=2)
+        self.dl_bar = ttk.Progressbar(prog_frame, orient="horizontal", length=400, mode="determinate", maximum=100)
+        self.dl_bar.grid(row=2, column=1, sticky="ew", padx=4)
+        self.dl_pct_var = tk.StringVar(value="")
+        tk.Label(prog_frame, textvariable=self.dl_pct_var, width=18, anchor="w",
+                 font=("Courier", 9)).grid(row=2, column=2, sticky="w", padx=4)
+
+        # Row 3 – global query progress bar
+        tk.Label(prog_frame, text="Query progress:", width=14, anchor="e").grid(row=3, column=0, sticky="e", pady=2)
+        self.global_bar = ttk.Progressbar(prog_frame, orient="horizontal", length=400, mode="determinate", maximum=100)
+        self.global_bar.grid(row=3, column=1, sticky="ew", padx=4)
+        self.global_pct_var = tk.StringVar(value="")
+        tk.Label(prog_frame, textvariable=self.global_pct_var, width=18, anchor="w",
+                 font=("Courier", 9)).grid(row=3, column=2, sticky="w", padx=4)
+
+        # ── Status bar ────────────────────────────────────────────────────────
         self.status_var = tk.StringVar(value="Ready")
         tk.Label(self.root, textvariable=self.status_var, anchor="w",
                  relief="sunken", fg="#1a5276", font=("Helvetica", 9)).pack(fill="x", padx=10)
 
+        # ── Log output ────────────────────────────────────────────────────────
         log_frame = tk.LabelFrame(self.root, text="Log Output", padx=4, pady=4)
         log_frame.pack(fill="both", expand=True, padx=10, pady=(4, 10))
         self.log_text = scrolledtext.ScrolledText(
@@ -135,27 +175,67 @@ class SmutscrapeGUI:
         self.log_text.delete("1.0", "end")
         self.log_text.config(state="disabled")
 
+    def _set_dl_progress(self, pct, speed="", eta=""):
+        """Called from worker thread via queue to update download bar."""
+        self.dl_bar["value"] = pct
+        label = f"{pct:.1f}%"
+        if speed: label += f"  {speed}"
+        if eta:   label += f"  ETA {eta}"
+        self.dl_pct_var.set(label)
+
+    def _set_global_progress(self, done, total):
+        pct = (done / total * 100) if total else 0
+        self.global_bar["value"] = pct
+        self.global_pct_var.set(f"{done} / {total}  ({pct:.0f}%)")
+
+    def _set_video_info(self, title, date, duration):
+        self.video_title_var.set(title or "—")
+        parts = []
+        if date:     parts.append(f"\U0001f4c5 {date}")
+        if duration: parts.append(f"\u23f1 {duration}")
+        self.video_meta_var.set("   ".join(parts) if parts else "—")
+        # Reset download bar for each new video
+        self.dl_bar["value"] = 0
+        self.dl_pct_var.set("")
+
     def _poll_log_queue(self):
         try:
             while True:
-                msg = self.log_queue.get_nowait()
-                low = msg.lower()
-                if   "[filter]" in low or "skip" in low: tag = "filter"
-                elif "success"  in low or "finished" in low: tag = "success"
-                elif "error"    in low or "failed"   in low: tag = "error"
-                elif "warn"     in low:                       tag = "warn"
-                else:                                         tag = None
-                self._log(msg.rstrip(), tag)
+                item = self.log_queue.get_nowait()
+                kind = item[0]
+
+                if kind == "log":
+                    msg = item[1]
+                    low = msg.lower()
+                    if   "[filter]" in low or "skip" in low: tag = "filter"
+                    elif "success"  in low or "finished" in low: tag = "success"
+                    elif "error"    in low or "failed"   in low: tag = "error"
+                    elif "warn"     in low:                       tag = "warn"
+                    else:                                         tag = None
+                    self._log(msg.rstrip(), tag)
+
+                elif kind == "dl_progress":
+                    _, pct, speed, eta = item
+                    self._set_dl_progress(pct, speed, eta)
+
+                elif kind == "global_progress":
+                    _, done, total = item
+                    self._set_global_progress(done, total)
+
+                elif kind == "video_info":
+                    _, title, date, duration = item
+                    self._set_video_info(title, date, duration)
+
         except queue.Empty:
             pass
-        self.root.after(150, self._poll_log_queue)
+        self.root.after(100, self._poll_log_queue)
 
     def _install_loguru_sink(self):
         from loguru import logger
-        import re as _re
-        ansi = _re.compile(r'\x1b\[[0-9;]*m')
+        import re as _re2
+        ansi = _re2.compile(r'\x1b\[[0-9;]*m')
         def _sink(message):
-            self.log_queue.put(ansi.sub('', str(message)).rstrip())
+            self.log_queue.put(("log", ansi.sub('', str(message)).rstrip()))
         if self._loguru_sink_id is not None:
             try: logger.remove(self._loguru_sink_id)
             except Exception: pass
@@ -182,6 +262,14 @@ class SmutscrapeGUI:
         if not mode:      messagebox.showwarning("Input Error", "Please select a mode.");  return
         if not query:     messagebox.showwarning("Input Error", "Please enter a query.");   return
 
+        # Reset all progress widgets
+        self.dl_bar["value"]  = 0
+        self.dl_pct_var.set("")
+        self.global_bar["value"] = 0
+        self.global_pct_var.set("")
+        self.video_title_var.set("—")
+        self.video_meta_var.set("—")
+
         self.run_button.config(state="disabled")
         self.status_var.set("Scraping in progress...")
         self._install_loguru_sink()
@@ -204,25 +292,16 @@ class SmutscrapeGUI:
             if not mode_config:
                 raise ValueError(f"Mode '{mode}' not found for site '{site_name}'.")
 
-            # Detect placeholder key from the pattern, e.g. {search}, {pornstar}
-            import re as _re
             url_pattern     = mode_config.url_pattern
             ph_match        = _re.search(r'\{(\w+)\}', url_pattern)
             placeholder_key = ph_match.group(1) if ph_match else mode
 
             site_dict = site_obj.to_dict()
 
-            # ── FIX: pass site_obj.base_url explicitly; do NOT pass it again
-            # inside site_dict because construct_url already receives base_url
-            # as its first positional argument — passing a site_dict that also
-            # contains 'base_url' would NOT cause a TypeError (construct_url
-            # only unpacks kwargs), so the real Windows crash was that
-            # site_obj.base_url was being passed as BOTH positional arg AND
-            # as a key in **site_dict. We now pass ONLY the positional arg. ──
             constructed_url = construct_url(
-                site_obj.base_url,   # positional: base_url
-                url_pattern,         # positional: pattern
-                site_dict,           # positional: site_config  (NOT unpacked)
+                site_obj.base_url,
+                url_pattern,
+                site_dict,
                 mode=mode,
                 **{placeholder_key: query}
             )
@@ -236,6 +315,16 @@ class SmutscrapeGUI:
             re_nfo       = self.renfo_var.get()
             try:    start_page = int(self.page_entry.get().strip())
             except: start_page = 1
+
+            # ── callbacks passed down into core ───────────────────────────────
+            def dl_progress_cb(pct, speed="", eta=""):
+                self.log_queue.put(("dl_progress", pct, speed, eta))
+
+            def video_info_cb(title, date, duration):
+                self.log_queue.put(("video_info", title, date, duration))
+
+            def global_progress_cb(done, total):
+                self.log_queue.put(("global_progress", done, total))
 
             current_url  = constructed_url
             current_page = start_page
@@ -252,21 +341,24 @@ class SmutscrapeGUI:
                     apply_state=self.applystate_var.get(),
                     state_set=state_set,
                     after_date=after_date,
-                    min_duration=min_duration
+                    min_duration=min_duration,
+                    dl_progress_cb=dl_progress_cb,
+                    video_info_cb=video_info_cb,
+                    global_progress_cb=global_progress_cb,
                 )
                 current_url = next_url
                 if next_page: current_page = next_page
                 if current_url:
                     _time.sleep(general_config.get('sleep', {}).get('between_pages', 3))
 
-            self.log_queue.put(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Finished successfully.")
+            self.log_queue.put(("log", f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Finished successfully."))
             self.root.after(0, lambda: self.status_var.set("Finished!"))
 
         except Exception as exc:
             import traceback
             err_tb    = traceback.format_exc()
             err_short = str(exc)
-            self.log_queue.put(f"ERROR: {err_tb}")
+            self.log_queue.put(("log", f"ERROR: {err_tb}"))
             self.root.after(0, lambda s=err_short: self.status_var.set(f"Error: {s}"))
         finally:
             sys.stdout, sys.stderr = old_out, old_err

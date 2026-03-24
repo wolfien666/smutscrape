@@ -86,16 +86,14 @@ def duration_str_to_minutes(dur_str):
     if not dur_str:
         return None
     dur_str = str(dur_str).strip()
-    # ISO 8601 duration  e.g. PT1H23M45S
     m = re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?$", dur_str, re.IGNORECASE)
     if m and any(m.groups()):
         return float(m.group(1) or 0)*60 + float(m.group(2) or 0) + float(m.group(3) or 0)/60
-    # HH:MM:SS  or  MM:SS
     parts = dur_str.split(":")
     try:
         if len(parts) == 3:   return int(parts[0])*60 + int(parts[1]) + int(parts[2])/60
         elif len(parts) == 2: return int(parts[0]) + int(parts[1])/60
-        else:                 return float(dur_str)/60   # bare seconds
+        else:                 return float(dur_str)/60
     except (ValueError, TypeError):
         return None
 
@@ -333,7 +331,7 @@ _DL_PROGRESS_RE = re.compile(
 
 
 def download_video(page_url, site_config, general_config, output_dir=None,
-                   progress_callback=None):
+                   progress_callback=None, stop_event=None):
     if output_dir is None:
         output_dir = resolve_download_dir(general_config)
 
@@ -372,6 +370,11 @@ def download_video(page_url, site_config, general_config, output_dir=None,
             bufsize=1,
         )
         for line in proc.stdout:
+            # Honour stop request mid-download
+            if stop_event and stop_event.is_set():
+                proc.terminate()
+                logger.warning("[DOWNLOAD] Aborted by user stop request.")
+                return False
             line = line.rstrip()
             if not line:
                 continue
@@ -447,7 +450,8 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
                       mode=None, identifier=None, overwrite=False, headers=None,
                       new_nfo=False, do_not_ignore=False, apply_state=False,
                       state_set=None, after_date=None, min_duration=None,
-                      dl_progress_cb=None, video_info_cb=None, global_progress_cb=None):
+                      dl_progress_cb=None, video_info_cb=None, global_progress_cb=None,
+                      stop_event=None):
 
     after_threshold = parse_after_threshold(after_date) if after_date else None
     min_dur_minutes = float(min_duration) if min_duration else None
@@ -519,12 +523,16 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
     processed      = 0
 
     for i, video_element in enumerate(video_elements, 1):
+        # ── STOP check ───────────────────────────────────────────────────────
+        if stop_event and stop_event.is_set():
+            logger.warning("[STOP] Aborting page processing due to user stop request.")
+            break
+
         if video_offset > 0 and i < video_offset:
             continue
 
         video_data = extract_data(video_element, list_scraper['video_item']['fields'], driver, site_config)
 
-        # First-pass filter (list-page data — may be incomplete)
         if not video_passes_filters(video_data, after_threshold, min_dur_minutes):
             skipped_filter += 1
             processed += 1
@@ -532,7 +540,6 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
                 global_progress_cb(processed, total_items)
             continue
 
-        # ── Resolve URL ──────────────────────────────────────────────────────
         raw_url = video_data.get('url', '')
         if isinstance(raw_url, list):
             raw_url = raw_url[0] if raw_url else ''
@@ -556,11 +563,10 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
             continue
 
         print()
-        print(colored(f"┈┈┈ {i} of {total_items} ┈ {video_url} ".ljust(term_width, "┈"), "magenta"))
+        print(colored(f"\u2508\u2508\u2508 {i} of {total_items} \u2508 {video_url} ".ljust(term_width, "\u2508"), "magenta"))
 
-        # Emit preliminary video info to GUI (from list card)
         if video_info_cb:
-            v_title    = video_data.get('title', '') or video_url.split('/')[-2] or video_url
+            v_title = video_data.get('title', '') or video_url.split('/')[-2] or video_url
             video_info_cb(v_title, video_data.get('date', ''), video_data.get('duration', ''))
 
         if is_url_processed(video_url, state_set) and not (overwrite or new_nfo):
@@ -571,12 +577,12 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
                 global_progress_cb(processed, total_items)
             continue
 
-        # Second-pass filter + download happens inside process_video_page
         if process_video_page(
             video_url, site_config, general_config, overwrite, headers,
             new_nfo, do_not_ignore, apply_state=apply_state, state_set=state_set,
             dl_progress_cb=dl_progress_cb, video_info_cb=video_info_cb,
             after_threshold=after_threshold, min_dur_minutes=min_dur_minutes,
+            stop_event=stop_event,
         ):
             success = True
 
@@ -590,6 +596,9 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
         driver.quit()
 
     # ── Pagination ───────────────────────────────────────────────────────────
+    if stop_event and stop_event.is_set():
+        return None, None, success
+
     if mode not in site_config.get('modes', {}):
         return None, None, success
 
@@ -627,11 +636,14 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
 def process_video_page(url, site_config, general_config, overwrite=False, headers=None,
                        new_nfo=False, do_not_ignore=False, apply_state=False,
                        state_set=None, dl_progress_cb=None, video_info_cb=None,
-                       after_threshold=None, min_dur_minutes=None):
+                       after_threshold=None, min_dur_minutes=None, stop_event=None):
     """
     Fetch the video page, apply a HARD second-pass filter on the accurate
     date and duration scraped from that page, then download if it passes.
     """
+    if stop_event and stop_event.is_set():
+        return False
+
     logger.info(f"Processing video page: {url}")
     use_selenium = site_config.get('use_selenium', False)
     driver = get_selenium_driver(general_config) if use_selenium else None
@@ -644,24 +656,18 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
     v_date   = raw_data.get('date', '')
     v_dur    = raw_data.get('duration', '')
 
-    # ── HARD second-pass filter using video-page data ────────────────────────
     if after_threshold is not None and v_date:
         parsed = parse_date_loose(v_date)
         if parsed is not None and parsed < after_threshold:
-            logger.info(
-                f"[FILTER] Skipping (video-page date {parsed} < {after_threshold}): {url}"
-            )
+            logger.info(f"[FILTER] Skipping (video-page date {parsed} < {after_threshold}): {url}")
             return False
 
     if min_dur_minutes is not None and min_dur_minutes > 0 and v_dur:
         dur_min = duration_str_to_minutes(v_dur)
         if dur_min is not None and dur_min < min_dur_minutes:
-            logger.info(
-                f"[FILTER] Skipping (video-page duration {dur_min:.1f}m < min {min_dur_minutes}m): {url}"
-            )
+            logger.info(f"[FILTER] Skipping (video-page duration {dur_min:.1f}m < min {min_dur_minutes}m): {url}")
             return False
 
-    # Update GUI with accurate video-page metadata
     if video_info_cb:
         video_info_cb(title, v_date, v_dur)
 
@@ -670,14 +676,16 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
 
     if method == 'yt-dlp':
         logger.success(f"Successfully processed video: {title}")
-        ok = download_video(url, site_config, general_config, progress_callback=dl_progress_cb)
+        ok = download_video(url, site_config, general_config,
+                            progress_callback=dl_progress_cb, stop_event=stop_event)
     else:
         video_url = raw_data.get('download_url')
         if not video_url:
             logger.error("No download URL found")
             return False
         logger.success(f"Successfully processed video: {title}")
-        ok = download_video(video_url, site_config, general_config, progress_callback=dl_progress_cb)
+        ok = download_video(video_url, site_config, general_config,
+                            progress_callback=dl_progress_cb, stop_event=stop_event)
 
     if ok and apply_state and state_set is not None:
         state_set.add(url)

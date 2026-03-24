@@ -2,7 +2,7 @@
 
 name: YouPorn
 shortcode: yp
-domain: YouPorn.com
+domain: youporn.com
 base_url: "https://www.youporn.com"
 selector_style: css
 no_overwrite: true
@@ -12,7 +12,7 @@ download:
 url_encoding_rules:
   " ": "+"
   "%20": "+"
-note: "One of the major free tube sites. Date metadata is exposed in the page JSON-LD block."
+note: "Major free tube site. Date metadata is exposed in the page JSON-LD block. Uses yt-dlp for reliable stream extraction."
 
 modes:
   video:
@@ -21,69 +21,81 @@ modes:
     tip: "Download a single video by its numeric ID"
     examples:
       - "16825655"
+
   search:
     url_pattern: "/search/?query={search}"
     url_pattern_pages: "/search/?query={search}&page={page}"
     scraper: list_scraper
-    tip: "Search and download videos by keyword"
+    max_pages: 50
+    tip: "Search and bulk-download videos by keyword"
     examples:
       - "amateur homemade"
       - "blonde milf"
+      - "teen"
+
   category:
     url_pattern: "/category/{category}/"
     url_pattern_pages: "/category/{category}/?page={page}"
     scraper: list_scraper
-    tip: "Download videos by category slug"
+    max_pages: 50
+    tip: "Bulk-download videos by category slug"
     examples:
       - "amateur"
       - "milf"
+      - "teen"
+
   pornstar:
     url_pattern: "/pornstar/{pornstar}/"
     url_pattern_pages: "/pornstar/{pornstar}/?page={page}"
     scraper: list_scraper
+    max_pages: 50
     url_encoding_rules:
       " ": "-"
       "%20": "-"
-    tip: "Download videos featuring a pornstar"
+    tip: "Bulk-download videos featuring a pornstar"
     examples:
       - "Riley Reid"
+      - "Abella Danger"
+
   channel:
-    url_pattern: "/channel/{channel}/"
-    url_pattern_pages: "/channel/{channel}/?page={page}"
+    url_pattern: "/channel/{channel}/videos/"
+    url_pattern_pages: "/channel/{channel}/videos/?page={page}"
     scraper: list_scraper
+    max_pages: 50
     url_encoding_rules:
       " ": "-"
       "%20": "-"
-    tip: "Download videos from a specific channel"
+    tip: "Bulk-download videos from a specific channel"
     examples:
       - "bangbros"
+      - "brazzers"
 
 scrapers:
   video_scraper:
     title:
-      selector: "h1.video-title, h1[itemprop='name'], .video-title h1"
+      selector: "h1.video-title, h1[itemprop='name'], .video-title h1, h1"
     download_url:
-      selector: "meta[property='og:video:secure_url'], meta[property='og:video']"
+      selector: "meta[property='og:video:secure_url'], meta[property='og:video'], meta[property='og:url']"
       attribute: "content"
     date:
       selector: "script[type='application/ld+json']"
       postProcess:
         - replace:
-            - regex: '.*"uploadDate"\s*:\s*"([^"T]+).*'
+            - regex: '(?s).*?"uploadDate"\s*:\s*"([^"T]+)[T"]+.*'
               with: "\\1"
     description:
-      selector: "div.video-description, p.video-description"
+      selector: "div.video-description, p.video-description, .description"
     tags:
-      selector: "a.tag-name, div.video-tags a, ul.video-tags li a"
+      selector: "a.tag-name, div.video-tags a, ul.video-tags li a, a[data-label='tag'], .tags a"
     actors:
-      selector: "a[data-label='pornstar'], div.video-cast a, .pornstars a"
+      selector: "a[data-label='pornstar'], div.video-cast a, .pornstars a, .castList a"
     image:
       selector: "meta[property='og:image']"
       attribute: "content"
     studios:
-      selector: "a.channel-name, div.video-channel a"
+      selector: "a.channel-name, div.video-channel a, .channelName a"
     duration:
-      selector: "meta[property='video:duration']"
+      selector: "meta[property='video:duration'], meta[name='duration']"
       attribute: "content"
 
   list_scraper:
@@ -95,17 +107,24 @@ scrapers:
         - "div#videoSearchResult"
         - "div.search-video-thumbs"
         - "div.yp-grid-items"
+        - "ul.videos"
+        - "div.videoSearchResult"
+        - "section[class*='video']"
     video_item:
-      selector: "li.video-listing-item, div.video-box, div.pcVideoListItem, article.video-box"
+      selector: "li.video-listing-item, div.video-box, div.pcVideoListItem, article.video-box, li[class*='video']"
       fields:
         url:
           selector: "a.video-box-image, a.thumb-link, a[href*='/watch/']"
           attribute: "href"
         title:
-          selector: "a.video-title, span.video-title, .title a"
+          selector: "a.video-title, span.video-title, .title a, a[class*='title']"
           attribute: "title"
         duration:
-          selector: "span.duration, div.video-duration, .duration"
+          selector: "span.duration, div.video-duration, .duration, span[class*='duration']"
         date:
-          selector: "span.date, time[datetime], .date-added"
+          selector: "span.date, time[datetime], .date-added, span[class*='date']"
           attribute: "datetime"
+    pagination:
+      next_page:
+        selector: "a[rel='next'], a.next, li.next a, .pagination a[aria-label='Next']"
+        attribute: "href"

@@ -38,6 +38,7 @@ class SmutscrapeGUI:
         self.root.geometry("750x640")
         self.root.resizable(True, True)
         self.log_queue = queue.Queue()
+        self._loguru_sink_id = None
         self._build_ui()
         self._poll_log_queue()
 
@@ -71,7 +72,6 @@ class SmutscrapeGUI:
 
         tk.Label(filters, text="After Date:", width=14, anchor="e").grid(row=0, column=0, sticky="e", pady=3)
         self.after_entry = tk.Entry(filters, width=18)
-        self.after_entry.insert(0, "")
         self.after_entry.grid(row=0, column=1, sticky="w", padx=6)
         tk.Label(filters, text="YYYY-MM  or  YYYY-MM-DD", fg="grey").grid(row=0, column=2, sticky="w")
 
@@ -128,7 +128,6 @@ class SmutscrapeGUI:
             height=12
         )
         self.log_text.pack(fill="both", expand=True)
-        # Colour tags
         self.log_text.tag_config("filter", foreground="#5dade2")
         self.log_text.tag_config("success", foreground="#58d68d")
         self.log_text.tag_config("error", foreground="#ec7063")
@@ -147,7 +146,6 @@ class SmutscrapeGUI:
             self.mode_combo.current(0)
 
     def _log(self, msg, tag=None):
-        """Append a line to the log widget (must be called from main thread)."""
         self.log_text.config(state="normal")
         self.log_text.insert("end", msg + "\n", tag or "")
         self.log_text.see("end")
@@ -159,11 +157,9 @@ class SmutscrapeGUI:
         self.log_text.config(state="disabled")
 
     def _poll_log_queue(self):
-        """Check the queue for new log messages every 150 ms."""
         try:
             while True:
                 msg = self.log_queue.get_nowait()
-                # Choose colour tag based on keywords
                 low = msg.lower()
                 if "[filter]" in low or "skip" in low:
                     tag = "filter"
@@ -179,6 +175,33 @@ class SmutscrapeGUI:
         except queue.Empty:
             pass
         self.root.after(150, self._poll_log_queue)
+
+    def _install_loguru_sink(self):
+        """Add a loguru sink that forwards all log records into the GUI queue."""
+        from loguru import logger
+        import re as _re
+        ansi_escape = _re.compile(r'\x1b\[[0-9;]*m')
+
+        def _gui_sink(message):
+            text = ansi_escape.sub('', str(message)).rstrip()
+            self.log_queue.put(text)
+
+        # Remove previous GUI sink if any, then add fresh one
+        if self._loguru_sink_id is not None:
+            try:
+                logger.remove(self._loguru_sink_id)
+            except Exception:
+                pass
+        self._loguru_sink_id = logger.add(_gui_sink, format="{time:HH:mm:ss} | {level:<7} | {message}", level="DEBUG", colorize=False)
+
+    def _remove_loguru_sink(self):
+        if self._loguru_sink_id is not None:
+            try:
+                from loguru import logger
+                logger.remove(self._loguru_sink_id)
+            except Exception:
+                pass
+            self._loguru_sink_id = None
 
     # ── scraping ─────────────────────────────────────────────────────────────
 
@@ -199,6 +222,7 @@ class SmutscrapeGUI:
 
         self.run_button.config(state="disabled")
         self.status_var.set("Scraping in progress...")
+        self._install_loguru_sink()  # Route all loguru output into GUI log widget
         self._log(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Starting: site={site_name}  mode={mode}  query={query}", "success")
 
         t = threading.Thread(
@@ -209,7 +233,6 @@ class SmutscrapeGUI:
         t.start()
 
     def _run_task(self, site_name, mode, query):
-        # Redirect stdout/stderr into the log queue for this thread
         handler = QueueHandler(self.log_queue)
         old_stdout, old_stderr = sys.stdout, sys.stderr
         sys.stdout = handler
@@ -227,15 +250,29 @@ class SmutscrapeGUI:
             if not mode_config:
                 raise ValueError(f"Mode '{mode}' not found for site '{site_name}'.")
 
-            # mode_config is a ModeConfig dataclass — use attribute access
-            url_pattern = mode_config.url_pattern
+            # ── BUG FIX: use url_pattern (page 1), NOT url_pattern_pages ─────────────
+            # url_pattern_pages contains {page} placeholder — never use it for page 1.
+            # Also: the kwarg key MUST match the placeholder name in the pattern.
+            # e.g. /search/?query={search}  →  construct_url(..., search=query)
+            #      /pornstar/{pornstar}/     →  construct_url(..., pornstar=query)
+            url_pattern = mode_config.url_pattern  # e.g. "/search/?query={search}"
+
+            # Detect the placeholder name inside the pattern  (e.g. "search", "pornstar")
+            import re as _re
+            placeholder_match = _re.search(r'\{(\w+)\}', url_pattern)
+            placeholder_key = placeholder_match.group(1) if placeholder_match else mode
+
+            site_dict = site_obj.to_dict()
             constructed_url = construct_url(
                 site_obj.base_url,
                 url_pattern,
-                site_obj.to_dict(),
+                site_dict,
                 mode=mode,
-                **{mode: query}
+                **{placeholder_key: query}   # ← correct key, not hardcoded mode name
             )
+
+            from loguru import logger as _logger
+            _logger.debug(f"[GUI] Constructed URL for page 1: {constructed_url}")
 
             after_date = self.after_entry.get().strip() or None
             min_duration = self.min_dur_entry.get().strip() or None
@@ -254,7 +291,7 @@ class SmutscrapeGUI:
             while current_url:
                 next_url, next_page, ok = process_list_page(
                     current_url,
-                    site_obj.to_dict(),
+                    site_dict,
                     general_config,
                     page_num=current_page,
                     video_offset=0,
@@ -286,6 +323,7 @@ class SmutscrapeGUI:
         finally:
             sys.stdout = old_stdout
             sys.stderr = old_stderr
+            self._remove_loguru_sink()
             self.root.after(0, lambda: self.run_button.config(state="normal"))
 
 

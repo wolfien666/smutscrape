@@ -179,29 +179,17 @@ def pierce_iframe(driver, url, site_config):
 
 
 def fetch_page(url, user_agents, headers, use_selenium=False, driver=None, retry_count=0):
-    if not use_selenium:
-        import cloudscraper
-        import requests
-        scraper = cloudscraper.create_scraper()
-        if 'User-Agent' not in headers:
-            headers['User-Agent'] = random.choice(user_agents)
-        logger.debug(f"Fetching URL (requests): {url}")
-        time.sleep(random.uniform(1, 3))
-        try:
-            response = scraper.get(url, headers=headers, timeout=30)
-            response.raise_for_status()
-            return BeautifulSoup(response.content, "html.parser")
-        except Exception as e:
-            logger.error(f"Error fetching {url}: {e}")
-            return None
-    else:
-        if driver is None:
-            logger.warning("Selenium requested, but no driver provided.")
-            return None
+    """
+    Fetch a page and return a BeautifulSoup object.
+    If use_selenium=True but driver is None (Chrome not available),
+    automatically falls back to cloudscraper so scraping still works.
+    """
+    # ── Selenium path ──────────────────────────────────────────────────
+    if use_selenium and driver is not None:
         logger.debug(f"Fetching URL (selenium): {url}")
         try:
             site_config = globals().get('site_config', {})
-            if site_config.get('iframe', {}).get('enabled'):
+            if isinstance(site_config, dict) and site_config.get('iframe', {}).get('enabled'):
                 final_url = pierce_iframe(driver, url, site_config)
             else:
                 driver.get(url)
@@ -217,6 +205,29 @@ def fetch_page(url, user_agents, headers, use_selenium=False, driver=None, retry
                     return fetch_page(url, user_agents, headers, use_selenium, new_driver, retry_count + 1)
             logger.error(f"Failed to fetch {url} with Selenium: {e}")
             return None
+
+    # ── requests / cloudscraper path (also fallback when driver is None) ────
+    if use_selenium and driver is None:
+        logger.warning(
+            f"[SELENIUM FALLBACK] Chrome driver unavailable — falling back to cloudscraper for {url}.\n"
+            "  Install Chrome/Chromium for full JS-rendered page support."
+        )
+
+    import cloudscraper
+    import requests
+    scraper = cloudscraper.create_scraper()
+    if 'User-Agent' not in headers:
+        headers = dict(headers)
+        headers['User-Agent'] = random.choice(user_agents)
+    logger.debug(f"Fetching URL (requests): {url}")
+    time.sleep(random.uniform(1, 3))
+    try:
+        response = scraper.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        return BeautifulSoup(response.content, "html.parser")
+    except Exception as e:
+        logger.error(f"Error fetching {url}: {e}")
+        return None
 
 
 def extract_data(soup, selectors, driver=None, site_config=None):
@@ -386,10 +397,9 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
     item_selector = list_scraper['video_item']['selector']
     video_elements = container.select(item_selector)
     if not video_elements:
-        # Try a broad fallback: any <a href*=/watch/>
         fallback_elements = soup.select("a[href*='/watch/']")
         logger.error(
-            f"[ITEMS] Item selector '{item_selector}' matched 0 elements inside container.\n"
+            f"[ITEMS] Item selector matched 0 elements inside container.\n"
             f"  Container tag: <{container.name} class='{container.get('class', '')}'>\n"
             f"  Broad fallback 'a[href*=\"/watch/\"]' found: {len(fallback_elements)} links"
         )
@@ -455,12 +465,21 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
     
     next_url = None
     if url_pattern_pages:
-        next_url = construct_url(base_url, url_pattern_pages, site_config, mode=mode, **{mode: identifier, 'page': page_num + 1})
+        # ── Use the same placeholder-detection logic as the GUI ───────────────
+        # url_pattern_pages may contain {search}, {pornstar}, etc. + {page}
+        # We must pass both the identifier kwarg AND page kwarg
+        placeholder_match = re.search(r'\{(\w+)\}', url_pattern_pages)
+        id_key = placeholder_match.group(1) if placeholder_match and placeholder_match.group(1) != 'page' else mode
+        next_url = construct_url(
+            base_url, url_pattern_pages, site_config,
+            mode=mode,
+            **{id_key: identifier, 'page': page_num + 1}
+        )
     elif scraper_pagination and 'next_page' in scraper_pagination:
         next_page_config = scraper_pagination['next_page']
-        next_page = soup.select_one(next_page_config.get('selector', ''))
-        if next_page:
-            next_url = next_page.get(next_page_config.get('attribute', 'href'))
+        next_page_el = soup.select_one(next_page_config.get('selector', ''))
+        if next_page_el:
+            next_url = next_page_el.get(next_page_config.get('attribute', 'href'))
             if next_url and not next_url.startswith(('http://', 'https://')):
                 next_url = urllib.parse.urljoin(base_url, next_url)
     

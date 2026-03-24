@@ -285,32 +285,44 @@ class SmutscrapeGUI:
     def _bind_mousewheel(self):
         """
         Route mousewheel events to exactly one target:
-          1. If widget (or any ancestor) is a Combobox/Listbox/Text — let Tk handle it natively.
-          2. Else if widget is inside _cat_canvas — scroll _cat_canvas only.
-          3. Else scroll _main_canvas, BUT only when content is taller than viewport.
+          1. If event.widget is a bare string (Tk internal path, e.g. Combobox
+             dropdown Listbox) — treat as native, do nothing.
+          2. If widget (or any ancestor) is a Combobox/Listbox/Text — let Tk
+             handle it natively.
+          3. Else if widget is inside _cat_canvas — scroll _cat_canvas only.
+          4. Else scroll _main_canvas, BUT only when content overflows viewport.
         """
-        # Widget class names that should handle their own scrolling
         _NATIVE_SCROLL = {"TCombobox", "Combobox", "Listbox", "Text", "ScrolledText"}
 
         def _is_native(w):
+            """Walk up the widget tree; return True if any ancestor is a native scroller.
+            Guards against w being a plain string (Tk internal widget path)."""
             while w:
-                cls = w.winfo_class()
-                if cls in _NATIVE_SCROLL:
-                    return True
-                try: w = w.master
-                except AttributeError: break
+                # Tk sometimes passes a raw string path instead of a widget object
+                if isinstance(w, str):
+                    return True   # treat unknown/internal widgets as native
+                try:
+                    if w.winfo_class() in _NATIVE_SCROLL:
+                        return True
+                    w = w.master
+                except AttributeError:
+                    break
             return False
 
         def _is_in_cat_canvas(w):
+            """Walk up; return True if widget lives inside _cat_canvas."""
             while w:
+                if isinstance(w, str):
+                    break   # can't compare string path to widget object
                 if w is self._cat_canvas:
                     return True
-                try: w = w.master
-                except AttributeError: break
+                try:
+                    w = w.master
+                except AttributeError:
+                    break
             return False
 
         def _main_can_scroll():
-            """Return True only when inner content is taller than the canvas viewport."""
             inner_h  = self._inner.winfo_reqheight()
             canvas_h = self._main_canvas.winfo_height()
             return inner_h > canvas_h
@@ -319,22 +331,19 @@ class SmutscrapeGUI:
             widget = event.widget
             delta  = -1 if (event.num == 5 or getattr(event, 'delta', 1) < 0) else 1
 
-            # 1. Native scrollable widget — do nothing, let Tk handle it
             if _is_native(widget):
                 return
 
-            # 2. Inside category canvas — scroll only that canvas
             if _is_in_cat_canvas(widget):
                 self._cat_canvas.yview_scroll(-delta, "units")
                 return
 
-            # 3. Main canvas — only when there is actually overflow
             if _main_can_scroll():
                 self._main_canvas.yview_scroll(-delta, "units")
 
         self.root.bind_all("<MouseWheel>", _on_wheel)
-        self.root.bind_all("<Button-4>",   _on_wheel)   # Linux up
-        self.root.bind_all("<Button-5>",   _on_wheel)   # Linux down
+        self.root.bind_all("<Button-4>",   _on_wheel)
+        self.root.bind_all("<Button-5>",   _on_wheel)
 
     # -------------------------------------------------------------------------
     # UI construction
@@ -512,7 +521,7 @@ class SmutscrapeGUI:
         )
         self.log_toggle_btn.pack(side="left", padx=8)
 
-        # ── PROGRESS ──────────────────────────────────────────────────────────
+        # ── PROGRESS ────────────────────────────────────────────────────────
         prog = self._lf(self._inner, "  PROGRESS ")
         prog.pack(fill="x", padx=10, pady=(2, 4))
         prog.columnconfigure(1, weight=1)
@@ -589,24 +598,16 @@ class SmutscrapeGUI:
     # -------------------------------------------------------------------------
 
     def _on_inner_configure(self, event):
-        """Update scrollregion, but clamp it so it never goes above y=0."""
         bbox = self._main_canvas.bbox("all")
         if bbox:
-            # Never let scroll region start above 0 (prevents black-space drift)
-            self._main_canvas.configure(
-                scrollregion=(0, 0, bbox[2], bbox[3])
-            )
+            self._main_canvas.configure(scrollregion=(0, 0, bbox[2], bbox[3]))
 
     def _on_canvas_configure(self, event):
         self._main_canvas.itemconfig(self._inner_id, width=event.width)
-        # Reset scroll to top whenever window is resized and content fits
         self.root.after(10, self._reset_scroll_if_fits)
 
     def _reset_scroll_if_fits(self):
-        """If all content fits in the viewport, snap view back to top."""
-        inner_h  = self._inner.winfo_reqheight()
-        canvas_h = self._main_canvas.winfo_height()
-        if inner_h <= canvas_h:
+        if self._inner.winfo_reqheight() <= self._main_canvas.winfo_height():
             self._main_canvas.yview_moveto(0)
 
     # -------------------------------------------------------------------------

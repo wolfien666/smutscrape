@@ -191,7 +191,7 @@ def fetch_page(url, user_agents, headers, use_selenium=False, driver=None, retry
             response = scraper.get(url, headers=headers, timeout=30)
             response.raise_for_status()
             return BeautifulSoup(response.content, "html.parser")
-        except requests.exceptions.RequestException as e:
+        except Exception as e:
             logger.error(f"Error fetching {url}: {e}")
             return None
     else:
@@ -225,7 +225,7 @@ def extract_data(soup, selectors, driver=None, site_config=None):
         logger.error("Soup is None; cannot extract data")
         return data
     for field, config in selectors.items():
-        if field == 'download_url' and site_config.get('m3u8_mode', False):
+        if field == 'download_url' and site_config and site_config.get('m3u8_mode', False):
             continue
         if isinstance(config, str):
             elements = soup.select(config)
@@ -288,6 +288,7 @@ def extract_data(soup, selectors, driver=None, site_config=None):
                                 value = re.sub(regex, replacement, value, flags=re.DOTALL) if value else ''
                         except re.error:
                             value = ''
+        data[field] = value
     return data
 
 
@@ -296,7 +297,6 @@ def construct_url(base_url, pattern, site_config, mode=None, **kwargs):
     url = pattern
     for key, value in kwargs.items():
         if value is not None:
-            # Handle arithmetic in placeholders like {page - 1}
             arithmetic_match = re.search(r'\{' + re.escape(key) + r'\s*([\+\-\*\/])\s*(\d+)\}', url)
             if arithmetic_match:
                 op, val = arithmetic_match.group(1), int(arithmetic_match.group(2))
@@ -310,22 +310,17 @@ def construct_url(base_url, pattern, site_config, mode=None, **kwargs):
 
 def process_url(url, site_config, general_config, overwrite=False, re_nfo=False, page="1", apply_state=False, state_set=None, after_date=None, min_duration=None):
     """Process a direct URL or site mode."""
-    # Split page into page_num and video_offset
     page_parts = str(page).split('.')
     current_page_num = int(page_parts[0])
     current_video_offset = int(page_parts[1]) if len(page_parts) > 1 else 0
     
-    # Logic to match URL to mode and process accordingly
-    # Simplified for this merged version:
     if is_url(url):
-        # Match URL to mode
         for mode_name, mode_config in site_config.get("modes", {}).items():
             pattern = mode_config.get("url_pattern")
             if pattern and re.search(pattern_to_regex(pattern), url):
                 if mode_name == 'video':
                     return process_video_page(url, site_config, general_config, overwrite, general_config.get('headers', {}), re_nfo, apply_state=apply_state, state_set=state_set)
                 else:
-                    # List page mode
                     constructed_url = url
                     success = False
                     while constructed_url:
@@ -345,7 +340,6 @@ def process_url(url, site_config, general_config, overwrite=False, re_nfo=False,
 
 
 def process_list_page(url, site_config, general_config, page_num=1, video_offset=0, mode=None, identifier=None, overwrite=False, headers=None, new_nfo=False, do_not_ignore=False, apply_state=False, state_set=None, after_date=None, min_duration=None):
-    # Parse filter thresholds
     after_threshold = parse_after_threshold(after_date) if after_date else None
     min_dur_minutes = float(min_duration) if min_duration else None
 
@@ -360,24 +354,56 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
     base_url = site_config['base_url']
     container_selector = list_scraper['video_container']['selector']
     
+    # ── Container search with verbose diagnostics ─────────────────────────────
     container = None
+    tried_selectors = []
     if isinstance(container_selector, list):
         for selector in container_selector:
+            tried_selectors.append(selector)
             container = soup.select_one(selector)
-            if container: break
-        if not container: return None, None, False
+            if container:
+                logger.debug(f"[CONTAINER] Matched selector: '{selector}'")
+                break
+        if not container:
+            logger.error(
+                f"[CONTAINER] None of the {len(tried_selectors)} container selectors matched on {url}.\n"
+                f"  Tried: {tried_selectors}\n"
+                f"  Page title: {soup.title.string if soup.title else 'N/A'}\n"
+                f"  Body classes: {soup.body.get('class', []) if soup.body else 'N/A'}"
+            )
+            return None, None, False
     else:
+        tried_selectors.append(container_selector)
         container = soup.select_one(container_selector)
-        if not container: return None, None, False
+        if not container:
+            logger.error(
+                f"[CONTAINER] Selector '{container_selector}' matched nothing on {url}.\n"
+                f"  Page title: {soup.title.string if soup.title else 'N/A'}"
+            )
+            return None, None, False
     
+    # ── Video item search with verbose diagnostics ────────────────────────────
     item_selector = list_scraper['video_item']['selector']
     video_elements = container.select(item_selector)
-    if not video_elements: return None, None, False
+    if not video_elements:
+        # Try a broad fallback: any <a href*=/watch/>
+        fallback_elements = soup.select("a[href*='/watch/']")
+        logger.error(
+            f"[ITEMS] Item selector '{item_selector}' matched 0 elements inside container.\n"
+            f"  Container tag: <{container.name} class='{container.get('class', '')}'>\n"
+            f"  Broad fallback 'a[href*=\"/watch/\"]' found: {len(fallback_elements)} links"
+        )
+        if fallback_elements:
+            logger.warning(f"[ITEMS] Using {len(fallback_elements)} fallback <a> elements directly (URL-only mode).")
+            video_elements = fallback_elements
+        else:
+            return None, None, False
     
     term_width = get_terminal_width()
     print()
     page_info = f" page {page_num}, {site_config['name'].lower()} {mode}: \"{identifier}\" "
     print(colored(page_info.center(term_width, "═"), "yellow"))
+    logger.info(f"Found {len(video_elements)} video elements on page {page_num}")
     
     if after_threshold: logger.info(f"[FILTER] Date filter: > {after_threshold}")
     if min_dur_minutes: logger.info(f"[FILTER] Duration filter: > {min_dur_minutes} min")
@@ -389,18 +415,19 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
         
         video_data = extract_data(video_element, list_scraper['video_item']['fields'], driver, site_config)
         
-        # Apply filters
         if not video_passes_filters(video_data, after_threshold, min_dur_minutes):
             skipped_filter += 1
             continue
 
-        if 'url' in video_data:
+        if 'url' in video_data and video_data['url']:
             video_url = video_data['url']
             if not video_url.startswith(('http://', 'https://')):
                 video_url = f"http:{video_url}" if video_url.startswith('//') else urllib.parse.urljoin(base_url, video_url)
-        elif 'video_key' in video_data:
+        elif 'video_key' in video_data and video_data['video_key']:
             video_url = construct_url(base_url, site_config['modes']['video']['url_pattern'], site_config, mode='video', video=video_data['video_key'])
-        else: continue
+        else:
+            logger.debug(f"[ITEMS] No URL or video_key for element {i}, raw data: {video_data}")
+            continue
         
         print()
         counter = f"{i} of {len(video_elements)}"
@@ -417,7 +444,7 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
     if skipped_filter: logger.info(f"[FILTER] Skipped {skipped_filter} videos due to filters.")
     if driver: driver.quit()
     
-    if mode not in site_config['modes']: return None, None, success
+    if mode not in site_config.get('modes', {}): return None, None, success
     
     mode_config = site_config['modes'][mode]
     scraper_pagination = list_scraper.get('pagination', {})
@@ -455,7 +482,6 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
         logger.error("No download URL found")
         return False
 
-    # Mocking download and metadata finalization for brevity in this merged version
     logger.success(f"Successfully processed video: {raw_data.get('title', 'Unknown')}")
     if apply_state and state_set is not None:
         state_set.add(url)

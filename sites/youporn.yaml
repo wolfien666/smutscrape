@@ -6,13 +6,13 @@ domain: youporn.com
 base_url: "https://www.youporn.com"
 selector_style: css
 no_overwrite: true
-use_selenium: false
+use_selenium: true
 download:
   method: "yt-dlp"
 url_encoding_rules:
   " ": "+"
   "%20": "+"
-note: "Major free tube site. Date metadata is exposed in the page JSON-LD block. Uses yt-dlp for reliable stream extraction."
+note: "Major free tube site. JavaScript-rendered via React so Selenium is required for list pages. Date metadata exposed in JSON-LD block."
 
 modes:
   video:
@@ -29,9 +29,9 @@ modes:
     max_pages: 50
     tip: "Search and bulk-download videos by keyword"
     examples:
+      - "ffm"
       - "amateur homemade"
       - "blonde milf"
-      - "teen"
 
   category:
     url_pattern: "/category/{category}/"
@@ -101,30 +101,41 @@ scrapers:
   list_scraper:
     video_container:
       selector:
-        - "div.video-list"
-        - "ul.video-listing-ol"
-        - "section.video-results"
-        - "div#videoSearchResult"
-        - "div.search-video-thumbs"
-        - "div.yp-grid-items"
-        - "ul.videos"
-        - "div.videoSearchResult"
+        # Selenium-rendered selectors (React SPA)
+        - "div[class*='videoSearchResult']"
+        - "div[class*='video-listing']"
+        - "div[class*='video-list']"
+        - "ul[class*='video']"
         - "section[class*='video']"
+        - "div[class*='videos']"
+        - "div[class*='grid']"
+        # Broader fallbacks
+        - "main"
+        - "div#content"
+        - "div.content"
+        - "body"
     video_item:
-      selector: "li.video-listing-item, div.video-box, div.pcVideoListItem, article.video-box, li[class*='video']"
+      selector: >
+        li[class*='video'],
+        div[class*='video-box'],
+        div[class*='videoBox'],
+        article[class*='video'],
+        li[class*='pcVideo'],
+        div[class*='pcVideo'],
+        a[href*='/watch/']
       fields:
         url:
-          selector: "a.video-box-image, a.thumb-link, a[href*='/watch/']"
+          selector: "a[href*='/watch/']"
           attribute: "href"
         title:
-          selector: "a.video-title, span.video-title, .title a, a[class*='title']"
+          selector: "a[class*='title'], span[class*='title'], div[class*='title'], a[title]"
           attribute: "title"
         duration:
-          selector: "span.duration, div.video-duration, .duration, span[class*='duration']"
+          selector: "span[class*='duration'], div[class*='duration'], var[class*='duration']"
         date:
-          selector: "span.date, time[datetime], .date-added, span[class*='date']"
+          selector: "time[datetime], span[class*='date'], div[class*='date']"
           attribute: "datetime"
     pagination:
       next_page:
-        selector: "a[rel='next'], a.next, li.next a, .pagination a[aria-label='Next']"
+        selector: "a[rel='next'], a[class*='next'], li[class*='next'] a, .pagination a[aria-label='Next'], a[aria-label='Next page']"
         attribute: "href"

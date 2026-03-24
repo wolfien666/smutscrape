@@ -115,14 +115,16 @@ scrapers:
         - "div.content"
         - "body"
     video_item:
+      # NOTE: bare a[href*='/watch/'] intentionally excluded — it matches
+      # anchor tags *inside* the real card elements and causes every video
+      # to be processed twice (once as the card, once as the naked <a>).
       selector: >
         li[class*='video'],
         div[class*='video-box'],
         div[class*='videoBox'],
         article[class*='video'],
         li[class*='pcVideo'],
-        div[class*='pcVideo'],
-        a[href*='/watch/']
+        div[class*='pcVideo']
       fields:
         url:
           selector: "a[href*='/watch/']"

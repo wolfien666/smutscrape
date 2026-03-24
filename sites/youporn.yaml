@@ -1,0 +1,115 @@
+# sites/youporn.yaml
+
+name: YouPorn
+shortcode: yp
+domain: YouPorn.com
+base_url: "https://www.youporn.com"
+selector_style: css
+no_overwrite: true
+use_selenium: false
+download:
+  method: "yt-dlp"
+url_encoding_rules:
+  " ": "+"
+  "%20": "+"
+note: "One of the major free tube sites, owned by MindGeek/Aylo. Good library of both amateur and studio content. Search is reliable and pagination is stable. Date metadata is exposed in the page JSON-LD block."
+
+modes:
+  video:
+    url_pattern: "/watch/{video}/"
+    scraper: video_scraper
+    tip: "Download a single video by its numeric ID"
+    examples:
+      - "16825655"
+  search:
+    url_pattern: "/search/?query={search}"
+    url_pattern_pages: "/search/?query={search}&page={page}"
+    scraper: list_scraper
+    tip: "Search and download videos by keyword"
+    examples:
+      - "amateur homemade"
+      - "blonde milf"
+      - "college party"
+  category:
+    url_pattern: "/category/{category}/"
+    url_pattern_pages: "/category/{category}/?page={page}"
+    scraper: list_scraper
+    tip: "Download videos by category slug"
+    examples:
+      - "amateur"
+      - "milf"
+      - "lesbian"
+  pornstar:
+    url_pattern: "/pornstar/{pornstar}/"
+    url_pattern_pages: "/pornstar/{pornstar}/?page={page}"
+    scraper: list_scraper
+    url_encoding_rules:
+      " ": "-"
+      "%20": "-"
+    tip: "Download videos featuring a pornstar"
+    examples:
+      - "Riley Reid"
+      - "Abella Danger"
+  channel:
+    url_pattern: "/channel/{channel}/"
+    url_pattern_pages: "/channel/{channel}/?page={page}"
+    scraper: list_scraper
+    url_encoding_rules:
+      " ": "-"
+      "%20": "-"
+    tip: "Download videos from a specific channel"
+    examples:
+      - "bangbros"
+      - "brazzers"
+
+scrapers:
+  video_scraper:
+    title:
+      selector: "h1.video-title, h1[itemprop='name'], .video-title h1"
+    download_url:
+      selector: "meta[property='og:video:secure_url'], meta[property='og:video']"
+      attribute: "content"
+    date:
+      selector: "script[type='application/ld+json']"
+      postProcess:
+        - replace:
+            - regex: '.*"uploadDate"\s*:\s*"([^"T]+).*'
+              with: "\\1"
+    description:
+      selector: "div.video-description, p.video-description"
+    tags:
+      selector: "a.tag-name, div.video-tags a, ul.video-tags li a"
+    actors:
+      selector: "a[data-label='pornstar'], div.video-cast a, .pornstars a"
+    image:
+      selector: "meta[property='og:image']"
+      attribute: "content"
+    studios:
+      selector: "a.channel-name, div.video-channel a"
+    duration:
+      selector: "meta[property='video:duration']"
+      attribute: "content"
+
+  list_scraper:
+    video_container:
+      selector:
+        - "div.video-list"
+        - "ul.video-listing-ol"
+        - "section.video-results"
+        - "div#videoSearchResult"
+        - "div.search-video-thumbs"
+        - "div.yp-grid-items"
+    video_item:
+      selector: "li.video-listing-item, div.video-box, div.pcVideoListItem, article.video-box"
+      fields:
+        url:
+          selector: "a.video-box-image, a.thumb-link, a[href*='/watch/']"
+          attribute: "href"
+        title:
+          selector: "a.video-title, span.video-title, .title a"
+          attribute: "title"
+        duration:
+          selector: "span.duration, div.video-duration, .duration"
+        date:
+          selector: "span.date, time[datetime], .date-added"
+          attribute: "datetime"

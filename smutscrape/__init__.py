@@ -23,9 +23,12 @@ from smutscrape.storage import StorageManager
 # Make CLI entry point available
 from smutscrape.cli import main as cli_main
 
+# Activate date/duration filters (monkey-patches process_list_page)
+import smutscrape.core_patch  # noqa: F401
+
 __all__ = [
     '__version__',
-    '__author__', 
+    '__author__',
     '__description__',
     'construct_url',
     'match_url_to_mode',
@@ -39,4 +42,4 @@ __all__ = [
     'SessionManager',
     'StorageManager',
     'cli_main'
-] 
+]

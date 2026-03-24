@@ -9,6 +9,7 @@ import time
 import random
 import datetime
 import tempfile
+import subprocess
 import urllib.parse
 import feedparser
 from urllib.parse import urlparse
@@ -104,6 +105,7 @@ def video_passes_filters(video_data, after_threshold, min_duration_minutes):
             if video_date is not None and video_date < after_threshold:
                 logger.info(f"[FILTER] Skipping (date {video_date} < {after_threshold}): {video_data.get('url','?')}")
                 return False
+        # If date is empty we cannot filter — let it pass and filter on the video page
     if min_duration_minutes is not None and min_duration_minutes > 0:
         raw_dur = video_data.get("duration", "")
         if raw_dur:
@@ -111,6 +113,7 @@ def video_passes_filters(video_data, after_threshold, min_duration_minutes):
             if dur_min is not None and dur_min < min_duration_minutes:
                 logger.info(f"[FILTER] Skipping (duration {dur_min:.1f}m < min {min_duration_minutes}m): {video_data.get('url','?')}")
                 return False
+        # If duration is empty we cannot filter — let it pass
     return True
 
 
@@ -288,6 +291,65 @@ def construct_url(base_url, pattern, site_config, mode=None, **kwargs):
     if not url.startswith(('http://', 'https://')):
         url = urllib.parse.urljoin(base_url, url)
     return url
+
+
+# ---------------------------------------------------------------------------
+# download_video  (yt-dlp wrapper)
+# ---------------------------------------------------------------------------
+
+def download_video(page_url, site_config, general_config, output_dir=None):
+    """
+    Download *page_url* using yt-dlp, selecting the best available quality.
+    Returns True on success, False on failure.
+    """
+    if output_dir is None:
+        output_dir = general_config.get('download_dir') or os.path.join(os.getcwd(), 'downloads')
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Output template: download_dir / site_shortcode / %(title)s [%(id)s].%(ext)s
+    shortcode = site_config.get('shortcode', 'dl')
+    out_template = os.path.join(output_dir, shortcode, '%(title)s [%(id)s].%(ext)s')
+
+    cmd = [
+        'yt-dlp',
+        '--format', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
+        '--merge-output-format', 'mp4',
+        '--no-playlist',
+        '--no-warnings',
+        '--output', out_template,
+        page_url,
+    ]
+
+    # Optional cookies file
+    cookies = general_config.get('cookies_file') or site_config.get('cookies_file')
+    if cookies and os.path.isfile(cookies):
+        cmd += ['--cookies', cookies]
+
+    # Optional rate limit
+    rate_limit = general_config.get('rate_limit')
+    if rate_limit:
+        cmd += ['--limit-rate', str(rate_limit)]
+
+    logger.info(f"[DOWNLOAD] yt-dlp: {page_url}")
+    logger.debug(f"[DOWNLOAD] cmd: {' '.join(cmd)}")
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode == 0:
+            logger.success(f"[DOWNLOAD] OK: {page_url}")
+            return True
+        else:
+            logger.error(f"[DOWNLOAD] yt-dlp failed (rc={result.returncode}): {result.stderr.strip()[-500:]}")
+            return False
+    except FileNotFoundError:
+        logger.error("[DOWNLOAD] yt-dlp not found. Install it: pip install yt-dlp  or  sudo apt install yt-dlp")
+        return False
+    except subprocess.TimeoutExpired:
+        logger.error(f"[DOWNLOAD] Timeout exceeded for {page_url}")
+        return False
+    except Exception as e:
+        logger.error(f"[DOWNLOAD] Unexpected error: {e}")
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -497,12 +559,26 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
     soup   = fetch_page(url, general_config['user_agents'], headers or {}, use_selenium, driver)
     if not soup:
         return False
-    raw_data  = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config)
-    video_url = raw_data.get('download_url')
-    if not video_url:
-        logger.error("No download URL found")
-        return False
-    logger.success(f"Successfully processed video: {raw_data.get('title', 'Unknown')}")
-    if apply_state and state_set is not None:
+
+    raw_data = extract_data(soup, site_config['scrapers']['video_scraper'], driver, site_config)
+    title    = raw_data.get('title', 'Unknown')
+
+    # ── Determine download method ────────────────────────────────────────────
+    download_cfg = site_config.get('download', {})
+    method = download_cfg.get('method', 'yt-dlp')
+
+    if method == 'yt-dlp':
+        logger.success(f"Successfully processed video: {title}")
+        ok = download_video(url, site_config, general_config)
+    else:
+        # Legacy / direct URL download fallback
+        video_url = raw_data.get('download_url')
+        if not video_url:
+            logger.error("No download URL found")
+            return False
+        logger.success(f"Successfully processed video: {title}")
+        ok = download_video(video_url, site_config, general_config)
+
+    if ok and apply_state and state_set is not None:
         state_set.add(url)
-    return True
+    return ok

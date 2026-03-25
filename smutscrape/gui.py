@@ -204,19 +204,16 @@ class SmutscrapeGUI:
 
         # Remove OS title bar entirely
         self.root.overrideredirect(True)
-
-        # Keep window in taskbar / allow minimize via custom button
         self.root.after(10, lambda: self.root.wm_attributes("-type", "normal"))
 
         _apply_dark_ttk(root)
 
         # Drag state
-        self._drag_x = 0
-        self._drag_y = 0
+        self._drag_x    = 0
+        self._drag_y    = 0
+        self._dragging  = False
         self._maximized = False
         self._restore_geo = "960x860"
-        # Set of widgets that are valid drag handles (populated in _build_ui)
-        self._drag_handles = set()
 
         self.log_queue       = queue.Queue()
         self._loguru_sink_id = None
@@ -235,37 +232,40 @@ class SmutscrapeGUI:
         self._poll_log_queue()
 
     # -------------------------------------------------------------------------
-    # Custom title bar drag / window controls
+    # Custom title bar drag — bound ONLY to explicit drag-handle widgets,
+    # never to a container frame (which would catch bubbled child clicks).
     # -------------------------------------------------------------------------
 
-    def _on_drag_start(self, event):
-        # Only initiate drag when the click originates on a registered handle
-        if event.widget not in self._drag_handles:
-            return
-        self._drag_x = event.x_root - self.root.winfo_x()
-        self._drag_y = event.y_root - self.root.winfo_y()
-
-    def _on_drag_motion(self, event):
-        if self._maximized:
-            return
-        # Only move when a drag was properly started (drag coords non-zero is not
-        # a reliable guard, so we use a flag instead)
-        if not self._dragging:
-            return
-        x = event.x_root - self._drag_x
-        y = event.y_root - self._drag_y
-        self.root.geometry(f"+{x}+{y}")
-
-    def _on_drag_start(self, event):
-        if event.widget not in self._drag_handles:
-            self._dragging = False
-            return
+    def _drag_start(self, event):
         self._dragging = True
         self._drag_x = event.x_root - self.root.winfo_x()
         self._drag_y = event.y_root - self.root.winfo_y()
+        return "break"   # stop propagation
 
-    def _on_drag_stop(self, event):
+    def _drag_motion(self, event):
+        if not self._dragging or self._maximized:
+            return
+        self.root.geometry(f"+{event.x_root - self._drag_x}+{event.y_root - self._drag_y}")
+        return "break"
+
+    def _drag_stop(self, event):
         self._dragging = False
+        return "break"
+
+    def _drag_dblclick(self, event):
+        self._on_maximize()
+        return "break"
+
+    def _make_drag_handle(self, widget):
+        """Bind drag events to a specific widget only — never a parent frame."""
+        widget.bind("<ButtonPress-1>",   self._drag_start,    add=False)
+        widget.bind("<B1-Motion>",        self._drag_motion,   add=False)
+        widget.bind("<ButtonRelease-1>",  self._drag_stop,     add=False)
+        widget.bind("<Double-Button-1>",  self._drag_dblclick, add=False)
+
+    # -------------------------------------------------------------------------
+    # Window controls
+    # -------------------------------------------------------------------------
 
     def _on_minimize(self):
         self.root.overrideredirect(False)
@@ -276,10 +276,7 @@ class SmutscrapeGUI:
         self.root.overrideredirect(True)
         self.root.unbind("<Map>")
 
-    def _on_maximize(self, event=None):
-        # ignore double-click events that originate from non-drag-handle widgets
-        if event is not None and event.widget not in self._drag_handles:
-            return
+    def _on_maximize(self):
         if self._maximized:
             self.root.geometry(self._restore_geo)
             self._maximized = False
@@ -294,14 +291,6 @@ class SmutscrapeGUI:
 
     def _on_close(self):
         self.root.destroy()
-
-    def _register_drag_handle(self, widget):
-        """Mark a widget as a valid title-bar drag surface."""
-        self._drag_handles.add(widget)
-        widget.bind("<ButtonPress-1>",  self._on_drag_start)
-        widget.bind("<B1-Motion>",       self._on_drag_motion)
-        widget.bind("<ButtonRelease-1>", self._on_drag_stop)
-        widget.bind("<Double-Button-1>", self._on_maximize)
 
     # -------------------------------------------------------------------------
     # Widget factories
@@ -439,33 +428,33 @@ class SmutscrapeGUI:
     # -------------------------------------------------------------------------
 
     def _build_ui(self):
-        self._dragging = False
-
-        # ── Custom OS-less title bar ──────────────────────────────────────────
+        # ── Custom OS-less title bar ────────────────────────────────────────
+        # The frame itself gets NO mouse bindings at all — only the two
+        # label widgets are drag handles so bubbling from Entry/Button is
+        # never intercepted.
         title_bar = tk.Frame(self.root, bg=C["panel"], height=32)
         title_bar.pack(fill="x", side="top")
         title_bar.pack_propagate(False)
 
-        # Register the bare frame as a drag handle
-        self._register_drag_handle(title_bar)
-
-        # App name label — also a drag handle
+        # Drag-handle labels (cursor fleur signals draggability)
         lbl_title = tk.Label(
             title_bar,
             text="\u2593\u2592\u2591  S M U T S C R A P E  \u2591\u2592\u2593",
-            bg=C["panel"], fg=C["fg"], font=("Courier", 11, "bold"), cursor="fleur"
+            bg=C["panel"], fg=C["fg"],
+            font=("Courier", 11, "bold"), cursor="fleur"
         )
         lbl_title.pack(side="left", padx=(10, 4))
-        self._register_drag_handle(lbl_title)
+        self._make_drag_handle(lbl_title)
 
         lbl_edition = tk.Label(
             title_bar, text="dark reaper edition",
-            bg=C["panel"], fg=C["fg_dim"], font=("Courier", 8), cursor="fleur"
+            bg=C["panel"], fg=C["fg_dim"],
+            font=("Courier", 8), cursor="fleur"
         )
         lbl_edition.pack(side="left")
-        self._register_drag_handle(lbl_edition)
+        self._make_drag_handle(lbl_edition)
 
-        # Window control buttons — NOT drag handles, just normal buttons
+        # Window control buttons (right side) — plain buttons, no drag
         btn_close = tk.Button(
             title_bar, text="\u2715", command=self._on_close,
             bg=C["panel"], fg="#ff3333",
@@ -493,7 +482,6 @@ class SmutscrapeGUI:
         )
         btn_min.pack(side="right")
 
-        # Configure button
         self._button(
             title_bar, "\u2699  Configure",
             self._open_config_editor,
@@ -501,7 +489,7 @@ class SmutscrapeGUI:
             padx=12, pady=3
         ).pack(side="right", padx=8)
 
-        # Thin separator line under custom title bar
+        # Thin separator
         tk.Frame(self.root, bg=C["border"], height=1).pack(fill="x", side="top")
 
         # ── Scrollable content area ───────────────────────────────────────────

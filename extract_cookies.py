@@ -5,24 +5,46 @@ extract_cookies.py
 Extracts cookies from your browser and writes a Netscape-format cookies.txt
 that yt-dlp / smutscrape can consume via the `cookies_file` config key.
 
-Usage (Windows)
------
-    python extract_cookies.py
-    python extract_cookies.py --output C:\\Users\\You\\smutscrape-cookies.txt
+WHY CHROME DOESN'T WORK ON WINDOWS
+-----------------------------------
+Chrome 127+ (July 2024) introduced App-Bound Encryption on Windows.
+Cookies are now encrypted with a key bound to the Chrome binary itself.
+No external program — including yt-dlp — can decrypt them anymore.
+See: https://github.com/yt-dlp/yt-dlp/issues/10927
+
+SOLUTIONS (pick one)
+---------------------
+  OPTION A ─ Firefox (recommended, free):
+    1. Install Firefox: https://www.mozilla.org/firefox/
+    2. Visit xhamster.com, pornhub.com etc. and log in
+    3. Run:  python extract_cookies.py --browser firefox
+
+  OPTION B ─ Browser extension (no Firefox install needed):
+    1. Install "Get cookies.txt LOCALLY" from Chrome Web Store:
+       https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc
+    2. Go to xhamster.com (while logged in)
+    3. Click the extension icon → Export → save as xhamster.txt
+    4. Repeat for each site you want
+    5. Merge them:  python extract_cookies.py --merge C:\path\to\*.txt --output smutscrape-cookies.txt
+
+  OPTION C ─ Edge (Chromium-based but may work):
     python extract_cookies.py --browser edge
+    (Edge uses a slightly different encryption path that yt-dlp can sometimes read)
+
+Usage
+-----
+    python extract_cookies.py                          # Firefox, default output
+    python extract_cookies.py --browser firefox
+    python extract_cookies.py --browser edge
+    python extract_cookies.py --merge *.txt --output smutscrape-cookies.txt
 
 Requirements
 ------------
-    yt-dlp must be installed and on PATH:  pip install -U yt-dlp
-
-Notes
------
-- Chrome does NOT need to be closed on Windows.
-- The output file contains active login tokens. Keep it private.
-- Never commit it to git (already covered by .gitignore).
+    yt-dlp must be installed:  pip install -U yt-dlp
 """
 
 import argparse
+import glob
 import os
 import subprocess
 import sys
@@ -37,13 +59,12 @@ NETSCAPE_HEADER = (
     "\n"
 )
 
+TEST_URL = 'https://xhamster.com/videos/family-12900151'
+
 
 def check_ytdlp():
     if shutil.which('yt-dlp') is None:
-        print(
-            "[ERROR] yt-dlp not found on PATH.\n"
-            "  Install it with:  pip install -U yt-dlp"
-        )
+        print("[ERROR] yt-dlp not found.  Install: pip install -U yt-dlp")
         sys.exit(1)
 
 
@@ -54,7 +75,11 @@ def validate_output_path(path):
     return path
 
 
-def extract_via_ytdlp(browser, profile, output_path):
+# ---------------------------------------------------------------------------
+# Option A/C: extract via yt-dlp --cookies-from-browser
+# ---------------------------------------------------------------------------
+
+def extract_from_browser(browser, profile, output_path):
     browser_arg = browser
     if profile and profile.lower() not in ('default', ''):
         browser_arg = f"{browser}:{profile}"
@@ -70,71 +95,127 @@ def extract_via_ytdlp(browser, profile, output_path):
         '--cookies', tmp_path,
         '--simulate',
         '--ignore-errors',
-        'https://xhamster.com/videos/family-12900151',
+        TEST_URL,
     ]
 
-    print(f"[INFO] Running: {' '.join(cmd)}")
-    print()
-
+    print(f"[INFO] Extracting cookies from {browser} via yt-dlp ...")
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=False,   # <-- let stdout/stderr print directly to terminal
-            text=True,
-            timeout=60,
-        )
-        print()
-        print(f"[INFO] yt-dlp exit code: {result.returncode}")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     except subprocess.TimeoutExpired:
         print("[WARN] yt-dlp timed out.")
+        return 0
     except Exception as e:
-        print(f"[ERROR] yt-dlp failed: {e}")
-        sys.exit(1)
+        print(f"[ERROR] {e}")
+        return 0
 
-    # Check what was written
+    # Show any errors (but not the DPAPI wall-of-text)
+    stderr = result.stderr or ''
+    if 'DPAPI' in stderr or 'App-Bound' in stderr or 'app-bound' in stderr.lower():
+        print()
+        print("[ERROR] Chrome App-Bound Encryption is blocking cookie access.")
+        print("        Chrome 127+ on Windows permanently prevents this.")
+        print()
+        print("  → SOLUTION A: Use Firefox (recommended)")
+        print("      1. Install Firefox: https://www.mozilla.org/firefox/")
+        print("      2. Log in to your sites in Firefox")
+        print("      3. Run: python extract_cookies.py --browser firefox")
+        print()
+        print("  → SOLUTION B: Browser extension (no Firefox needed)")
+        print("      1. Install 'Get cookies.txt LOCALLY' from Chrome Web Store")
+        print("         https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc")
+        print("      2. Visit each site while logged in, click extension → Export")
+        print("      3. Run: python extract_cookies.py --merge <exported_files> --output smutscrape-cookies.txt")
+        try: os.unlink(tmp_path)
+        except OSError: pass
+        return -1   # signal: show instructions, don't show generic warn
+    elif result.returncode != 0 and stderr.strip():
+        # Show first 3 lines of error so it's diagnosable
+        for line in stderr.strip().splitlines()[:3]:
+            if line.strip():
+                print(f"  [yt-dlp] {line}")
+
     try:
         with open(tmp_path, 'r', encoding='utf-8', errors='replace') as f:
             raw_lines = f.readlines()
-        file_size = os.path.getsize(tmp_path)
-        print(f"[INFO] Temp cookie file size: {file_size} bytes, {len(raw_lines)} lines")
     except FileNotFoundError:
-        print("[ERROR] yt-dlp did not create the cookie file at all.")
-        sys.exit(1)
+        raw_lines = []
     finally:
+        try: os.unlink(tmp_path)
+        except OSError: pass
+
+    return _write_cookies(raw_lines, output_path)
+
+
+# ---------------------------------------------------------------------------
+# Option B: merge manually-exported cookies.txt files
+# ---------------------------------------------------------------------------
+
+def merge_cookie_files(patterns, output_path):
+    """
+    Merge one or more Netscape cookies.txt files (from browser extension exports)
+    into a single deduplicated output file.
+    """
+    files = []
+    for pat in patterns:
+        files.extend(glob.glob(pat))
+
+    if not files:
+        print(f"[ERROR] No files matched: {patterns}")
+        sys.exit(1)
+
+    seen = set()
+    all_lines = []
+    for fpath in files:
+        print(f"[INFO] Reading: {fpath}")
         try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
+            with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
+                for line in f:
+                    stripped = line.strip()
+                    if not stripped or stripped.startswith('#'):
+                        continue
+                    if stripped not in seen:
+                        seen.add(stripped)
+                        all_lines.append(line)
+        except Exception as e:
+            print(f"[WARN] Could not read {fpath}: {e}")
 
-    cookie_lines = [
-        l for l in raw_lines
-        if l.strip() and not l.strip().startswith('#')
-    ]
+    return _write_cookies(all_lines, output_path)
 
+
+# ---------------------------------------------------------------------------
+# Shared writer
+# ---------------------------------------------------------------------------
+
+def _write_cookies(cookie_lines, output_path):
+    valid = [l for l in cookie_lines if l.strip() and not l.strip().startswith('#')]
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(NETSCAPE_HEADER)
-        for line in raw_lines:
-            stripped = line.strip()
-            if stripped and not stripped.startswith('#'):
-                f.write(line if line.endswith('\n') else line + '\n')
+        for line in valid:
+            f.write(line if line.endswith('\n') else line + '\n')
+    return len(valid)
 
-    return len(cookie_lines)
 
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
 
 def parse_args():
     default_out = os.path.join(os.path.expanduser('~'), 'smutscrape-cookies.txt')
     p = argparse.ArgumentParser(
-        description='Extract browser cookies to Netscape format for yt-dlp / smutscrape.',
+        description='Extract browser cookies for yt-dlp / smutscrape.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
     )
     p.add_argument('--output', '-o', default=default_out,
                    help=f'Output file path (default: {default_out})')
-    p.add_argument('--browser', '-b', default='chrome',
-                   choices=['chrome', 'chromium', 'brave', 'edge', 'firefox', 'opera', 'vivaldi'],
-                   help='Browser to extract from (default: chrome)')
-    p.add_argument('--profile', '-p', default='Default',
-                   help='Chrome profile name (default: Default)')
+    p.add_argument('--browser', '-b', default='firefox',
+                   choices=['firefox', 'chrome', 'chromium', 'brave', 'edge', 'opera', 'vivaldi'],
+                   help='Browser to extract from (default: firefox)')
+    p.add_argument('--profile', '-p', default='',
+                   help='Browser profile name (default: auto-detect)')
+    p.add_argument('--merge', '-m', nargs='+', metavar='FILE',
+                   help='Merge existing Netscape cookies.txt files instead of extracting from browser')
     return p.parse_args()
 
 
@@ -145,23 +226,39 @@ def main():
     output_path = validate_output_path(args.output)
 
     print()
-    print(f"Browser : {args.browser}  (profile: {args.profile})")
-    print(f"Output  : {output_path}")
-    print()
 
-    count = extract_via_ytdlp(args.browser, args.profile, output_path)
+    if args.merge:
+        print(f"[MODE] Merging cookie files → {output_path}")
+        print()
+        count = merge_cookie_files(args.merge, output_path)
+    else:
+        print(f"Browser : {args.browser}")
+        print(f"Output  : {output_path}")
+        print()
+
+        if args.browser == 'chrome' and sys.platform == 'win32':
+            print("[WARN] Chrome on Windows 10/11 uses App-Bound Encryption.")
+            print("       Trying anyway — but it will likely fail.")
+            print("       Run with --browser firefox for a reliable result.")
+            print()
+
+        count = extract_from_browser(args.browser, args.profile, output_path)
 
     print()
-    if count == 0:
-        print("[WARN] No cookies were written. See yt-dlp output above for the real error.")
+    if count == -1:
+        pass  # instructions already printed
+    elif count == 0:
+        print("[WARN] No cookies were written.")
+        if args.browser == 'firefox':
+            print("  Make sure you are logged in to the sites in Firefox first.")
     else:
         print(f"[OK] {count} cookies written to: {output_path}")
         safe_path = output_path.replace('\\', '/')
         print()
-        print("Add this line to your smutscrape config.yaml:")
+        print("Add this to your smutscrape config.yaml:")
         print(f'  cookies_file: "{safe_path}"')
         print()
-        print("[REMINDER] Keep this file private \u2014 never commit it to git.")
+        print("[REMINDER] Keep this file private — never commit it to git.")
 
 
 if __name__ == '__main__':

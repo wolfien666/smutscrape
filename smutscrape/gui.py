@@ -197,36 +197,17 @@ def _apply_dark_ttk(root):
 class SmutscrapeGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Smutscrape")
+        self.root.title("Smutscrape  —  Nix edition")
         self.root.geometry("960x860")
         self.root.resizable(True, True)
         self.root.configure(bg=C["bg"])
 
-        # ---------------------------------------------------------------------------
-        # Borderless window approach:
-        #
-        # On Linux/X11 we use wm_attributes("-type", "normal") combined with
-        # overrideredirect so the WM still participates in focus management.
-        # The key insight: call overrideredirect(True) THEN immediately
-        # grab_set() so Tkinter itself routes all events to this window
-        # (same mechanism ConfigEditor relies on for its own inputs to work).
-        # We release the grab only when the config editor is open, and
-        # re-acquire it when the editor is closed.
-        # ---------------------------------------------------------------------------
-        self.root.overrideredirect(True)
-        # Let the WM know this is a normal application window even without decoration.
-        # This is a no-op on Windows/macOS but critical on X11 for taskbar/focus.
-        try:
-            self.root.wm_attributes("-type", "normal")
-        except tk.TclError:
-            pass
+        # NOTE: overrideredirect is intentionally NOT used here.
+        # It kills WM focus delivery, making all Entry/Combobox widgets
+        # unresponsive to keyboard input.  The OS title bar is kept.
 
         _apply_dark_ttk(root)
 
-        # Drag state
-        self._drag_x      = 0
-        self._drag_y      = 0
-        self._dragging    = False
         self._maximized   = False
         self._restore_geo = "960x860"
 
@@ -245,97 +226,6 @@ class SmutscrapeGUI:
         self._build_ui()
         self._bind_mousewheel()
         self._poll_log_queue()
-
-        # Acquire the event grab AFTER the UI is fully built.
-        # This is what makes inputs focusable under overrideredirect:
-        # Tkinter's grab mechanism routes all pointer/keyboard events
-        # to this window regardless of what the WM thinks.
-        self.root.after(100, self._acquire_grab)
-
-    # -------------------------------------------------------------------------
-    # Grab management  (the core fix for overrideredirect focus)
-    # -------------------------------------------------------------------------
-
-    def _acquire_grab(self):
-        """Give this window Tkinter-level grab so inputs receive focus."""
-        try:
-            self.root.grab_set()
-        except tk.TclError:
-            pass
-
-    def _release_grab(self):
-        """Release grab so a child Toplevel (config editor) can take over."""
-        try:
-            self.root.grab_release()
-        except tk.TclError:
-            pass
-
-    # -------------------------------------------------------------------------
-    # Custom title bar drag
-    # -------------------------------------------------------------------------
-
-    def _drag_start(self, event):
-        self._dragging = True
-        self._drag_x = event.x_root - self.root.winfo_x()
-        self._drag_y = event.y_root - self.root.winfo_y()
-        return "break"
-
-    def _drag_motion(self, event):
-        if not self._dragging or self._maximized:
-            return
-        self.root.geometry(f"+{event.x_root - self._drag_x}+{event.y_root - self._drag_y}")
-        return "break"
-
-    def _drag_stop(self, event):
-        self._dragging = False
-        return "break"
-
-    def _drag_dblclick(self, event):
-        self._on_maximize()
-        return "break"
-
-    def _make_drag_handle(self, widget):
-        """Bind drag events only to the two title-bar label widgets."""
-        widget.bind("<ButtonPress-1>",   self._drag_start,    add=False)
-        widget.bind("<B1-Motion>",        self._drag_motion,   add=False)
-        widget.bind("<ButtonRelease-1>",  self._drag_stop,     add=False)
-        widget.bind("<Double-Button-1>",  self._drag_dblclick, add=False)
-
-    # -------------------------------------------------------------------------
-    # Window controls
-    # -------------------------------------------------------------------------
-
-    def _on_minimize(self):
-        self._release_grab()
-        self.root.overrideredirect(False)
-        self.root.iconify()
-        self.root.bind("<Map>", self._on_restore_from_minimize)
-
-    def _on_restore_from_minimize(self, event=None):
-        self.root.overrideredirect(True)
-        try:
-            self.root.wm_attributes("-type", "normal")
-        except tk.TclError:
-            pass
-        self.root.unbind("<Map>")
-        self.root.after(100, self._acquire_grab)
-
-    def _on_maximize(self):
-        if self._maximized:
-            self.root.geometry(self._restore_geo)
-            self._maximized = False
-            self._max_btn.config(text="\u25a1")
-        else:
-            self._restore_geo = self.root.geometry()
-            sw = self.root.winfo_screenwidth()
-            sh = self.root.winfo_screenheight()
-            self.root.geometry(f"{sw}x{sh}+0+0")
-            self._maximized = True
-            self._max_btn.config(text="\u2752")
-
-    def _on_close(self):
-        self._release_grab()
-        self.root.destroy()
 
     # -------------------------------------------------------------------------
     # Widget factories
@@ -411,10 +301,6 @@ class SmutscrapeGUI:
                 return
             except tk.TclError:
                 self._cfg_win = None
-        # Release the main-window grab BEFORE opening the editor.
-        # ConfigEditor calls grab_set() on itself, which is enough;
-        # but if we still hold the grab here the editor's inputs are deaf.
-        self._release_grab()
         self._cfg_win = ConfigEditor(self.root)
         self._cfg_win.protocol("WM_DELETE_WINDOW", self._on_cfg_close)
 
@@ -422,8 +308,6 @@ class SmutscrapeGUI:
         if self._cfg_win:
             self._cfg_win.destroy()
         self._cfg_win = None
-        # Re-acquire grab for the main window now that the editor is gone.
-        self.root.after(100, self._acquire_grab)
 
     # -------------------------------------------------------------------------
     # Smart mousewheel routing
@@ -479,65 +363,7 @@ class SmutscrapeGUI:
     # -------------------------------------------------------------------------
 
     def _build_ui(self):
-        # ── Custom title bar ──────────────────────────────────────────────────
-        title_bar = tk.Frame(self.root, bg=C["panel"], height=32)
-        title_bar.pack(fill="x", side="top")
-        title_bar.pack_propagate(False)
-
-        lbl_title = tk.Label(
-            title_bar,
-            text="\u2593\u2592\u2591  S M U T S C R A P E  \u2591\u2592\u2593",
-            bg=C["panel"], fg=C["fg"],
-            font=("Courier", 11, "bold"), cursor="fleur"
-        )
-        lbl_title.pack(side="left", padx=(10, 4))
-        self._make_drag_handle(lbl_title)
-
-        lbl_edition = tk.Label(
-            title_bar, text="Nix edition",
-            bg=C["panel"], fg=C["fg_dim"],
-            font=("Courier", 8), cursor="fleur"
-        )
-        lbl_edition.pack(side="left")
-        self._make_drag_handle(lbl_edition)
-
-        btn_close = tk.Button(
-            title_bar, text="\u2715", command=self._on_close,
-            bg=C["panel"], fg="#ff3333",
-            activebackground="#3d0000", activeforeground="#ff6666",
-            relief="flat", bd=0, font=("Courier", 11, "bold"),
-            cursor="hand2", padx=10, pady=2
-        )
-        btn_close.pack(side="right")
-
-        self._max_btn = tk.Button(
-            title_bar, text="\u25a1", command=self._on_maximize,
-            bg=C["panel"], fg=C["fg_dim"],
-            activebackground=C["panel2"], activeforeground=C["fg"],
-            relief="flat", bd=0, font=("Courier", 11),
-            cursor="hand2", padx=10, pady=2
-        )
-        self._max_btn.pack(side="right")
-
-        btn_min = tk.Button(
-            title_bar, text="\u2212", command=self._on_minimize,
-            bg=C["panel"], fg=C["fg_dim"],
-            activebackground=C["panel2"], activeforeground=C["fg"],
-            relief="flat", bd=0, font=("Courier", 11, "bold"),
-            cursor="hand2", padx=10, pady=2
-        )
-        btn_min.pack(side="right")
-
-        self._button(
-            title_bar, "\u2699  Configure",
-            self._open_config_editor,
-            bg=C["btn_cfg"], fg=C["accent"],
-            padx=12, pady=3
-        ).pack(side="right", padx=8)
-
-        tk.Frame(self.root, bg=C["border"], height=1).pack(fill="x", side="top")
-
-        # ── Scrollable content area ─────────────────────────────────────────────
+        # ── Scrollable content area ───────────────────────────────────────────
         self._main_canvas = tk.Canvas(self.root, bg=C["bg"],
                                       highlightthickness=0, bd=0)
         self._main_vsb    = ttk.Scrollbar(self.root, orient="vertical",
@@ -553,9 +379,19 @@ class SmutscrapeGUI:
         self._inner.bind("<Configure>", self._on_inner_configure)
         self._main_canvas.bind("<Configure>", self._on_canvas_configure)
 
+        # ── Configure button row ──────────────────────────────────────────────
+        cfg_bar = tk.Frame(self._inner, bg=C["panel"])
+        cfg_bar.pack(fill="x", padx=10, pady=(8, 2))
+        self._button(
+            cfg_bar, "\u2699  Configure",
+            self._open_config_editor,
+            bg=C["btn_cfg"], fg=C["accent"],
+            padx=12, pady=3
+        ).pack(side="left")
+
         # ── TARGET ───────────────────────────────────────────────────────────
         top = self._lf(self._inner, "  TARGET ")
-        top.pack(fill="x", padx=10, pady=(8, 4))
+        top.pack(fill="x", padx=10, pady=(4, 4))
 
         self._label(top, "Site:", width=16, anchor="e").grid(row=0, column=0, sticky="e", pady=3)
         self.site_var   = tk.StringVar()
@@ -582,7 +418,7 @@ class SmutscrapeGUI:
         self.query_entry.grid(row=2, column=1, columnspan=2, sticky="ew", padx=6, pady=3)
         top.columnconfigure(1, weight=1)
 
-        # ── CATEGORIES ───────────────────────────────────────────────────────
+        # ── CATEGORIES ────────────────────────────────────────────────────────
         self.cat_frame = self._lf(
             self._inner,
             "  CATEGORIES  (check one or more \u2014 each scraped in sequence)",

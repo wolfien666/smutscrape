@@ -201,7 +201,20 @@ class SmutscrapeGUI:
         self.root.geometry("960x860")
         self.root.resizable(True, True)
         self.root.configure(bg=C["bg"])
+
+        # Remove OS title bar entirely
+        self.root.overrideredirect(True)
+
+        # Keep window in taskbar / allow minimize via custom button
+        self.root.after(10, lambda: self.root.wm_attributes("-type", "normal"))
+
         _apply_dark_ttk(root)
+
+        # Drag state
+        self._drag_x = 0
+        self._drag_y = 0
+        self._maximized = False
+        self._restore_geo = "960x860"
 
         self.log_queue       = queue.Queue()
         self._loguru_sink_id = None
@@ -213,11 +226,51 @@ class SmutscrapeGUI:
         self._cat_db         = _load_category_db()
         self._cat_vars       = {}
         self._log_visible    = True
-        self._cfg_win        = None   # keep reference to avoid garbage-collection
+        self._cfg_win        = None
 
         self._build_ui()
         self._bind_mousewheel()
         self._poll_log_queue()
+
+    # -------------------------------------------------------------------------
+    # Custom title bar drag / window controls
+    # -------------------------------------------------------------------------
+
+    def _on_drag_start(self, event):
+        self._drag_x = event.x_root - self.root.winfo_x()
+        self._drag_y = event.y_root - self.root.winfo_y()
+
+    def _on_drag_motion(self, event):
+        if self._maximized:
+            return
+        x = event.x_root - self._drag_x
+        y = event.y_root - self._drag_y
+        self.root.geometry(f"+{x}+{y}")
+
+    def _on_minimize(self):
+        self.root.overrideredirect(False)
+        self.root.iconify()
+        self.root.bind("<Map>", self._on_restore_from_minimize)
+
+    def _on_restore_from_minimize(self, event=None):
+        self.root.overrideredirect(True)
+        self.root.unbind("<Map>")
+
+    def _on_maximize(self):
+        if self._maximized:
+            self.root.geometry(self._restore_geo)
+            self._maximized = False
+            self._max_btn.config(text="\u25a1")
+        else:
+            self._restore_geo = self.root.geometry()
+            sw = self.root.winfo_screenwidth()
+            sh = self.root.winfo_screenheight()
+            self.root.geometry(f"{sw}x{sh}+0+0")
+            self._maximized = True
+            self._max_btn.config(text="\u2752")
+
+    def _on_close(self):
+        self.root.destroy()
 
     # -------------------------------------------------------------------------
     # Widget factories
@@ -286,7 +339,6 @@ class SmutscrapeGUI:
     # -------------------------------------------------------------------------
 
     def _open_config_editor(self):
-        """Open the config editor as a modal Toplevel. Only one at a time."""
         if self._cfg_win is not None:
             try:
                 self._cfg_win.lift()
@@ -295,8 +347,7 @@ class SmutscrapeGUI:
             except tk.TclError:
                 self._cfg_win = None
         self._cfg_win = ConfigEditor(self.root)
-        self._cfg_win.protocol("WM_DELETE_WINDOW",
-                               self._on_cfg_close)
+        self._cfg_win.protocol("WM_DELETE_WINDOW", self._on_cfg_close)
 
     def _on_cfg_close(self):
         if self._cfg_win:
@@ -308,15 +359,6 @@ class SmutscrapeGUI:
     # -------------------------------------------------------------------------
 
     def _bind_mousewheel(self):
-        """
-        Route mousewheel events to exactly one target:
-          1. If event.widget is a bare string (Tk internal path, e.g. Combobox
-             dropdown Listbox) — treat as native, do nothing.
-          2. If widget (or any ancestor) is a Combobox/Listbox/Text — let Tk
-             handle it natively.
-          3. Else if widget is inside _cat_canvas — scroll _cat_canvas only.
-          4. Else scroll _main_canvas, BUT only when content overflows viewport.
-        """
         _NATIVE_SCROLL = {"TCombobox", "Combobox", "Listbox", "Text", "ScrolledText"}
 
         def _is_native(w):
@@ -366,6 +408,74 @@ class SmutscrapeGUI:
     # -------------------------------------------------------------------------
 
     def _build_ui(self):
+        # ── Custom OS-less title bar ──────────────────────────────────────────
+        title_bar = tk.Frame(self.root, bg=C["panel"], height=32)
+        title_bar.pack(fill="x", side="top")
+        title_bar.pack_propagate(False)
+
+        # Drag bindings on the bar itself
+        title_bar.bind("<ButtonPress-1>",   self._on_drag_start)
+        title_bar.bind("<B1-Motion>",        self._on_drag_motion)
+        title_bar.bind("<Double-Button-1>",  lambda e: self._on_maximize())
+
+        # App name + edition
+        lbl_title = tk.Label(
+            title_bar,
+            text="\u2593\u2592\u2591  S M U T S C R A P E  \u2591\u2592\u2593",
+            bg=C["panel"], fg=C["fg"], font=("Courier", 11, "bold"), cursor="fleur"
+        )
+        lbl_title.pack(side="left", padx=(10, 4))
+        lbl_title.bind("<ButtonPress-1>",  self._on_drag_start)
+        lbl_title.bind("<B1-Motion>",       self._on_drag_motion)
+
+        lbl_edition = tk.Label(
+            title_bar, text="dark reaper edition",
+            bg=C["panel"], fg=C["fg_dim"], font=("Courier", 8), cursor="fleur"
+        )
+        lbl_edition.pack(side="left")
+        lbl_edition.bind("<ButtonPress-1>",  self._on_drag_start)
+        lbl_edition.bind("<B1-Motion>",       self._on_drag_motion)
+
+        # Window control buttons (right side)
+        btn_close = tk.Button(
+            title_bar, text="\u2715", command=self._on_close,
+            bg=C["panel"], fg="#ff3333",
+            activebackground="#3d0000", activeforeground="#ff6666",
+            relief="flat", bd=0, font=("Courier", 11, "bold"),
+            cursor="hand2", padx=10, pady=2
+        )
+        btn_close.pack(side="right")
+
+        self._max_btn = tk.Button(
+            title_bar, text="\u25a1", command=self._on_maximize,
+            bg=C["panel"], fg=C["fg_dim"],
+            activebackground=C["panel2"], activeforeground=C["fg"],
+            relief="flat", bd=0, font=("Courier", 11),
+            cursor="hand2", padx=10, pady=2
+        )
+        self._max_btn.pack(side="right")
+
+        btn_min = tk.Button(
+            title_bar, text="\u2212", command=self._on_minimize,
+            bg=C["panel"], fg=C["fg_dim"],
+            activebackground=C["panel2"], activeforeground=C["fg"],
+            relief="flat", bd=0, font=("Courier", 11, "bold"),
+            cursor="hand2", padx=10, pady=2
+        )
+        btn_min.pack(side="right")
+
+        # Configure button
+        self._button(
+            title_bar, "\u2699  Configure",
+            self._open_config_editor,
+            bg=C["btn_cfg"], fg=C["accent"],
+            padx=12, pady=3
+        ).pack(side="right", padx=8)
+
+        # Thin separator line under custom title bar
+        tk.Frame(self.root, bg=C["border"], height=1).pack(fill="x", side="top")
+
+        # ── Scrollable content area ───────────────────────────────────────────
         self._main_canvas = tk.Canvas(self.root, bg=C["bg"],
                                       highlightthickness=0, bd=0)
         self._main_vsb    = ttk.Scrollbar(self.root, orient="vertical",
@@ -381,27 +491,9 @@ class SmutscrapeGUI:
         self._inner.bind("<Configure>", self._on_inner_configure)
         self._main_canvas.bind("<Configure>", self._on_canvas_configure)
 
-        # ── Title bar ────────────────────────────────────────────────────────
-        title_bar = tk.Frame(self._inner, bg=C["panel"])
-        title_bar.pack(fill="x", padx=10, pady=(8, 2))
-        tk.Label(title_bar, text="\u2593\u2592\u2591  S M U T S C R A P E  \u2591\u2592\u2593",
-                 bg=C["panel"], fg=C["fg"], font=("Courier", 13, "bold")
-                 ).pack(side="left")
-        tk.Label(title_bar, text="dark reaper edition",
-                 bg=C["panel"], fg=C["fg_dim"], font=("Courier", 8)
-                 ).pack(side="left", padx=10)
-        # ─── Configure button lives in the title bar, far right ───
-        self._button(
-            title_bar, "\u2699  Configure",
-            self._open_config_editor,
-            bg=C["btn_cfg"], fg=C["accent"],
-            padx=12, pady=3
-        ).pack(side="right", padx=4)
-        tk.Frame(self._inner, bg=C["border"], height=1).pack(fill="x", padx=10, pady=(0, 6))
-
         # ── TARGET ───────────────────────────────────────────────────────────
         top = self._lf(self._inner, "  TARGET ")
-        top.pack(fill="x", padx=10, pady=(0, 4))
+        top.pack(fill="x", padx=10, pady=(8, 4))
 
         self._label(top, "Site:", width=16, anchor="e").grid(row=0, column=0, sticky="e", pady=3)
         self.site_var   = tk.StringVar()

@@ -194,6 +194,10 @@ def _apply_dark_ttk(root):
 # Main GUI
 # ===========================================================================
 
+# Widget classes that should receive keyboard focus when clicked.
+_FOCUSABLE_CLASSES = {"Entry", "TEntry", "TCombobox", "Combobox", "Text", "TSpinbox"}
+
+
 class SmutscrapeGUI:
     def __init__(self, root):
         self.root = root
@@ -202,7 +206,8 @@ class SmutscrapeGUI:
         self.root.resizable(True, True)
         self.root.configure(bg=C["bg"])
 
-        # Remove OS title bar entirely
+        # Remove OS title bar.  With overrideredirect the WM no longer
+        # delivers focus events automatically, so we patch that below.
         self.root.overrideredirect(True)
         self.root.after(10, lambda: self.root.wm_attributes("-type", "normal"))
 
@@ -229,18 +234,49 @@ class SmutscrapeGUI:
 
         self._build_ui()
         self._bind_mousewheel()
+        self._fix_overrideredirect_focus()   # <-- the key fix
         self._poll_log_queue()
 
     # -------------------------------------------------------------------------
-    # Custom title bar drag — bound ONLY to explicit drag-handle widgets,
-    # never to a container frame (which would catch bubbled child clicks).
+    # overrideredirect focus fix
+    # -------------------------------------------------------------------------
+
+    def _fix_overrideredirect_focus(self):
+        """
+        overrideredirect(True) stops the window manager from giving focus to
+        child widgets when the user clicks them.  We compensate by listening
+        globally for every ButtonPress-1 and forcibly calling focus_set() on
+        the clicked widget whenever it is a focusable input type.  This is
+        completely inert for non-input widgets (Labels, Frames, Buttons, …).
+        """
+        def _grant_focus(event):
+            w = event.widget
+            # Skip non-tk string references (e.g. Combobox popdown list)
+            if isinstance(w, str):
+                return
+            try:
+                cls = w.winfo_class()
+            except Exception:
+                return
+            if cls in _FOCUSABLE_CLASSES:
+                w.focus_set()
+
+        # Use add='+' so we never displace existing bindings on any widget.
+        self.root.bind_all("<ButtonPress-1>", _grant_focus, add=True)
+
+        # Also grab application-level focus immediately so the first click
+        # inside the window doesn't get swallowed by the WM.
+        self.root.after(50, self.root.focus_force)
+
+    # -------------------------------------------------------------------------
+    # Custom title bar drag — bound ONLY to the two label drag-handle widgets.
     # -------------------------------------------------------------------------
 
     def _drag_start(self, event):
         self._dragging = True
         self._drag_x = event.x_root - self.root.winfo_x()
         self._drag_y = event.y_root - self.root.winfo_y()
-        return "break"   # stop propagation
+        return "break"
 
     def _drag_motion(self, event):
         if not self._dragging or self._maximized:
@@ -257,7 +293,6 @@ class SmutscrapeGUI:
         return "break"
 
     def _make_drag_handle(self, widget):
-        """Bind drag events to a specific widget only — never a parent frame."""
         widget.bind("<ButtonPress-1>",   self._drag_start,    add=False)
         widget.bind("<B1-Motion>",        self._drag_motion,   add=False)
         widget.bind("<ButtonRelease-1>",  self._drag_stop,     add=False)
@@ -274,6 +309,7 @@ class SmutscrapeGUI:
 
     def _on_restore_from_minimize(self, event=None):
         self.root.overrideredirect(True)
+        self.root.after(50, self.root.focus_force)
         self.root.unbind("<Map>")
 
     def _on_maximize(self):
@@ -428,15 +464,11 @@ class SmutscrapeGUI:
     # -------------------------------------------------------------------------
 
     def _build_ui(self):
-        # ── Custom OS-less title bar ────────────────────────────────────────
-        # The frame itself gets NO mouse bindings at all — only the two
-        # label widgets are drag handles so bubbling from Entry/Button is
-        # never intercepted.
+        # ── Custom title bar ──────────────────────────────────────────────────
         title_bar = tk.Frame(self.root, bg=C["panel"], height=32)
         title_bar.pack(fill="x", side="top")
         title_bar.pack_propagate(False)
 
-        # Drag-handle labels (cursor fleur signals draggability)
         lbl_title = tk.Label(
             title_bar,
             text="\u2593\u2592\u2591  S M U T S C R A P E  \u2591\u2592\u2593",
@@ -447,14 +479,13 @@ class SmutscrapeGUI:
         self._make_drag_handle(lbl_title)
 
         lbl_edition = tk.Label(
-            title_bar, text="dark reaper edition",
+            title_bar, text="Nix edition",
             bg=C["panel"], fg=C["fg_dim"],
             font=("Courier", 8), cursor="fleur"
         )
         lbl_edition.pack(side="left")
         self._make_drag_handle(lbl_edition)
 
-        # Window control buttons (right side) — plain buttons, no drag
         btn_close = tk.Button(
             title_bar, text="\u2715", command=self._on_close,
             bg=C["panel"], fg="#ff3333",
@@ -489,10 +520,9 @@ class SmutscrapeGUI:
             padx=12, pady=3
         ).pack(side="right", padx=8)
 
-        # Thin separator
         tk.Frame(self.root, bg=C["border"], height=1).pack(fill="x", side="top")
 
-        # ── Scrollable content area ───────────────────────────────────────────
+        # ── Scrollable content area ─────────────────────────────────────────────
         self._main_canvas = tk.Canvas(self.root, bg=C["bg"],
                                       highlightthickness=0, bd=0)
         self._main_vsb    = ttk.Scrollbar(self.root, orient="vertical",
@@ -537,7 +567,7 @@ class SmutscrapeGUI:
         self.query_entry.grid(row=2, column=1, columnspan=2, sticky="ew", padx=6, pady=3)
         top.columnconfigure(1, weight=1)
 
-        # ── CATEGORIES ────────────────────────────────────────────────────────
+        # ── CATEGORIES ───────────────────────────────────────────────────────
         self.cat_frame = self._lf(
             self._inner,
             "  CATEGORIES  (check one or more \u2014 each scraped in sequence)",

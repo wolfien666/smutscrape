@@ -26,6 +26,14 @@ download_destinations:
 
 # --------------------------------------------------------------------------------
 
+# Cookies file (Netscape format) for sites that require login to fetch metadata
+# or bypass age-gates.  Generate this file with:
+#   python extract_cookies.py --output ~/smutscrape-cookies.txt
+# Then uncomment the line below:
+# cookies_file: "~/smutscrape-cookies.txt"
+
+# --------------------------------------------------------------------------------
+
 # Terms to skip during scraping (case-insensitive, applied to all metadata fields).
 ignored:
   - "Scat"
@@ -90,7 +98,7 @@ case_overrides:
   - "MILF"
   - "MissaX"
   - "MOTHERLESS"
-  - "MOTHERLESS.COM ™"
+  - "MOTHERLESS.COM \u2122"
   - "TXXX"
   - "XXX"
   - "3D"
@@ -121,7 +129,7 @@ sleep:
 
 # File naming conventions
 file_naming:
-  invalid_chars:   '/:*?"<>|'''                     # Characters to remove from filenames
+  invalid_chars:   '/:*?"<>|\u2019'                 # Characters to remove from filenames
   extension:       ".mp4"                           # Default file extension
   max_chars:       200                              # Maximum filename length
 

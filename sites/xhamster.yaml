@@ -1,5 +1,3 @@
-# sites/xhamster.yaml
-
 name: xHamster
 shortcode: xh
 domain: xHamster.com
@@ -9,6 +7,7 @@ no_overwrite: true
 use_selenium: true
 download:
   method: "yt-dlp"
+impersonate: chrome
 url_encoding_rules:
   " ": "-"
   "%20": "-"

@@ -9,14 +9,14 @@ This script uses yt-dlp's own --cookies-from-browser flag, which correctly
 handles Windows 10/11 Chrome DPAPI encryption, macOS Keychain, and Linux
 secret-service — no extra Python packages required.
 
-Usage
+Usage (Windows)
 -----
-    # Windows (run from the repo folder, Chrome can be open):
     python extract_cookies.py
     python extract_cookies.py --output C:\\Users\\You\\smutscrape-cookies.txt
     python extract_cookies.py --browser edge
 
-    # Linux / macOS:
+Usage (Linux / macOS)
+-----
     python extract_cookies.py --browser firefox
 
 Requirements
@@ -25,12 +25,9 @@ Requirements
 
 Notes
 -----
-- The script uses a throwaway yt-dlp invocation against a known lightweight
-  URL (xhamster's homepage) just to trigger cookie extraction.  The page is
-  never actually downloaded.
-- On Windows, Chrome does NOT need to be closed first.
+- Chrome does NOT need to be closed on Windows.
 - The output file contains active login tokens.  Keep it private and never
-  commit it to git (it is already covered by .gitignore).
+  commit it to git (already covered by .gitignore).
 """
 
 import argparse
@@ -40,25 +37,6 @@ import sys
 import tempfile
 import shutil
 
-
-# ---------------------------------------------------------------------------
-# All domains smutscrape cares about — we run one extraction pass per domain
-# so the file stays small and only contains relevant cookies.
-# ---------------------------------------------------------------------------
-ALL_SMUT_DOMAINS = [
-    'xhamster.com',
-    'pornhub.com',
-    'xvideos.com',
-    'xnxx.com',
-    'redtube.com',
-    'youporn.com',
-    'tnaflix.com',
-    'motherless.com',
-    'incestflix.com',
-    'tabootube.xxx',
-    'txxx.com',
-    'eporner.com',
-]
 
 NETSCAPE_HEADER = (
     "# Netscape HTTP Cookie File\n"
@@ -77,99 +55,110 @@ def check_ytdlp():
         sys.exit(1)
 
 
+def validate_output_path(path):
+    """
+    Make sure --output is a FILE path, not a directory.
+    If the user passed a directory (or '.'), append a default filename.
+    """
+    path = os.path.abspath(path)
+    if os.path.isdir(path):
+        path = os.path.join(path, 'smutscrape-cookies.txt')
+    elif not path.endswith('.txt') and not os.path.splitext(path)[1]:
+        # Looks like a bare directory name that doesn't exist yet
+        os.makedirs(path, exist_ok=True)
+        path = os.path.join(path, 'smutscrape-cookies.txt')
+    return path
+
+
 def extract_via_ytdlp(browser, profile, output_path):
     """
-    Run yt-dlp once per smutscrape domain to harvest cookies.
-    yt-dlp writes a Netscape cookies.txt on its own; we just merge them.
+    Use yt-dlp --cookies-from-browser to dump ALL cookies from the browser
+    directly into a Netscape cookies.txt file in one shot.
 
-    Strategy:
-        yt-dlp --cookies-from-browser chrome \
-               --cookies <tmp_file> \
-               --skip-download \
-               --quiet \
-               --no-warnings \
-               https://<domain>/
+    This is the correct approach: yt-dlp reads the browser's SQLite cookie
+    database directly (handling DPAPI on Windows, Keychain on macOS, etc.)
+    and writes every cookie without needing a URL at all.  We use a dummy
+    'null' extractor URL trick: pass --cookies-from-browser with
+    --print-json on a URL that returns immediately, but the key is that
+    yt-dlp writes the cookie jar BEFORE attempting the URL.
 
-    After each run, append any new lines from tmp_file into the master file.
+    Actually the cleanest method: yt-dlp supports dumping cookies without
+    a URL when you combine --cookies-from-browser with --cookies <file>
+    and a real URL.  We use a reliable lightweight test URL.
     """
     browser_arg = browser
     if profile and profile.lower() not in ('default', ''):
-        # yt-dlp accepts  "chrome:Profile 1"  syntax
         browser_arg = f"{browser}:{profile}"
 
-    seen_lines = set()
-    master_lines = []
+    with tempfile.NamedTemporaryFile(
+        suffix='.txt', delete=False, mode='w', encoding='utf-8'
+    ) as tmp:
+        tmp_path = tmp.name
 
-    for domain in ALL_SMUT_DOMAINS:
-        url = f"https://www.{domain}/"
-        with tempfile.NamedTemporaryFile(suffix='.txt', delete=False, mode='w') as tmp:
-            tmp_path = tmp.name
+    # yt-dlp --cookies-from-browser writes the cookie jar to --cookies <file>
+    # when it initialises, regardless of whether the download succeeds.
+    # We use a known-fast xhamster URL and --skip-download is NOT used —
+    # instead we use --simulate which runs the info extraction step only
+    # (which triggers cookie jar initialisation) without downloading.
+    cmd = [
+        'yt-dlp',
+        '--cookies-from-browser', browser_arg,
+        '--cookies', tmp_path,
+        '--simulate',
+        '--quiet',
+        '--no-warnings',
+        '--ignore-errors',
+        'https://xhamster.com/videos/family-12900151',
+    ]
 
-        cmd = [
-            'yt-dlp',
-            '--cookies-from-browser', browser_arg,
-            '--cookies', tmp_path,
-            '--skip-download',
-            '--quiet',
-            '--no-warnings',
-            url,
-        ]
+    print(f"[INFO] Reading cookies from {browser} (profile: {profile}) ...")
+    print("       (yt-dlp is probing one URL to trigger cookie export — this takes ~5s)")
 
-        print(f"[INFO] Extracting cookies for {domain} ...", end=' ', flush=True)
+    try:
+        subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        print("[WARN] yt-dlp timed out, but the cookie file may still have been written.")
+    except Exception as e:
+        print(f"[ERROR] yt-dlp failed: {e}")
+        sys.exit(1)
+
+    # Read what yt-dlp dumped
+    try:
+        with open(tmp_path, 'r', encoding='utf-8', errors='replace') as f:
+            raw_lines = f.readlines()
+    except FileNotFoundError:
+        print(
+            "[ERROR] yt-dlp did not create a cookie file.\n"
+            "  This usually means yt-dlp couldn't find your Chrome profile.\n"
+            "  Try closing Chrome completely and running again."
+        )
+        sys.exit(1)
+    finally:
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-        except subprocess.TimeoutExpired:
-            print("timeout, skipping.")
             os.unlink(tmp_path)
-            continue
-        except Exception as e:
-            print(f"error ({e}), skipping.")
-            os.unlink(tmp_path)
-            continue
+        except OSError:
+            pass
 
-        # Read whatever yt-dlp wrote
-        try:
-            with open(tmp_path, 'r', encoding='utf-8', errors='replace') as f:
-                raw = f.read()
-        except FileNotFoundError:
-            print("no output, skipping.")
-            continue
-        finally:
-            try: os.unlink(tmp_path)
-            except OSError: pass
-
-        new = 0
-        for line in raw.splitlines():
-            stripped = line.strip()
-            # Skip header/blank lines and duplicates
-            if not stripped or stripped.startswith('#'):
-                continue
-            if stripped not in seen_lines:
-                seen_lines.add(stripped)
-                master_lines.append(line)
-                new += 1
-
-        print(f"{new} new cookies.")
+    # Count non-header lines
+    cookie_lines = [
+        l for l in raw_lines
+        if l.strip() and not l.strip().startswith('#')
+    ]
 
     # Write final file
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(NETSCAPE_HEADER)
-        for line in master_lines:
-            f.write(line + '\n')
+        for line in raw_lines:
+            stripped = line.strip()
+            if stripped and not stripped.startswith('#'):
+                f.write(line if line.endswith('\n') else line + '\n')
 
-    return len(master_lines)
+    return len(cookie_lines)
 
 
 def parse_args():
-    default_out = os.path.join(
-        os.path.expanduser('~'), 'smutscrape-cookies.txt'
-    )
+    default_out = os.path.join(os.path.expanduser('~'), 'smutscrape-cookies.txt')
     p = argparse.ArgumentParser(
         description=(
             'Extract browser cookies to Netscape format for yt-dlp / smutscrape.\n'
@@ -180,7 +169,10 @@ def parse_args():
     p.add_argument(
         '--output', '-o',
         default=default_out,
-        help=f'Output path (default: {default_out})'
+        help=(
+            f'Output FILE path (default: {default_out}).\n'
+            'If you pass a directory, smutscrape-cookies.txt is created inside it.'
+        )
     )
     p.add_argument(
         '--browser', '-b',
@@ -200,27 +192,28 @@ def main():
     args = parse_args()
     check_ytdlp()
 
+    output_path = validate_output_path(args.output)
+
     print()
     print(f"Browser : {args.browser}  (profile: {args.profile})")
-    print(f"Output  : {args.output}")
+    print(f"Output  : {output_path}")
     print()
 
-    count = extract_via_ytdlp(args.browser, args.profile, args.output)
+    count = extract_via_ytdlp(args.browser, args.profile, output_path)
 
     print()
     if count == 0:
         print(
-            "[WARN] No cookies were extracted.\n"
-            "  Make sure you are logged in to the sites in Chrome\n"
-            "  and that yt-dlp can access your browser profile.\n"
-            "  On Windows, try closing Chrome first if you see errors."
+            "[WARN] No cookies were written.\n"
+            "  Make sure you are logged in to the sites in Chrome.\n"
+            "  Try closing Chrome completely and running again.\n"
+            "  You can also try --browser edge if you use Edge."
         )
     else:
-        print(f"[OK] {count} unique cookies written to: {args.output}")
+        print(f"[OK] {count} cookies written to: {output_path}")
         print()
+        safe_path = output_path.replace('\\', '/')
         print("Add this line to your smutscrape config.yaml:")
-        # Use forward slashes so YAML doesn't need escaping
-        safe_path = args.output.replace('\\', '/')
         print(f'  cookies_file: "{safe_path}"')
         print()
         print("[REMINDER] Keep this file private — never commit it to git.")

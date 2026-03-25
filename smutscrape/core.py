@@ -120,26 +120,6 @@ def video_passes_filters(video_data, after_threshold, min_duration_minutes):
 
 
 # ---------------------------------------------------------------------------
-# yt-dlp impersonation helper
-# ---------------------------------------------------------------------------
-
-def _impersonate_args(site_config, general_config):
-    """
-    Return a list of extra yt-dlp flags needed for impersonation.
-    Reads 'impersonate' from site_config first, then general_config.
-    If the value is True / 'auto', uses 'chrome' as the default target.
-    Suppresses the yt-dlp impersonation warning completely.
-    """
-    target = (site_config or {}).get('impersonate') \
-          or (general_config or {}).get('impersonate')
-    if not target:
-        return []
-    if target is True or str(target).lower() in ('true', 'auto', 'yes'):
-        target = 'chrome'
-    return ['--impersonate', str(target)]
-
-
-# ---------------------------------------------------------------------------
 # yt-dlp metadata probe  (duration + upload_date, NO download)
 # ---------------------------------------------------------------------------
 
@@ -150,6 +130,10 @@ def _probe_metadata_ytdlp(page_url, general_config, site_config=None, cookies=No
     Takes ~1-3 s and does NOT download anything.
     Called only when HTML scraping produced no duration/date AND a filter
     is active.  Fully invisible for sites that already expose those fields.
+
+    NOTE: --no-warnings suppresses the xhamster impersonation advisory
+    (which is just informational, not an error — downloads work fine
+    without curl_cffi).
     """
     cmd = [
         'yt-dlp',
@@ -161,9 +145,6 @@ def _probe_metadata_ytdlp(page_url, general_config, site_config=None, cookies=No
         '--no-warnings',
     ]
 
-    # Honour impersonation setting to silence xhamster (and similar) warnings
-    cmd += _impersonate_args(site_config, general_config)
-
     cookies = cookies or \
               (general_config or {}).get('cookies_file') or \
               (site_config or {}).get('cookies_file')
@@ -172,7 +153,7 @@ def _probe_metadata_ytdlp(page_url, general_config, site_config=None, cookies=No
 
     cmd.append(page_url)
 
-    logger.info(f"[PROBE] yt-dlp metadata probe → {page_url}")
+    logger.info(f"[PROBE] yt-dlp metadata probe \u2192 {page_url}")
     try:
         result = subprocess.run(
             cmd,
@@ -194,15 +175,26 @@ def _probe_metadata_ytdlp(page_url, general_config, site_config=None, cookies=No
         if len(lines) >= 2 and lines[1] not in ('NA', 'none', 'None', ''):
             upl_date = parse_date_loose(lines[1])
 
-        # Always log what was resolved so the user can see it in the log window
+        # Log what was resolved
         dur_str  = f"{dur_min:.1f} min" if dur_min is not None else "N/A"
         date_str = str(upl_date)         if upl_date is not None else "N/A"
         logger.info(f"[PROBE] duration={dur_str}  upload_date={date_str}")
 
+        # Warn if probe returned nothing — likely needs cookies or login
+        if dur_min is None and upl_date is None and result.returncode != 0:
+            stderr = result.stderr.strip()
+            if stderr:
+                logger.warning(f"[PROBE] yt-dlp stderr: {stderr[:400]}")
+            else:
+                logger.warning(
+                    f"[PROBE] yt-dlp returned no data (rc={result.returncode}). "
+                    "Site may require cookies/login for metadata."
+                )
+
         return dur_min, upl_date
 
     except FileNotFoundError:
-        logger.warning("[PROBE] yt-dlp not found — metadata probe skipped.")
+        logger.warning("[PROBE] yt-dlp not found \u2014 metadata probe skipped.")
         return None, None
     except subprocess.TimeoutExpired:
         logger.warning(f"[PROBE] yt-dlp probe timed out for {page_url}")
@@ -262,7 +254,7 @@ def fetch_page(url, user_agents, headers, use_selenium=False, driver=None, retry
 
     if use_selenium and driver is None:
         logger.warning(
-            f"[SELENIUM FALLBACK] Chrome driver unavailable — falling back to cloudscraper for {url}.\n"
+            f"[SELENIUM FALLBACK] Chrome driver unavailable \u2014 falling back to cloudscraper for {url}.\n"
             "  Install Chrome/Chromium for full JS-rendered page support."
         )
 
@@ -408,7 +400,7 @@ def resolve_download_dir(general_config):
 
     fallback = os.path.join(os.getcwd(), 'downloads')
     os.makedirs(fallback, exist_ok=True)
-    logger.warning(f"[DOWNLOAD] No download_destinations configured — falling back to: {fallback}")
+    logger.warning(f"[DOWNLOAD] No download_destinations configured \u2014 falling back to: {fallback}")
     return fallback
 
 
@@ -440,11 +432,9 @@ def download_video(page_url, site_config, general_config, output_dir=None,
         '--merge-output-format', 'mp4',
         '--no-playlist',
         '--newline',
+        '--no-warnings',
         '--output', out_template,
     ]
-
-    # Impersonation (silences xhamster and similar extractor warnings)
-    cmd += _impersonate_args(site_config, general_config)
 
     cookies = general_config.get('cookies_file') or site_config.get('cookies_file')
     if cookies and os.path.isfile(cookies):
@@ -564,7 +554,7 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
     base_url           = site_config['base_url']
     container_selector = list_scraper['video_container']['selector']
 
-    # ── Container ────────────────────────────────────────────────────────────────
+    # \u2500\u2500 Container \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
     container = None
     tried = []
     if isinstance(container_selector, list):
@@ -591,7 +581,7 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
             )
             return None, None, False
 
-    # ── Video items ──────────────────────────────────────────────────────────────
+    # \u2500\u2500 Video items \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
     item_selector  = list_scraper['video_item']['selector']
     video_elements = container.select(item_selector)
     if not video_elements:
@@ -610,7 +600,7 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
     term_width  = get_terminal_width()
     total_items = len(video_elements)
     print()
-    print(colored(f" page {page_num}, {site_config['name'].lower()} {mode}: \"{identifier}\" ".center(term_width, "═"), "yellow"))
+    print(colored(f" page {page_num}, {site_config['name'].lower()} {mode}: \"{identifier}\" ".center(term_width, "\u2550"), "yellow"))
     logger.info(f"Found {total_items} video elements on page {page_num}")
     if after_threshold: logger.info(f"[FILTER] Date filter: > {after_threshold}")
     if min_dur_minutes: logger.info(f"[FILTER] Duration filter: > {min_dur_minutes} min")
@@ -659,7 +649,7 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
             continue
 
         print()
-        print(colored(f"┈┈┈ {i} of {total_items} ┈ {video_url} ".ljust(term_width, "┈"), "magenta"))
+        print(colored(f"\u2508\u2508\u2508 {i} of {total_items} \u2508 {video_url} ".ljust(term_width, "\u2508"), "magenta"))
 
         if video_info_cb:
             v_title = video_data.get('title', '') or video_url.split('/')[-2] or video_url
@@ -691,7 +681,7 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
     if driver:
         driver.quit()
 
-    # ── Pagination ──────────────────────────────────────────────────────────────
+    # \u2500\u2500 Pagination \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
     if stop_event and stop_event.is_set():
         return None, None, success
 
@@ -737,7 +727,7 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
     Fetch the video page, apply a hard second-pass filter on the accurate
     date and duration, then download.
 
-    For sites that don’t expose duration/date in HTML, a lightweight
+    For sites that don\u2019t expose duration/date in HTML, a lightweight
     yt-dlp metadata probe is run when either filter is active and the
     HTML scrape produced no value.  The probe takes ~1-3 s and is skipped
     entirely when not needed.
@@ -757,20 +747,20 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
     v_date   = raw_data.get('date', '')
     v_dur    = raw_data.get('duration', '')
 
-    # ── yt-dlp metadata probe when HTML gave us nothing ──────────────────────
+    # \u2500\u2500 yt-dlp metadata probe when HTML gave us nothing \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
     need_dur_probe  = (min_dur_minutes is not None and min_dur_minutes > 0 and not v_dur)
     need_date_probe = (after_threshold is not None and not v_date)
 
     if need_dur_probe or need_date_probe:
         probe_dur, probe_date = _probe_metadata_ytdlp(url, general_config, site_config)
         if need_dur_probe and probe_dur is not None:
-            v_dur = str(probe_dur * 60)   # raw seconds — duration_str_to_minutes handles floats
+            v_dur = str(probe_dur * 60)   # raw seconds \u2014 duration_str_to_minutes handles floats
             logger.info(f"[PROBE] Resolved duration: {probe_dur:.1f} min")
         if need_date_probe and probe_date is not None:
             v_date = probe_date.strftime("%Y-%m-%d")
             logger.info(f"[PROBE] Resolved upload date: {v_date}")
 
-    # ── Hard filter ────────────────────────────────────────────────────────────
+    # \u2500\u2500 Hard filter \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
     if after_threshold is not None and v_date:
         parsed = parse_date_loose(v_date)
         if parsed is not None and parsed < after_threshold:

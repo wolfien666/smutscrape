@@ -382,13 +382,13 @@ class SmutscrapeGUI:
         self._main_canvas.bind("<Configure>", self._on_canvas_configure)
 
         # ── Title bar ────────────────────────────────────────────────────────
-        title_bar = tk.Frame(self._inner, bg=C["bg"])
+        title_bar = tk.Frame(self._inner, bg=C["panel"])
         title_bar.pack(fill="x", padx=10, pady=(8, 2))
         tk.Label(title_bar, text="\u2593\u2592\u2591  S M U T S C R A P E  \u2591\u2592\u2593",
-                 bg=C["bg"], fg=C["fg"], font=("Courier", 13, "bold")
+                 bg=C["panel"], fg=C["fg"], font=("Courier", 13, "bold")
                  ).pack(side="left")
         tk.Label(title_bar, text="dark reaper edition",
-                 bg=C["bg"], fg=C["fg_dim"], font=("Courier", 8)
+                 bg=C["panel"], fg=C["fg_dim"], font=("Courier", 8)
                  ).pack(side="left", padx=10)
         # ─── Configure button lives in the title bar, far right ───
         self._button(

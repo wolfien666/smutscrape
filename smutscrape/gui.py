@@ -48,6 +48,7 @@ C = dict(
     log_bg      = "#050f05",
     log_fg      = "#39ff14",
     log_filter  = "#00e5ff",
+    log_probe   = "#ff00ff",   # magenta  — yt-dlp metadata probe lines
     log_success = "#7fff00",
     log_error   = "#ff3333",
     log_warn    = "#ff8c00",
@@ -61,6 +62,12 @@ C = dict(
 # ===========================================================================
 
 def _audit_site_filter_caps(sites):
+    """
+    A site supports date/duration filters if:
+      - its video_scraper YAML exposes those fields  (direct HTML scrape), OR
+      - its download method is 'yt-dlp'  (probe fallback via _probe_metadata_ytdlp)
+    Either way both filters are available to the user.
+    """
     caps = {}
     for sc, site_obj in sites.items():
         name = site_obj.name
@@ -68,6 +75,7 @@ def _audit_site_filter_caps(sites):
         if not os.path.isfile(yaml_path):
             yaml_path = os.path.join(_SITES_DIR, f"{name.lower().replace(' ','')}.yaml")
         has_date = has_dur = False
+        is_ytdlp = False
         try:
             with open(yaml_path) as fh:
                 data = yaml.safe_load(fh)
@@ -75,9 +83,14 @@ def _audit_site_filter_caps(sites):
             ls = data.get('scrapers', {}).get('list_scraper', {}).get('video_item', {}).get('fields', {})
             has_date = bool(vs.get('date') or ls.get('date'))
             has_dur  = bool(vs.get('duration') or ls.get('duration'))
+            # yt-dlp probe covers any site that uses yt-dlp as download method
+            is_ytdlp = (data.get('download', {}).get('method', '') == 'yt-dlp')
         except Exception:
             pass
-        caps[name] = {'date': has_date, 'duration': has_dur}
+        if is_ytdlp:
+            has_date = True
+            has_dur  = True
+        caps[name] = {'date': has_date, 'duration': has_dur, 'probe': is_ytdlp}
     return caps
 
 
@@ -201,10 +214,6 @@ class SmutscrapeGUI:
         self.root.geometry("960x860")
         self.root.resizable(True, True)
         self.root.configure(bg=C["bg"])
-
-        # NOTE: overrideredirect is intentionally NOT used here.
-        # It kills WM focus delivery, making all Entry/Combobox widgets
-        # unresponsive to keyboard input.  The OS title bar is kept.
 
         _apply_dark_ttk(root)
 
@@ -600,6 +609,7 @@ class SmutscrapeGUI:
         )
         self.log_text.pack(fill="both", expand=True)
         self.log_text.tag_config("filter",  foreground=C["log_filter"])
+        self.log_text.tag_config("probe",   foreground=C["log_probe"])   # magenta
         self.log_text.tag_config("success", foreground=C["log_success"])
         self.log_text.tag_config("error",   foreground=C["log_error"])
         self.log_text.tag_config("warn",    foreground=C["log_warn"])
@@ -694,29 +704,43 @@ class SmutscrapeGUI:
         self.mode_combo['values'] = modes
         if modes: self.mode_combo.current(0)
 
-        caps = self._filter_caps.get(site_name, {'date': True, 'duration': True})
-        badges = []
-        if not caps['date']:     badges.append("no date filter")
-        if not caps['duration']: badges.append("no duration filter")
-        self.filter_badge_var.set(
-            ("\u26a0 " + ", ".join(badges)) if badges else "\u2714 date & duration supported"
-        )
+        caps = self._filter_caps.get(site_name, {'date': True, 'duration': True, 'probe': False})
+        probe = caps.get('probe', False)
 
-        date_state = "normal" if caps['date'] else "disabled"
-        date_bg    = C["entry_bg"] if caps['date'] else C["entry_dis"]
-        hint_fg    = C["fg_dim"]   if caps['date'] else C["fg_disabled"]
-        hint_txt   = "all optional \u2014 fill only YYYY for year filter" \
-                     if caps['date'] else "not available for this site"
+        # Badge: show ✔ with (via probe) note when yt-dlp covers it
+        if caps['date'] and caps['duration']:
+            if probe:
+                badge = "\u2714 date & duration  (via yt-dlp probe)"
+            else:
+                badge = "\u2714 date & duration supported"
+        else:
+            missing = []
+            if not caps['date']:     missing.append("no date filter")
+            if not caps['duration']: missing.append("no duration filter")
+            badge = "\u26a0 " + ", ".join(missing)
+        self.filter_badge_var.set(badge)
+
+        # Date fields — always enabled for yt-dlp sites
+        date_state = "normal"
+        date_bg    = C["entry_bg"]
+        hint_fg    = C["fg_dim"]
+        hint_txt   = "all optional \u2014 fill only YYYY for year filter"
+        if not caps['date']:
+            date_state = "disabled"
+            date_bg    = C["entry_dis"]
+            hint_fg    = C["fg_disabled"]
+            hint_txt   = "not available for this site"
         for e in (self.date_yyyy, self.date_mm, self.date_dd):
             e.config(state=date_state, bg=date_bg)
         self.after_hint.config(fg=hint_fg, text=hint_txt)
 
-        if not caps['duration']:
-            self.min_dur_entry.config(state="disabled", bg=C["entry_dis"])
-            self.dur_hint.config(fg=C["fg_disabled"], text="not available for this site")
-        else:
+        # Duration field
+        if caps['duration']:
             self.min_dur_entry.config(state="normal", bg=C["entry_bg"])
             self.dur_hint.config(fg=C["fg_dim"], text="e.g. 10  (skip shorter than this)")
+        else:
+            self.min_dur_entry.config(state="disabled", bg=C["entry_dis"])
+            self.dur_hint.config(fg=C["fg_disabled"], text="not available for this site")
 
         self._on_mode_selected()
 
@@ -776,12 +800,14 @@ class SmutscrapeGUI:
                 if kind == "log":
                     msg = item[1]
                     low = msg.lower()
-                    if   "[filter]" in low or "skip" in low:     tag = "filter"
-                    elif "success"  in low or "finished" in low: tag = "success"
-                    elif "stopped"  in low or "abort"    in low: tag = "stopped"
-                    elif "error"    in low or "failed"   in low: tag = "error"
-                    elif "warn"     in low:                       tag = "warn"
-                    else:                                         tag = "info"
+                    # [PROBE] lines get their own magenta colour
+                    if   "[probe]" in low:                                tag = "probe"
+                    elif "[filter]" in low or "skip" in low:             tag = "filter"
+                    elif "success"  in low or "finished" in low:         tag = "success"
+                    elif "stopped"  in low or "abort"    in low:         tag = "stopped"
+                    elif "error"    in low or "failed"   in low:         tag = "error"
+                    elif "warn"     in low:                               tag = "warn"
+                    else:                                                 tag = "info"
                     self._log(msg.rstrip(), tag)
                 elif kind == "dl_progress":
                     _, pct, speed, eta = item
@@ -889,9 +915,10 @@ class SmutscrapeGUI:
             try:    start_page = int(self.page_entry.get().strip())
             except: start_page = 1
 
-            caps = self._filter_caps.get(site_name, {'date': True, 'duration': True})
-            if not caps['date']:     after_date   = None
-            if not caps['duration']: min_duration = None
+            # No longer gate filters on caps — probe handles missing HTML data
+            # caps = self._filter_caps.get(site_name, ...)
+            # if not caps['date']:     after_date   = None   <-- removed
+            # if not caps['duration']: min_duration = None   <-- removed
 
             def dl_progress_cb(pct, speed="", eta=""):
                 self.log_queue.put(("dl_progress", pct, speed, eta))

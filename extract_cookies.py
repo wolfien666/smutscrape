@@ -22,21 +22,22 @@ SOLUTIONS (pick one)
   OPTION B ─ Browser extension (no Firefox install needed):
     1. Install "Get cookies.txt LOCALLY" from Chrome Web Store:
        https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc
-    2. Go to xhamster.com (while logged in)
-    3. Click the extension icon → Export → save as xhamster.txt
-    4. Repeat for each site you want
-    5. Merge them:  python extract_cookies.py --merge C:\path\to\*.txt --output smutscrape-cookies.txt
+    2. Go to each site while logged in, click the extension → Export (Current Site)
+    3. Save each file, then merge+trim:
+       python extract_cookies.py --trim cookies.txt --output smutscrape-cookies.txt
+    OR if you exported ALL cookies at once:
+       python extract_cookies.py --trim full-export.txt --output smutscrape-cookies.txt
 
   OPTION C ─ Edge (Chromium-based but may work):
     python extract_cookies.py --browser edge
-    (Edge uses a slightly different encryption path that yt-dlp can sometimes read)
 
 Usage
 -----
     python extract_cookies.py                          # Firefox, default output
     python extract_cookies.py --browser firefox
     python extract_cookies.py --browser edge
-    python extract_cookies.py --merge *.txt --output smutscrape-cookies.txt
+    python extract_cookies.py --trim cookies.txt --output smutscrape-cookies.txt
+    python extract_cookies.py --merge a.txt b.txt --output smutscrape-cookies.txt
 
 Requirements
 ------------
@@ -61,6 +62,27 @@ NETSCAPE_HEADER = (
 
 TEST_URL = 'https://xhamster.com/videos/family-12900151'
 
+# Domains smutscrape actually cares about
+SMUT_DOMAINS = [
+    'xhamster.com', 'xhamster.desi', 'xhamster2.com',
+    'pornhub.com',
+    'xvideos.com', 'xvideos2.com',
+    'xnxx.com',
+    'redtube.com',
+    'youporn.com',
+    'tnaflix.com',
+    'motherless.com',
+    'incestflix.com', 'incestflix.net',
+    'tabootube.xxx',
+    'txxx.com',
+    'eporner.com',
+    'erothots.co',
+    'dirtyship.com',
+    '4tube.com',
+    'tube8.com',
+    'tsyndicate.com',   # xhamster CDN partner
+]
+
 
 def check_ytdlp():
     if shutil.which('yt-dlp') is None:
@@ -75,8 +97,14 @@ def validate_output_path(path):
     return path
 
 
+def _domain_is_relevant(domain):
+    """Return True if this cookie domain belongs to a smutscrape site."""
+    d = domain.lstrip('.')
+    return any(d.endswith(s) or s.endswith(d) for s in SMUT_DOMAINS)
+
+
 # ---------------------------------------------------------------------------
-# Option A/C: extract via yt-dlp --cookies-from-browser
+# Mode: extract from browser via yt-dlp
 # ---------------------------------------------------------------------------
 
 def extract_from_browser(browser, profile, output_path):
@@ -108,28 +136,21 @@ def extract_from_browser(browser, profile, output_path):
         print(f"[ERROR] {e}")
         return 0
 
-    # Show any errors (but not the DPAPI wall-of-text)
     stderr = result.stderr or ''
     if 'DPAPI' in stderr or 'App-Bound' in stderr or 'app-bound' in stderr.lower():
         print()
         print("[ERROR] Chrome App-Bound Encryption is blocking cookie access.")
         print("        Chrome 127+ on Windows permanently prevents this.")
         print()
-        print("  → SOLUTION A: Use Firefox (recommended)")
-        print("      1. Install Firefox: https://www.mozilla.org/firefox/")
-        print("      2. Log in to your sites in Firefox")
-        print("      3. Run: python extract_cookies.py --browser firefox")
+        print("  → SOLUTION A: Use Firefox")
+        print("      python extract_cookies.py --browser firefox")
         print()
-        print("  → SOLUTION B: Browser extension (no Firefox needed)")
-        print("      1. Install 'Get cookies.txt LOCALLY' from Chrome Web Store")
-        print("         https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc")
-        print("      2. Visit each site while logged in, click extension → Export")
-        print("      3. Run: python extract_cookies.py --merge <exported_files> --output smutscrape-cookies.txt")
+        print("  → SOLUTION B: Export with browser extension, then trim:")
+        print("      python extract_cookies.py --trim cookies.txt --output smutscrape-cookies.txt")
         try: os.unlink(tmp_path)
         except OSError: pass
-        return -1   # signal: show instructions, don't show generic warn
+        return -1
     elif result.returncode != 0 and stderr.strip():
-        # Show first 3 lines of error so it's diagnosable
         for line in stderr.strip().splitlines()[:3]:
             if line.strip():
                 print(f"  [yt-dlp] {line}")
@@ -143,18 +164,55 @@ def extract_from_browser(browser, profile, output_path):
         try: os.unlink(tmp_path)
         except OSError: pass
 
-    return _write_cookies(raw_lines, output_path)
+    return _write_cookies(raw_lines, output_path, filter_domains=True)
 
 
 # ---------------------------------------------------------------------------
-# Option B: merge manually-exported cookies.txt files
+# Mode: trim a full browser export down to smutscrape-relevant domains only
+# ---------------------------------------------------------------------------
+
+def trim_cookie_file(source_path, output_path):
+    """
+    Read a full Netscape cookies.txt (e.g. exported via browser extension
+    with "Export All"), keep only cookies for smutscrape-relevant domains,
+    deduplicate, and write to output_path.
+    """
+    print(f"[INFO] Reading: {source_path}")
+    try:
+        with open(source_path, 'r', encoding='utf-8', errors='replace') as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        print(f"[ERROR] File not found: {source_path}")
+        sys.exit(1)
+
+    kept, skipped = 0, 0
+    seen = set()
+    result_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            continue
+        parts = stripped.split('\t')
+        if len(parts) < 6:
+            continue
+        domain = parts[0]
+        if not _domain_is_relevant(domain):
+            skipped += 1
+            continue
+        if stripped not in seen:
+            seen.add(stripped)
+            result_lines.append(line)
+            kept += 1
+
+    print(f"[INFO] Kept {kept} cookies, removed {skipped} irrelevant cookies.")
+    return _write_cookies(result_lines, output_path, filter_domains=False)
+
+
+# ---------------------------------------------------------------------------
+# Mode: merge multiple files (e.g. per-site exports from extension)
 # ---------------------------------------------------------------------------
 
 def merge_cookie_files(patterns, output_path):
-    """
-    Merge one or more Netscape cookies.txt files (from browser extension exports)
-    into a single deduplicated output file.
-    """
     files = []
     for pat in patterns:
         files.extend(glob.glob(pat))
@@ -179,15 +237,25 @@ def merge_cookie_files(patterns, output_path):
         except Exception as e:
             print(f"[WARN] Could not read {fpath}: {e}")
 
-    return _write_cookies(all_lines, output_path)
+    return _write_cookies(all_lines, output_path, filter_domains=False)
 
 
 # ---------------------------------------------------------------------------
 # Shared writer
 # ---------------------------------------------------------------------------
 
-def _write_cookies(cookie_lines, output_path):
-    valid = [l for l in cookie_lines if l.strip() and not l.strip().startswith('#')]
+def _write_cookies(cookie_lines, output_path, filter_domains=False):
+    valid = []
+    for l in cookie_lines:
+        s = l.strip()
+        if not s or s.startswith('#'):
+            continue
+        if filter_domains:
+            parts = s.split('\t')
+            if len(parts) >= 6 and not _domain_is_relevant(parts[0]):
+                continue
+        valid.append(l)
+
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(NETSCAPE_HEADER)
@@ -203,7 +271,7 @@ def _write_cookies(cookie_lines, output_path):
 def parse_args():
     default_out = os.path.join(os.path.expanduser('~'), 'smutscrape-cookies.txt')
     p = argparse.ArgumentParser(
-        description='Extract browser cookies for yt-dlp / smutscrape.',
+        description='Extract / trim browser cookies for yt-dlp / smutscrape.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
@@ -214,8 +282,10 @@ def parse_args():
                    help='Browser to extract from (default: firefox)')
     p.add_argument('--profile', '-p', default='',
                    help='Browser profile name (default: auto-detect)')
+    p.add_argument('--trim', metavar='FILE',
+                   help='Trim a full browser-exported cookies.txt to smutscrape domains only')
     p.add_argument('--merge', '-m', nargs='+', metavar='FILE',
-                   help='Merge existing Netscape cookies.txt files instead of extracting from browser')
+                   help='Merge multiple per-site Netscape cookies.txt files into one')
     return p.parse_args()
 
 
@@ -224,33 +294,31 @@ def main():
     check_ytdlp()
 
     output_path = validate_output_path(args.output)
-
     print()
 
-    if args.merge:
-        print(f"[MODE] Merging cookie files → {output_path}")
+    if args.trim:
+        print(f"[MODE] Trim → {output_path}")
+        print()
+        count = trim_cookie_file(args.trim, output_path)
+    elif args.merge:
+        print(f"[MODE] Merge → {output_path}")
         print()
         count = merge_cookie_files(args.merge, output_path)
     else:
         print(f"Browser : {args.browser}")
         print(f"Output  : {output_path}")
         print()
-
         if args.browser == 'chrome' and sys.platform == 'win32':
             print("[WARN] Chrome on Windows 10/11 uses App-Bound Encryption.")
-            print("       Trying anyway — but it will likely fail.")
-            print("       Run with --browser firefox for a reliable result.")
+            print("       Trying anyway — run with --browser firefox for reliability.")
             print()
-
         count = extract_from_browser(args.browser, args.profile, output_path)
 
     print()
     if count == -1:
-        pass  # instructions already printed
+        pass
     elif count == 0:
         print("[WARN] No cookies were written.")
-        if args.browser == 'firefox':
-            print("  Make sure you are logged in to the sites in Firefox first.")
     else:
         print(f"[OK] {count} cookies written to: {output_path}")
         safe_path = output_path.replace('\\', '/')

@@ -429,7 +429,7 @@ class SmutscrapeGUI:
         lbl_title.bind("<B1-Motion>",       self._on_drag_motion)
 
         lbl_edition = tk.Label(
-            title_bar, text="dark reaper edition",
+            title_bar, text="Nix edition",
             bg=C["panel"], fg=C["fg_dim"], font=("Courier", 8), cursor="fleur"
         )
         lbl_edition.pack(side="left")

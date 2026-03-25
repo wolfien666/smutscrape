@@ -56,9 +56,10 @@ def parse_date_loose(date_str):
     if not date_str:
         return None
     date_str = str(date_str).strip()
-    for fmt in ["%Y-%m-%dT%H:%M:%S","%Y-%m-%dT%H:%M","%Y-%m-%d","%Y-%m","%Y",
+    for fmt in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d", "%Y-%m", "%Y",
                 "%Y%m%d",
-                "%B %d, %Y","%b %d, %Y","%d %B %Y","%d %b %Y","%m/%d/%Y","%d/%m/%Y"]:
+                "%B %d, %Y", "%b %d, %Y", "%d %B %Y", "%d %b %Y",
+                "%m/%d/%Y", "%d/%m/%Y"]:
         try:
             return datetime.datetime.strptime(date_str[:20], fmt).date()
         except (ValueError, TypeError):
@@ -100,8 +101,7 @@ def duration_str_to_minutes(dur_str):
 
 def video_passes_filters(video_data, after_threshold, min_duration_minutes):
     """Quick pre-check on list-page data. Returns False only when data is
-    present AND definitely fails. Empty fields pass through for the stricter
-    re-check done on the actual video page."""
+    present AND definitely fails."""
     if after_threshold is not None:
         raw_date = video_data.get("date", "")
         if raw_date:
@@ -120,6 +120,26 @@ def video_passes_filters(video_data, after_threshold, min_duration_minutes):
 
 
 # ---------------------------------------------------------------------------
+# yt-dlp impersonation helper
+# ---------------------------------------------------------------------------
+
+def _impersonate_args(site_config, general_config):
+    """
+    Return a list of extra yt-dlp flags needed for impersonation.
+    Reads 'impersonate' from site_config first, then general_config.
+    If the value is True / 'auto', uses 'chrome' as the default target.
+    Suppresses the yt-dlp impersonation warning completely.
+    """
+    target = (site_config or {}).get('impersonate') \
+          or (general_config or {}).get('impersonate')
+    if not target:
+        return []
+    if target is True or str(target).lower() in ('true', 'auto', 'yes'):
+        target = 'chrome'
+    return ['--impersonate', str(target)]
+
+
+# ---------------------------------------------------------------------------
 # yt-dlp metadata probe  (duration + upload_date, NO download)
 # ---------------------------------------------------------------------------
 
@@ -128,8 +148,8 @@ def _probe_metadata_ytdlp(page_url, general_config, site_config=None, cookies=No
     Run ``yt-dlp --print duration --print upload_date`` on *page_url*.
     Returns (duration_minutes: float|None, upload_date: datetime.date|None).
     Takes ~1-3 s and does NOT download anything.
-    Called only when the HTML scraper produced no duration/date AND at least
-    one of those filters is active.
+    Called only when HTML scraping produced no duration/date AND a filter
+    is active.  Fully invisible for sites that already expose those fields.
     """
     cmd = [
         'yt-dlp',
@@ -141,26 +161,29 @@ def _probe_metadata_ytdlp(page_url, general_config, site_config=None, cookies=No
         '--no-warnings',
     ]
 
-    # Honour cookies from general or site config
-    if cookies is None:
-        cookies = (general_config or {}).get('cookies_file') or \
-                  (site_config or {}).get('cookies_file')
+    # Honour impersonation setting to silence xhamster (and similar) warnings
+    cmd += _impersonate_args(site_config, general_config)
+
+    cookies = cookies or \
+              (general_config or {}).get('cookies_file') or \
+              (site_config or {}).get('cookies_file')
     if cookies and os.path.isfile(cookies):
         cmd += ['--cookies', cookies]
 
     cmd.append(page_url)
 
-    logger.debug(f"[PROBE] yt-dlp metadata probe: {page_url}")
+    logger.info(f"[PROBE] yt-dlp metadata probe → {page_url}")
     try:
         result = subprocess.run(
             cmd,
             capture_output=True, text=True, timeout=30
         )
         lines = [l.strip() for l in result.stdout.strip().splitlines() if l.strip()]
-        # yt-dlp prints values in the order --print flags were given
-        # line 0 = duration (seconds, float), line 1 = upload_date (YYYYMMDD or NA)
-        dur_min   = None
-        upl_date  = None
+        # yt-dlp prints values in --print order:
+        #   line 0 = duration (seconds as float, or 'NA')
+        #   line 1 = upload_date (YYYYMMDD, or 'NA')
+        dur_min  = None
+        upl_date = None
 
         if len(lines) >= 1 and lines[0] not in ('NA', 'none', 'None', ''):
             try:
@@ -169,9 +192,13 @@ def _probe_metadata_ytdlp(page_url, general_config, site_config=None, cookies=No
                 pass
 
         if len(lines) >= 2 and lines[1] not in ('NA', 'none', 'None', ''):
-            upl_date = parse_date_loose(lines[1])   # handles YYYYMMDD via new fmt entry
+            upl_date = parse_date_loose(lines[1])
 
-        logger.debug(f"[PROBE] duration={dur_min:.1f}m  upload_date={upl_date}  url={page_url}")
+        # Always log what was resolved so the user can see it in the log window
+        dur_str  = f"{dur_min:.1f} min" if dur_min is not None else "N/A"
+        date_str = str(upl_date)         if upl_date is not None else "N/A"
+        logger.info(f"[PROBE] duration={dur_str}  upload_date={date_str}")
+
         return dur_min, upl_date
 
     except FileNotFoundError:
@@ -386,7 +413,7 @@ def resolve_download_dir(general_config):
 
 
 # ---------------------------------------------------------------------------
-# download_video  (yt-dlp wrapper, streams stdout for live progress)
+# download_video  (yt-dlp wrapper)
 # ---------------------------------------------------------------------------
 
 _DL_PROGRESS_RE = re.compile(
@@ -414,8 +441,10 @@ def download_video(page_url, site_config, general_config, output_dir=None,
         '--no-playlist',
         '--newline',
         '--output', out_template,
-        page_url,
     ]
+
+    # Impersonation (silences xhamster and similar extractor warnings)
+    cmd += _impersonate_args(site_config, general_config)
 
     cookies = general_config.get('cookies_file') or site_config.get('cookies_file')
     if cookies and os.path.isfile(cookies):
@@ -424,6 +453,8 @@ def download_video(page_url, site_config, general_config, output_dir=None,
     rate_limit = general_config.get('rate_limit')
     if rate_limit:
         cmd += ['--limit-rate', str(rate_limit)]
+
+    cmd.append(page_url)
 
     logger.info(f"[DOWNLOAD] yt-dlp: {page_url}")
     logger.debug(f"[DOWNLOAD] cmd: {' '.join(cmd)}")
@@ -459,7 +490,7 @@ def download_video(page_url, site_config, general_config, output_dir=None,
             logger.error(f"[DOWNLOAD] yt-dlp failed (rc={proc.returncode})")
             return False
     except FileNotFoundError:
-        logger.error("[DOWNLOAD] yt-dlp not found. Install it: pip install yt-dlp  or  sudo apt install yt-dlp")
+        logger.error("[DOWNLOAD] yt-dlp not found. Install it: pip install yt-dlp")
         return False
     except subprocess.TimeoutExpired:
         logger.error(f"[DOWNLOAD] Timeout exceeded for {page_url}")
@@ -703,14 +734,13 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
                        state_set=None, dl_progress_cb=None, video_info_cb=None,
                        after_threshold=None, min_dur_minutes=None, stop_event=None):
     """
-    Fetch the video page, apply a HARD second-pass filter on the accurate
-    date and duration scraped from that page, then download if it passes.
+    Fetch the video page, apply a hard second-pass filter on the accurate
+    date and duration, then download.
 
-    For sites that don’t expose duration or upload-date in their HTML, a
-    lightweight yt-dlp metadata probe (`--no-download --print duration
-    --print upload_date`) is run when either filter is active and the
+    For sites that don’t expose duration/date in HTML, a lightweight
+    yt-dlp metadata probe is run when either filter is active and the
     HTML scrape produced no value.  The probe takes ~1-3 s and is skipped
-    entirely when it isn’t needed.
+    entirely when not needed.
     """
     if stop_event and stop_event.is_set():
         return False
@@ -728,22 +758,19 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
     v_dur    = raw_data.get('duration', '')
 
     # ── yt-dlp metadata probe when HTML gave us nothing ──────────────────────
-    # Only probe when at least one filter is active AND the corresponding
-    # HTML field is missing.  This keeps overhead = 0 for sites that do
-    # expose the data.
     need_dur_probe  = (min_dur_minutes is not None and min_dur_minutes > 0 and not v_dur)
     need_date_probe = (after_threshold is not None and not v_date)
 
     if need_dur_probe or need_date_probe:
         probe_dur, probe_date = _probe_metadata_ytdlp(url, general_config, site_config)
         if need_dur_probe and probe_dur is not None:
-            v_dur = str(probe_dur * 60)   # store as raw seconds string – duration_str_to_minutes handles float strings
-            logger.info(f"[PROBE] Resolved duration via yt-dlp: {probe_dur:.1f} min")
+            v_dur = str(probe_dur * 60)   # raw seconds — duration_str_to_minutes handles floats
+            logger.info(f"[PROBE] Resolved duration: {probe_dur:.1f} min")
         if need_date_probe and probe_date is not None:
             v_date = probe_date.strftime("%Y-%m-%d")
-            logger.info(f"[PROBE] Resolved upload date via yt-dlp: {v_date}")
+            logger.info(f"[PROBE] Resolved upload date: {v_date}")
 
-    # ── Hard filter on video-page values (HTML or probed) ────────────────────
+    # ── Hard filter ────────────────────────────────────────────────────────────
     if after_threshold is not None and v_date:
         parsed = parse_date_loose(v_date)
         if parsed is not None and parsed < after_threshold:

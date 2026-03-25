@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
 from smutscrape.cli import get_site_manager, load_configuration, get_session_manager
 from smutscrape.core import process_list_page, construct_url
+from smutscrape.config_editor import ConfigEditor
 
 _SITES_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.realpath(__file__))), 'sites'
@@ -40,6 +41,7 @@ C = dict(
     btn_start   = "#1a5c1a",
     btn_stop    = "#3d0000",
     btn_clear   = "#2a2a2a",
+    btn_cfg     = "#1a3a5c",
     cb_select   = "#1f3d1f",
     prog_trough = "#1a1a1a",
     prog_bar    = "#39ff14",
@@ -211,6 +213,7 @@ class SmutscrapeGUI:
         self._cat_db         = _load_category_db()
         self._cat_vars       = {}
         self._log_visible    = True
+        self._cfg_win        = None   # keep reference to avoid garbage-collection
 
         self._build_ui()
         self._bind_mousewheel()
@@ -279,6 +282,28 @@ class SmutscrapeGUI:
         )
 
     # -------------------------------------------------------------------------
+    # Configure window launcher
+    # -------------------------------------------------------------------------
+
+    def _open_config_editor(self):
+        """Open the config editor as a modal Toplevel. Only one at a time."""
+        if self._cfg_win is not None:
+            try:
+                self._cfg_win.lift()
+                self._cfg_win.focus_set()
+                return
+            except tk.TclError:
+                self._cfg_win = None
+        self._cfg_win = ConfigEditor(self.root)
+        self._cfg_win.protocol("WM_DELETE_WINDOW",
+                               self._on_cfg_close)
+
+    def _on_cfg_close(self):
+        if self._cfg_win:
+            self._cfg_win.destroy()
+        self._cfg_win = None
+
+    # -------------------------------------------------------------------------
     # Smart mousewheel routing
     # -------------------------------------------------------------------------
 
@@ -295,12 +320,9 @@ class SmutscrapeGUI:
         _NATIVE_SCROLL = {"TCombobox", "Combobox", "Listbox", "Text", "ScrolledText"}
 
         def _is_native(w):
-            """Walk up the widget tree; return True if any ancestor is a native scroller.
-            Guards against w being a plain string (Tk internal widget path)."""
             while w:
-                # Tk sometimes passes a raw string path instead of a widget object
                 if isinstance(w, str):
-                    return True   # treat unknown/internal widgets as native
+                    return True
                 try:
                     if w.winfo_class() in _NATIVE_SCROLL:
                         return True
@@ -310,10 +332,9 @@ class SmutscrapeGUI:
             return False
 
         def _is_in_cat_canvas(w):
-            """Walk up; return True if widget lives inside _cat_canvas."""
             while w:
                 if isinstance(w, str):
-                    break   # can't compare string path to widget object
+                    break
                 if w is self._cat_canvas:
                     return True
                 try:
@@ -323,21 +344,16 @@ class SmutscrapeGUI:
             return False
 
         def _main_can_scroll():
-            inner_h  = self._inner.winfo_reqheight()
-            canvas_h = self._main_canvas.winfo_height()
-            return inner_h > canvas_h
+            return self._inner.winfo_reqheight() > self._main_canvas.winfo_height()
 
         def _on_wheel(event):
             widget = event.widget
             delta  = -1 if (event.num == 5 or getattr(event, 'delta', 1) < 0) else 1
-
             if _is_native(widget):
                 return
-
             if _is_in_cat_canvas(widget):
                 self._cat_canvas.yview_scroll(-delta, "units")
                 return
-
             if _main_can_scroll():
                 self._main_canvas.yview_scroll(-delta, "units")
 
@@ -374,6 +390,13 @@ class SmutscrapeGUI:
         tk.Label(title_bar, text="dark reaper edition",
                  bg=C["bg"], fg=C["fg_dim"], font=("Courier", 8)
                  ).pack(side="left", padx=10)
+        # ─── Configure button lives in the title bar, far right ───
+        self._button(
+            title_bar, "\u2699  Configure",
+            self._open_config_editor,
+            bg=C["btn_cfg"], fg=C["accent"],
+            padx=12, pady=3
+        ).pack(side="right", padx=4)
         tk.Frame(self._inner, bg=C["border"], height=1).pack(fill="x", padx=10, pady=(0, 6))
 
         # ── TARGET ───────────────────────────────────────────────────────────

@@ -57,6 +57,7 @@ def parse_date_loose(date_str):
         return None
     date_str = str(date_str).strip()
     for fmt in ["%Y-%m-%dT%H:%M:%S","%Y-%m-%dT%H:%M","%Y-%m-%d","%Y-%m","%Y",
+                "%Y%m%d",
                 "%B %d, %Y","%b %d, %Y","%d %B %Y","%d %b %Y","%m/%d/%Y","%d/%m/%Y"]:
         try:
             return datetime.datetime.strptime(date_str[:20], fmt).date()
@@ -116,6 +117,72 @@ def video_passes_filters(video_data, after_threshold, min_duration_minutes):
                 logger.info(f"[FILTER] Skipping (duration {dur_min:.1f}m < min {min_duration_minutes}m): {video_data.get('url','?')}")
                 return False
     return True
+
+
+# ---------------------------------------------------------------------------
+# yt-dlp metadata probe  (duration + upload_date, NO download)
+# ---------------------------------------------------------------------------
+
+def _probe_metadata_ytdlp(page_url, general_config, site_config=None, cookies=None):
+    """
+    Run ``yt-dlp --print duration --print upload_date`` on *page_url*.
+    Returns (duration_minutes: float|None, upload_date: datetime.date|None).
+    Takes ~1-3 s and does NOT download anything.
+    Called only when the HTML scraper produced no duration/date AND at least
+    one of those filters is active.
+    """
+    cmd = [
+        'yt-dlp',
+        '--no-download',
+        '--no-playlist',
+        '--print', 'duration',
+        '--print', 'upload_date',
+        '--quiet',
+        '--no-warnings',
+    ]
+
+    # Honour cookies from general or site config
+    if cookies is None:
+        cookies = (general_config or {}).get('cookies_file') or \
+                  (site_config or {}).get('cookies_file')
+    if cookies and os.path.isfile(cookies):
+        cmd += ['--cookies', cookies]
+
+    cmd.append(page_url)
+
+    logger.debug(f"[PROBE] yt-dlp metadata probe: {page_url}")
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True, text=True, timeout=30
+        )
+        lines = [l.strip() for l in result.stdout.strip().splitlines() if l.strip()]
+        # yt-dlp prints values in the order --print flags were given
+        # line 0 = duration (seconds, float), line 1 = upload_date (YYYYMMDD or NA)
+        dur_min   = None
+        upl_date  = None
+
+        if len(lines) >= 1 and lines[0] not in ('NA', 'none', 'None', ''):
+            try:
+                dur_min = float(lines[0]) / 60.0
+            except ValueError:
+                pass
+
+        if len(lines) >= 2 and lines[1] not in ('NA', 'none', 'None', ''):
+            upl_date = parse_date_loose(lines[1])   # handles YYYYMMDD via new fmt entry
+
+        logger.debug(f"[PROBE] duration={dur_min:.1f}m  upload_date={upl_date}  url={page_url}")
+        return dur_min, upl_date
+
+    except FileNotFoundError:
+        logger.warning("[PROBE] yt-dlp not found — metadata probe skipped.")
+        return None, None
+    except subprocess.TimeoutExpired:
+        logger.warning(f"[PROBE] yt-dlp probe timed out for {page_url}")
+        return None, None
+    except Exception as exc:
+        logger.warning(f"[PROBE] yt-dlp probe error: {exc}")
+        return None, None
 
 
 # ---------------------------------------------------------------------------
@@ -370,7 +437,6 @@ def download_video(page_url, site_config, general_config, output_dir=None,
             bufsize=1,
         )
         for line in proc.stdout:
-            # Honour stop request mid-download
             if stop_event and stop_event.is_set():
                 proc.terminate()
                 logger.warning("[DOWNLOAD] Aborted by user stop request.")
@@ -467,7 +533,7 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
     base_url           = site_config['base_url']
     container_selector = list_scraper['video_container']['selector']
 
-    # ── Container ────────────────────────────────────────────────────────────
+    # ── Container ────────────────────────────────────────────────────────────────
     container = None
     tried = []
     if isinstance(container_selector, list):
@@ -494,7 +560,7 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
             )
             return None, None, False
 
-    # ── Video items ──────────────────────────────────────────────────────────
+    # ── Video items ──────────────────────────────────────────────────────────────
     item_selector  = list_scraper['video_item']['selector']
     video_elements = container.select(item_selector)
     if not video_elements:
@@ -523,7 +589,6 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
     processed      = 0
 
     for i, video_element in enumerate(video_elements, 1):
-        # ── STOP check ───────────────────────────────────────────────────────
         if stop_event and stop_event.is_set():
             logger.warning("[STOP] Aborting page processing due to user stop request.")
             break
@@ -563,7 +628,7 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
             continue
 
         print()
-        print(colored(f"\u2508\u2508\u2508 {i} of {total_items} \u2508 {video_url} ".ljust(term_width, "\u2508"), "magenta"))
+        print(colored(f"┈┈┈ {i} of {total_items} ┈ {video_url} ".ljust(term_width, "┈"), "magenta"))
 
         if video_info_cb:
             v_title = video_data.get('title', '') or video_url.split('/')[-2] or video_url
@@ -595,7 +660,7 @@ def process_list_page(url, site_config, general_config, page_num=1, video_offset
     if driver:
         driver.quit()
 
-    # ── Pagination ───────────────────────────────────────────────────────────
+    # ── Pagination ──────────────────────────────────────────────────────────────
     if stop_event and stop_event.is_set():
         return None, None, success
 
@@ -640,6 +705,12 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
     """
     Fetch the video page, apply a HARD second-pass filter on the accurate
     date and duration scraped from that page, then download if it passes.
+
+    For sites that don’t expose duration or upload-date in their HTML, a
+    lightweight yt-dlp metadata probe (`--no-download --print duration
+    --print upload_date`) is run when either filter is active and the
+    HTML scrape produced no value.  The probe takes ~1-3 s and is skipped
+    entirely when it isn’t needed.
     """
     if stop_event and stop_event.is_set():
         return False
@@ -656,6 +727,23 @@ def process_video_page(url, site_config, general_config, overwrite=False, header
     v_date   = raw_data.get('date', '')
     v_dur    = raw_data.get('duration', '')
 
+    # ── yt-dlp metadata probe when HTML gave us nothing ──────────────────────
+    # Only probe when at least one filter is active AND the corresponding
+    # HTML field is missing.  This keeps overhead = 0 for sites that do
+    # expose the data.
+    need_dur_probe  = (min_dur_minutes is not None and min_dur_minutes > 0 and not v_dur)
+    need_date_probe = (after_threshold is not None and not v_date)
+
+    if need_dur_probe or need_date_probe:
+        probe_dur, probe_date = _probe_metadata_ytdlp(url, general_config, site_config)
+        if need_dur_probe and probe_dur is not None:
+            v_dur = str(probe_dur * 60)   # store as raw seconds string – duration_str_to_minutes handles float strings
+            logger.info(f"[PROBE] Resolved duration via yt-dlp: {probe_dur:.1f} min")
+        if need_date_probe and probe_date is not None:
+            v_date = probe_date.strftime("%Y-%m-%d")
+            logger.info(f"[PROBE] Resolved upload date via yt-dlp: {v_date}")
+
+    # ── Hard filter on video-page values (HTML or probed) ────────────────────
     if after_threshold is not None and v_date:
         parsed = parse_date_loose(v_date)
         if parsed is not None and parsed < after_threshold:

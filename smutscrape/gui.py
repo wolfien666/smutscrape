@@ -194,10 +194,6 @@ def _apply_dark_ttk(root):
 # Main GUI
 # ===========================================================================
 
-# Widget classes that should receive keyboard focus when clicked.
-_FOCUSABLE_CLASSES = {"Entry", "TEntry", "TCombobox", "Combobox", "Text", "TSpinbox"}
-
-
 class SmutscrapeGUI:
     def __init__(self, root):
         self.root = root
@@ -206,18 +202,32 @@ class SmutscrapeGUI:
         self.root.resizable(True, True)
         self.root.configure(bg=C["bg"])
 
-        # Remove OS title bar.  With overrideredirect the WM no longer
-        # delivers focus events automatically, so we patch that below.
+        # ---------------------------------------------------------------------------
+        # Borderless window approach:
+        #
+        # On Linux/X11 we use wm_attributes("-type", "normal") combined with
+        # overrideredirect so the WM still participates in focus management.
+        # The key insight: call overrideredirect(True) THEN immediately
+        # grab_set() so Tkinter itself routes all events to this window
+        # (same mechanism ConfigEditor relies on for its own inputs to work).
+        # We release the grab only when the config editor is open, and
+        # re-acquire it when the editor is closed.
+        # ---------------------------------------------------------------------------
         self.root.overrideredirect(True)
-        self.root.after(10, lambda: self.root.wm_attributes("-type", "normal"))
+        # Let the WM know this is a normal application window even without decoration.
+        # This is a no-op on Windows/macOS but critical on X11 for taskbar/focus.
+        try:
+            self.root.wm_attributes("-type", "normal")
+        except tk.TclError:
+            pass
 
         _apply_dark_ttk(root)
 
         # Drag state
-        self._drag_x    = 0
-        self._drag_y    = 0
-        self._dragging  = False
-        self._maximized = False
+        self._drag_x      = 0
+        self._drag_y      = 0
+        self._dragging    = False
+        self._maximized   = False
         self._restore_geo = "960x860"
 
         self.log_queue       = queue.Queue()
@@ -234,42 +244,34 @@ class SmutscrapeGUI:
 
         self._build_ui()
         self._bind_mousewheel()
-        self._fix_overrideredirect_focus()   # <-- the key fix
         self._poll_log_queue()
 
-    # -------------------------------------------------------------------------
-    # overrideredirect focus fix
-    # -------------------------------------------------------------------------
-
-    def _fix_overrideredirect_focus(self):
-        """
-        overrideredirect(True) stops the window manager from giving focus to
-        child widgets when the user clicks them.  We compensate by listening
-        globally for every ButtonPress-1 and forcibly calling focus_set() on
-        the clicked widget whenever it is a focusable input type.  This is
-        completely inert for non-input widgets (Labels, Frames, Buttons, …).
-        """
-        def _grant_focus(event):
-            w = event.widget
-            # Skip non-tk string references (e.g. Combobox popdown list)
-            if isinstance(w, str):
-                return
-            try:
-                cls = w.winfo_class()
-            except Exception:
-                return
-            if cls in _FOCUSABLE_CLASSES:
-                w.focus_set()
-
-        # Use add='+' so we never displace existing bindings on any widget.
-        self.root.bind_all("<ButtonPress-1>", _grant_focus, add=True)
-
-        # Also grab application-level focus immediately so the first click
-        # inside the window doesn't get swallowed by the WM.
-        self.root.after(50, self.root.focus_force)
+        # Acquire the event grab AFTER the UI is fully built.
+        # This is what makes inputs focusable under overrideredirect:
+        # Tkinter's grab mechanism routes all pointer/keyboard events
+        # to this window regardless of what the WM thinks.
+        self.root.after(100, self._acquire_grab)
 
     # -------------------------------------------------------------------------
-    # Custom title bar drag — bound ONLY to the two label drag-handle widgets.
+    # Grab management  (the core fix for overrideredirect focus)
+    # -------------------------------------------------------------------------
+
+    def _acquire_grab(self):
+        """Give this window Tkinter-level grab so inputs receive focus."""
+        try:
+            self.root.grab_set()
+        except tk.TclError:
+            pass
+
+    def _release_grab(self):
+        """Release grab so a child Toplevel (config editor) can take over."""
+        try:
+            self.root.grab_release()
+        except tk.TclError:
+            pass
+
+    # -------------------------------------------------------------------------
+    # Custom title bar drag
     # -------------------------------------------------------------------------
 
     def _drag_start(self, event):
@@ -293,6 +295,7 @@ class SmutscrapeGUI:
         return "break"
 
     def _make_drag_handle(self, widget):
+        """Bind drag events only to the two title-bar label widgets."""
         widget.bind("<ButtonPress-1>",   self._drag_start,    add=False)
         widget.bind("<B1-Motion>",        self._drag_motion,   add=False)
         widget.bind("<ButtonRelease-1>",  self._drag_stop,     add=False)
@@ -303,14 +306,19 @@ class SmutscrapeGUI:
     # -------------------------------------------------------------------------
 
     def _on_minimize(self):
+        self._release_grab()
         self.root.overrideredirect(False)
         self.root.iconify()
         self.root.bind("<Map>", self._on_restore_from_minimize)
 
     def _on_restore_from_minimize(self, event=None):
         self.root.overrideredirect(True)
-        self.root.after(50, self.root.focus_force)
+        try:
+            self.root.wm_attributes("-type", "normal")
+        except tk.TclError:
+            pass
         self.root.unbind("<Map>")
+        self.root.after(100, self._acquire_grab)
 
     def _on_maximize(self):
         if self._maximized:
@@ -326,6 +334,7 @@ class SmutscrapeGUI:
             self._max_btn.config(text="\u2752")
 
     def _on_close(self):
+        self._release_grab()
         self.root.destroy()
 
     # -------------------------------------------------------------------------
@@ -402,6 +411,10 @@ class SmutscrapeGUI:
                 return
             except tk.TclError:
                 self._cfg_win = None
+        # Release the main-window grab BEFORE opening the editor.
+        # ConfigEditor calls grab_set() on itself, which is enough;
+        # but if we still hold the grab here the editor's inputs are deaf.
+        self._release_grab()
         self._cfg_win = ConfigEditor(self.root)
         self._cfg_win.protocol("WM_DELETE_WINDOW", self._on_cfg_close)
 
@@ -409,6 +422,8 @@ class SmutscrapeGUI:
         if self._cfg_win:
             self._cfg_win.destroy()
         self._cfg_win = None
+        # Re-acquire grab for the main window now that the editor is gone.
+        self.root.after(100, self._acquire_grab)
 
     # -------------------------------------------------------------------------
     # Smart mousewheel routing

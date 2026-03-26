@@ -21,6 +21,8 @@ import datetime
 import urllib.parse
 import urllib.request
 import subprocess
+import random
+import traceback
 from typing import Optional
 
 import tkinter as tk
@@ -46,7 +48,6 @@ SITES = {
         "search_url_p1": "https://xhamster.com/search/{q}",
         "use_selenium": True,
         "encoding": lambda s: s.replace(" ", "+"),
-        # list-page card selectors
         "card":      "div.thumb-list__item.video-thumb",
         "thumb":     ("a.video-thumb__image-container img", "src"),
         "thumb_alt": ("a.video-thumb__image-container img", "data-src"),
@@ -92,7 +93,7 @@ SITES = {
         "search_url_p1": "https://www.xnxx.com/search/{q}",
         "use_selenium": True,
         "encoding": lambda s: s.replace(" ", "+"),
-        "page_offset": -1,   # XNXX page 2 => /1
+        "page_offset": -1,
         "card":      "div.thumb-under",
         "thumb":     ("img.thumb, img[src*='thumb']", "src"),
         "thumb_alt": ("img", "data-src"),
@@ -108,7 +109,7 @@ SITES = {
         "search_url_p1": "https://www.xvideos.com/?k={q}",
         "use_selenium": True,
         "encoding": lambda s: s.replace(" ", "+"),
-        "page_offset": -1,   # XVideos page 2 => p=1
+        "page_offset": -1,
         "card":      "div.thumb-under",
         "thumb":     ("img.thumb, img[src*='thumb']", "src"),
         "thumb_alt": ("img", "data-src"),
@@ -122,8 +123,96 @@ SITES = {
 THUMB_W = 200
 THUMB_H = 120
 CARD_W   = 210
-CARD_H   = 185   # thumb + title + meta
+CARD_H   = 185
 COLS     = 4
+
+_DEFAULT_UA = [
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+]
+
+
+# ---------------------------------------------------------------------------
+# Driver / fetch helpers
+# ---------------------------------------------------------------------------
+
+def _get_real_driver():
+    """
+    Return the cached Selenium driver via the same path core.py uses:
+      get_config_manager().get_selenium_driver()
+    Returns None if unavailable (Chrome not running / selenium not installed).
+    """
+    try:
+        from smutscrape.cli import get_config_manager
+        return get_config_manager().get_selenium_driver()
+    except Exception as exc:
+        logger.debug(f"[BROWSE] Driver not available: {exc}")
+        return None
+
+
+def _fetch_with_selenium(driver, url: str, wait: float = 3.5):
+    """Navigate and return BeautifulSoup, or None on error."""
+    try:
+        from bs4 import BeautifulSoup
+        driver.get(url)
+        time.sleep(wait)
+        return BeautifulSoup(driver.page_source, "html.parser")
+    except Exception as exc:
+        logger.warning(f"[BROWSE] Selenium fetch error: {exc}")
+        return None
+
+
+def _fetch_with_cloudscraper(url: str, general_config: dict):
+    """HTTP fetch via cloudscraper (same fallback core.py uses)."""
+    try:
+        import cloudscraper
+        from bs4 import BeautifulSoup
+        scraper = cloudscraper.create_scraper()
+        ua_list  = general_config.get("user_agents") or _DEFAULT_UA
+        headers  = dict(general_config.get("headers") or {})
+        headers.setdefault("User-Agent", random.choice(ua_list))
+        time.sleep(random.uniform(1, 3))
+        resp = scraper.get(url, headers=headers, timeout=30)
+        resp.raise_for_status()
+        return BeautifulSoup(resp.content, "html.parser")
+    except Exception as exc:
+        logger.warning(f"[BROWSE] cloudscraper fetch error: {exc}")
+        return None
+
+
+def _fetch_page_browse(url: str, use_selenium: bool, general_config: dict):
+    """
+    Mirror of core.fetch_page() for the Browse tab:
+      1. Try Selenium (if use_selenium and driver available)
+      2. Fall back to cloudscraper
+    Returns BeautifulSoup or None.
+    """
+    soup = None
+
+    if use_selenium:
+        driver = _get_real_driver()
+        if driver is not None:
+            soup = _fetch_with_selenium(driver, url)
+            if soup is None:
+                # Try once more with a fresh driver
+                try:
+                    from smutscrape.cli import get_config_manager
+                    driver2 = get_config_manager().get_selenium_driver(force_new=True)
+                    if driver2:
+                        soup = _fetch_with_selenium(driver2, url)
+                except Exception:
+                    pass
+        else:
+            logger.info(
+                "[BROWSE] Chrome/Selenium not available — "
+                "falling back to cloudscraper for page fetch."
+            )
+
+    if soup is None:
+        soup = _fetch_with_cloudscraper(url, general_config)
+
+    return soup
 
 
 # ---------------------------------------------------------------------------
@@ -131,14 +220,17 @@ COLS     = 4
 # ---------------------------------------------------------------------------
 
 def _build_search_url(site_cfg: dict, query: str, page: int) -> str:
-    enc   = site_cfg["encoding"](query)
-    off   = site_cfg.get("page_offset", 0)
-    p0    = max(0, page + off)
+    enc = site_cfg["encoding"](query)
+    off = site_cfg.get("page_offset", 0)
+    p0  = max(0, page + off)
     if page == 1:
-        tpl = site_cfg["search_url_p1"]
-        return tpl.replace("{q}", enc)
-    tpl = site_cfg["search_url"]
-    return tpl.replace("{q}", enc).replace("{page}", str(page)).replace("{page_0}", str(p0))
+        return site_cfg["search_url_p1"].replace("{q}", enc)
+    return (
+        site_cfg["search_url"]
+        .replace("{q}", enc)
+        .replace("{page}", str(page))
+        .replace("{page_0}", str(p0))
+    )
 
 
 def _sel_first(soup, selector: Optional[str], attr: Optional[str]) -> str:
@@ -156,9 +248,6 @@ def _sel_first(soup, selector: Optional[str], attr: Optional[str]) -> str:
 
 
 def _scrape_cards(soup, site_name: str) -> list:
-    """
-    Returns list of dicts: {url, title, duration, date, thumb_url}
-    """
     cfg   = SITES[site_name]
     base  = cfg["base"]
     cards = soup.select(cfg["card"])
@@ -171,19 +260,14 @@ def _scrape_cards(soup, site_name: str) -> list:
             url = base + url
         title = _sel_first(card, cfg["title"][0], cfg["title"][1])
         if not title:
-            # fallback: text of link
             a = card.select_one("a")
             title = a.get_text(strip=True) if a else url
         title = title[:80]
-
-        duration = _sel_first(card, cfg["duration"][0], cfg["duration"][1])
-        date     = _sel_first(card, cfg["date"][0],     cfg["date"][1])
-
-        # thumb: try primary attribute, then fallback
+        duration  = _sel_first(card, cfg["duration"][0], cfg["duration"][1])
+        date      = _sel_first(card, cfg["date"][0],     cfg["date"][1])
         thumb_url = _sel_first(card, cfg["thumb"][0],     cfg["thumb"][1])
         if not thumb_url:
             thumb_url = _sel_first(card, cfg["thumb_alt"][0], cfg["thumb_alt"][1])
-
         results.append(dict(
             url=url, title=title,
             duration=duration.strip(), date=date.strip(),
@@ -207,32 +291,25 @@ def _fetch_thumb_bytes(url: str, timeout: int = 8) -> Optional[bytes]:
 
 
 def _duration_passes(duration_str: str, min_min: Optional[float]) -> bool:
-    """True if duration_str >= min_min minutes (or no filter / no data)."""
     if min_min is None or min_min <= 0:
         return True
     if not duration_str:
-        return True   # can't tell — let it through
-    # formats: "12:34", "1:02:34", "12 min", "734"  (seconds)
+        return True
     s = duration_str.strip()
     m = re.match(r'(\d+):(\d{2}):(\d{2})', s)
     if m:
-        mins = int(m.group(1))*60 + int(m.group(2)) + int(m.group(3))/60
-        return mins >= min_min
+        return int(m.group(1))*60 + int(m.group(2)) + int(m.group(3))/60 >= min_min
     m = re.match(r'(\d+):(\d{2})', s)
     if m:
-        mins = int(m.group(1)) + int(m.group(2))/60
-        return mins >= min_min
+        return int(m.group(1)) + int(m.group(2))/60 >= min_min
     m = re.match(r'(\d+)', s)
     if m:
         val = float(m.group(1))
-        # if it looks like raw seconds (>300) treat as seconds
-        mins = val/60 if val > 300 else val
-        return mins >= min_min
+        return (val/60 if val > 300 else val) >= min_min
     return True
 
 
 def _date_passes(date_str: str, after: Optional[datetime.date]) -> bool:
-    """True if date_str >= after (or no filter / can't parse)."""
     if after is None:
         return True
     if not date_str:
@@ -240,15 +317,13 @@ def _date_passes(date_str: str, after: Optional[datetime.date]) -> bool:
     for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d",
                 "%Y%m%d", "%B %d, %Y", "%b %d, %Y"):
         try:
-            d = datetime.datetime.strptime(date_str[:20], fmt).date()
-            return d >= after
+            return datetime.datetime.strptime(date_str[:20], fmt).date() >= after
         except ValueError:
             continue
     m = re.search(r'(\d{4})-(\d{1,2})-(\d{1,2})', date_str)
     if m:
         try:
-            d = datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
-            return d >= after
+            return datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3))) >= after
         except ValueError:
             pass
     return True
@@ -264,28 +339,29 @@ class BrowseTab:
 
     Parameters
     ----------
-    notebook      : ttk.Notebook  — parent notebook widget
-    get_general_config : callable  — returns current general_config dict
-    get_driver    : callable  — returns (or creates) the Selenium driver
-    C             : dict  — colour palette from gui.py
-    mk            : dict  — widget factory callables from gui.py
-                   keys: label, entry, button, checkbutton, lf
+    notebook           : ttk.Notebook  — parent notebook widget
+    get_general_config : callable      — returns current general_config dict
+    get_driver         : callable      — UNUSED (kept for API compat; driver
+                                         is now resolved internally via
+                                         get_config_manager().get_selenium_driver())
+    C                  : dict          — colour palette from gui.py
+    mk                 : dict          — widget factory callables from gui.py
+                         keys: label, entry, button, checkbutton, lf
     """
 
     def __init__(self, notebook, get_general_config, get_driver, C, mk):
-        self._notebook          = notebook
+        self._notebook           = notebook
         self._get_general_config = get_general_config
-        self._get_driver        = get_driver
-        self.C                  = C
-        self._mk                = mk
+        self.C                   = C
+        self._mk                 = mk
+        # get_driver kept for API compat but not used — we call _get_real_driver() directly
 
         self.frame = tk.Frame(notebook, bg=C["bg"])
 
-        # state
-        self._results: list          = []          # current page results
-        self._selected: dict         = {}          # url -> BooleanVar
-        self._thumb_images: dict     = {}          # url -> ImageTk.PhotoImage
-        self._card_frames: dict      = {}          # url -> Frame  (for highlight)
+        self._results: list          = []
+        self._selected: dict         = {}
+        self._thumb_images: dict     = {}
+        self._card_frames: dict      = {}
         self._page                   = 1
         self._current_query          = ""
         self._current_site           = ""
@@ -304,7 +380,7 @@ class BrowseTab:
         mk = self._mk
         outer = self.frame
 
-        # ── Search bar ───────────────────────────────────────────────────────
+        # ── Search bar ─────────────────────────────────────────────────
         bar = tk.Frame(outer, bg=C["panel"], pady=6)
         bar.pack(fill="x", padx=10, pady=(8, 4))
 
@@ -323,9 +399,9 @@ class BrowseTab:
 
         mk["label"](bar, "After date:").pack(side="left", padx=(0, 2))
         self._date_entry = mk["entry"](bar, width=10)
-        self._date_entry.insert(0, "")
         self._date_entry.pack(side="left", padx=(0, 4))
-        mk["label"](bar, "YYYY-MM-DD", fg=C["fg_dim"], font=("Courier", 7)).pack(side="left", padx=(0, 10))
+        mk["label"](bar, "YYYY-MM-DD", fg=C["fg_dim"],
+                    font=("Courier", 7)).pack(side="left", padx=(0, 10))
 
         mk["label"](bar, "Min dur (min):").pack(side="left", padx=(0, 2))
         self._dur_entry = mk["entry"](bar, width=5)
@@ -337,7 +413,7 @@ class BrowseTab:
         )
         self._search_btn.pack(side="left", padx=4)
 
-        # ── Pagination row ────────────────────────────────────────────────────
+        # ── Pagination row ───────────────────────────────────────────────
         nav = tk.Frame(outer, bg=C["panel2"], pady=3)
         nav.pack(fill="x", padx=10)
 
@@ -372,7 +448,7 @@ class BrowseTab:
         mk["label"](nav, textvariable=self._status_var, fg=C["fg_dim"],
                     font=("Courier", 8)).pack(side="right", padx=10)
 
-        # ── Thumbnail grid (scrollable canvas) ───────────────────────────────
+        # ── Thumbnail grid (scrollable canvas) ─────────────────────────────
         grid_outer = tk.Frame(outer, bg=C["bg"])
         grid_outer.pack(fill="both", expand=True, padx=10, pady=4)
 
@@ -398,7 +474,6 @@ class BrowseTab:
                           lambda e: self._canvas.itemconfig(
                               self._grid_win, width=e.width))
 
-        # Mousewheel on grid
         def _wheel(event):
             delta = -1 if (event.num == 5 or getattr(event, 'delta', 1) < 0) else 1
             self._canvas.yview_scroll(-delta, "units")
@@ -406,7 +481,7 @@ class BrowseTab:
         self._canvas.bind_all("<Button-4>",   _wheel)
         self._canvas.bind_all("<Button-5>",   _wheel)
 
-        # ── Download queue bar ────────────────────────────────────────────────
+        # ── Download bar ──────────────────────────────────────────────────
         dl_bar = tk.Frame(outer, bg=C["panel"], pady=6)
         dl_bar.pack(fill="x", padx=10, pady=(4, 8))
 
@@ -459,56 +534,63 @@ class BrowseTab:
         ).start()
 
     def _load_page_thread(self, site_name: str, query: str, page: int):
-        try:
-            from smutscrape.config import get_selenium_driver as _gsd
-        except ImportError:
-            _gsd = None
+        site_cfg       = SITES[site_name]
+        url            = _build_search_url(site_cfg, query, page)
+        general_config = self._get_general_config()
+        use_selenium   = site_cfg.get("use_selenium", True)
 
-        site_cfg = SITES[site_name]
-        url      = _build_search_url(site_cfg, query, page)
         logger.debug(f"[BROWSE] Fetching: {url}")
 
-        soup = None
         try:
-            driver = self._get_driver()
-            if driver:
-                driver.get(url)
-                time.sleep(3.5)
-                from bs4 import BeautifulSoup
-                soup = BeautifulSoup(driver.page_source, "html.parser")
+            soup = _fetch_page_browse(url, use_selenium, general_config)
         except Exception as exc:
-            logger.warning(f"[BROWSE] Selenium fetch failed: {exc}")
+            logger.error(f"[BROWSE] Unexpected fetch error:\n{traceback.format_exc()}")
+            soup = None
 
         if soup is None:
             self.frame.after(0, lambda: self._finish_load(
-                [], "Fetch failed \u2014 is Chrome/Selenium running?"
+                [],
+                "\u26a0 Fetch failed. Check the log; retrying with cloudscraper — "
+                "if blank results, the site may require cookies or JS."
             ))
             return
 
         all_cards = _scrape_cards(soup, site_name)
+        logger.info(f"[BROWSE] Scraped {len(all_cards)} cards from {url}")
 
-        # Apply client-side filters
-        after    = self._parse_after_date()
-        min_dur  = self._parse_min_dur()
+        after   = self._parse_after_date()
+        min_dur = self._parse_min_dur()
         filtered = [
             c for c in all_cards
-            if _date_passes(c["date"], after)
-            and _duration_passes(c["duration"], min_dur)
+            if _date_passes(c["date"], after) and _duration_passes(c["duration"], min_dur)
         ]
 
-        self.frame.after(0, lambda: self._finish_load(
-            filtered,
-            f"Page {page}  \u2022  {len(filtered)}/{len(all_cards)} cards"
-            + (f"  (filtered {len(all_cards)-len(filtered)})"
-               if len(all_cards) != len(filtered) else "")
-        ))
+        if not filtered and all_cards:
+            status = (
+                f"Page {page}  \u2022  0/{len(all_cards)} cards passed filters — "
+                "try relaxing the date/duration constraints."
+            )
+        elif not all_cards:
+            status = (
+                f"Page {page}  \u2022  0 cards found. "
+                "The page loaded but no video cards matched the CSS selectors. "
+                "The site layout may have changed."
+            )
+        else:
+            status = (
+                f"Page {page}  \u2022  {len(filtered)}/{len(all_cards)} cards"
+                + (f"  (filtered {len(all_cards)-len(filtered)})"
+                   if len(all_cards) != len(filtered) else "")
+            )
+
+        self.frame.after(0, lambda: self._finish_load(filtered, status))
 
     def _finish_load(self, results: list, status: str):
-        self._results  = results
-        self._selected = {r["url"]: tk.BooleanVar(value=False) for r in results}
+        self._results      = results
+        self._selected     = {r["url"]: tk.BooleanVar(value=False) for r in results}
         self._thumb_images = {}
         self._card_frames  = {}
-        self._loading = False
+        self._loading      = False
         self._page_var.set(f"Page {self._page}")
         self._set_status(status)
         self._search_btn.config(state="normal")
@@ -527,13 +609,8 @@ class BrowseTab:
 
     def _render_grid(self):
         self._clear_grid()
-        C = self.C
         for idx, item in enumerate(self._results):
-            row = idx // COLS
-            col = idx % COLS
-            self._build_card(self._grid_frame, item, row, col)
-
-        # Kick off async thumbnail loading
+            self._build_card(self._grid_frame, item, idx // COLS, idx % COLS)
         threading.Thread(
             target=self._load_thumbs_thread,
             args=(list(self._results),),
@@ -555,7 +632,6 @@ class BrowseTab:
         card.grid_propagate(False)
         self._card_frames[url] = card
 
-        # Placeholder thumb canvas
         thumb_canvas = tk.Canvas(
             card, width=THUMB_W, height=THUMB_H,
             bg=C["bg"], highlightthickness=0
@@ -566,11 +642,9 @@ class BrowseTab:
             text="loading\u2026", fill=C["fg_dim"],
             font=("Courier", 8)
         )
-        # Store canvas reference for later update
-        card._thumb_canvas = thumb_canvas
+        card._thumb_canvas  = thumb_canvas
         card._thumb_img_ref = None
 
-        # Title
         title_lbl = tk.Label(
             card, text=item["title"][:38],
             bg=C["panel2"], fg=C["fg"],
@@ -579,37 +653,27 @@ class BrowseTab:
         )
         title_lbl.place(x=5, y=THUMB_H + 8)
 
-        # Duration + date meta
         meta_parts = []
         if item["duration"]: meta_parts.append(f"\u23f1 {item['duration']}")
         if item["date"]:     meta_parts.append(f"\U0001f4c5 {item['date'][:10]}")
-        meta_lbl = tk.Label(
+        tk.Label(
             card, text="  ".join(meta_parts),
             bg=C["panel2"], fg=C["fg_dim"],
             font=("Courier", 7), anchor="w"
-        )
-        meta_lbl.place(x=5, y=THUMB_H + 24)
+        ).place(x=5, y=THUMB_H + 24)
 
-        # Checkbox overlay in top-right of thumb
-        def _toggle(u=url, v=var, c=card):
-            v.set(not v.get())
-            self._refresh_card_highlight(u)
-            self._update_sel_count()
-
-        chk = tk.Checkbutton(
+        tk.Checkbutton(
             card, variable=var,
             bg=C["panel2"],
             activebackground=C["cb_select"],
             selectcolor=C["bg"],
             bd=0, relief="flat",
-            command=lambda u=url, v=var, c=card: (
+            command=lambda u=url: (
                 self._refresh_card_highlight(u),
                 self._update_sel_count()
             )
-        )
-        chk.place(x=THUMB_W - 14, y=THUMB_H + 6)
+        ).place(x=THUMB_W - 14, y=THUMB_H + 6)
 
-        # Click anywhere on thumb to toggle
         for widget in (thumb_canvas, title_lbl):
             widget.bind("<Button-1>", lambda e, u=url: self._toggle_url(u))
 
@@ -622,18 +686,18 @@ class BrowseTab:
             data = _fetch_thumb_bytes(t_url)
             if data and PIL_AVAILABLE:
                 try:
-                    img = Image.open(io.BytesIO(data))
-                    img = img.resize((THUMB_W, THUMB_H), Image.LANCZOS)
+                    img   = Image.open(io.BytesIO(data)).resize(
+                        (THUMB_W, THUMB_H), Image.LANCZOS
+                    )
                     photo = ImageTk.PhotoImage(img)
                     self.frame.after(
-                        0,
-                        lambda u=url, ph=photo: self._set_thumb(u, ph)
+                        0, lambda u=url, ph=photo: self._set_thumb(u, ph)
                     )
                 except Exception:
                     pass
 
     def _set_thumb(self, url: str, photo):
-        self._thumb_images[url] = photo   # keep a reference!
+        self._thumb_images[url] = photo
         card = self._card_frames.get(url)
         if not card:
             return
@@ -645,9 +709,9 @@ class BrowseTab:
         card = self._card_frames.get(url)
         if card is None:
             return
-        selected = self._selected[url].get()
         card.config(
-            highlightbackground=self.C["accent"] if selected else self.C["border"]
+            highlightbackground=self.C["accent"]
+            if self._selected[url].get() else self.C["border"]
         )
 
     # -------------------------------------------------------- selection helpers
@@ -697,10 +761,8 @@ class BrowseTab:
         self._stop_dl_btn.config(state="normal")
         self._dl_progress_var.set(f"Queuing {len(urls)} video(s)\u2026")
 
-        gc = self._get_general_config()
-        site_name = self._current_site
-        shortcode = SITES[site_name]["shortcode"]
-
+        gc        = self._get_general_config()
+        shortcode = SITES[self._current_site]["shortcode"]
         self._dl_thread = threading.Thread(
             target=self._dl_worker,
             args=(urls, gc, shortcode),
@@ -769,14 +831,12 @@ class BrowseTab:
     def _poll_dl_queue(self):
         try:
             while True:
-                msg = self._dl_queue.get_nowait()
+                msg  = self._dl_queue.get_nowait()
                 kind = msg[0]
                 if kind == "status":
                     self._dl_progress_var.set(msg[1])
                 elif kind == "done_one":
-                    url = msg[1]
-                    # Mark card as done (green border)
-                    card = self._card_frames.get(url)
+                    card = self._card_frames.get(msg[1])
                     if card:
                         card.config(highlightbackground="#39ff14")
                 elif kind == "finished":

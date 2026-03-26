@@ -48,7 +48,7 @@ C = dict(
     log_bg      = "#050f05",
     log_fg      = "#39ff14",
     log_filter  = "#00e5ff",
-    log_probe   = "#ff00ff",   # magenta  — yt-dlp metadata probe lines
+    log_probe   = "#ff00ff",
     log_success = "#7fff00",
     log_error   = "#ff3333",
     log_warn    = "#ff8c00",
@@ -62,12 +62,6 @@ C = dict(
 # ===========================================================================
 
 def _audit_site_filter_caps(sites):
-    """
-    A site supports date/duration filters if:
-      - its video_scraper YAML exposes those fields  (direct HTML scrape), OR
-      - its download method is 'yt-dlp'  (probe fallback via _probe_metadata_ytdlp)
-    Either way both filters are available to the user.
-    """
     caps = {}
     for sc, site_obj in sites.items():
         name = site_obj.name
@@ -83,7 +77,6 @@ def _audit_site_filter_caps(sites):
             ls = data.get('scrapers', {}).get('list_scraper', {}).get('video_item', {}).get('fields', {})
             has_date = bool(vs.get('date') or ls.get('date'))
             has_dur  = bool(vs.get('duration') or ls.get('duration'))
-            # yt-dlp probe covers any site that uses yt-dlp as download method
             is_ytdlp = (data.get('download', {}).get('method', '') == 'yt-dlp')
         except Exception:
             pass
@@ -201,6 +194,20 @@ def _apply_dark_ttk(root):
         background=C["panel"], foreground=C["accent"],
         font=("Courier", 9, "bold"),
     )
+    # Notebook tabs
+    style.configure("TNotebook",
+        background=C["bg"], bordercolor=C["border"], tabmargins=[2, 4, 2, 0],
+    )
+    style.configure("TNotebook.Tab",
+        background=C["panel2"], foreground=C["fg_dim"],
+        font=("Courier", 10, "bold"),
+        padding=[14, 6],
+        bordercolor=C["border"],
+    )
+    style.map("TNotebook.Tab",
+        background=[("selected", C["panel"]), ("active", C["cb_select"])],
+        foreground=[("selected", C["accent"]), ("active", C["fg"])],
+    )
 
 
 # ===========================================================================
@@ -237,7 +244,7 @@ class SmutscrapeGUI:
         self._poll_log_queue()
 
     # -------------------------------------------------------------------------
-    # Widget factories
+    # Widget factories (also exposed as dict for BrowseTab)
     # -------------------------------------------------------------------------
 
     def _lf(self, parent, text, borderless=False, **kw):
@@ -296,6 +303,16 @@ class SmutscrapeGUI:
             font=("Courier", 9),
             bd=0, relief="flat",
             **kw
+        )
+
+    def _mk_dict(self):
+        """Return widget-factory callable dict for sub-modules like BrowseTab."""
+        return dict(
+            label=self._label,
+            entry=self._entry,
+            button=self._button,
+            checkbutton=self._checkbutton,
+            lf=self._lf,
         )
 
     # -------------------------------------------------------------------------
@@ -372,10 +389,69 @@ class SmutscrapeGUI:
     # -------------------------------------------------------------------------
 
     def _build_ui(self):
-        # ── Scrollable content area ───────────────────────────────────────────
-        self._main_canvas = tk.Canvas(self.root, bg=C["bg"],
+        # ── Top-level Notebook ────────────────────────────────────────────────
+        self._notebook = ttk.Notebook(self.root)
+        self._notebook.pack(fill="both", expand=True, padx=6, pady=6)
+
+        # ── Tab 1: Blind Scraper (original UI) ────────────────────────────────
+        self._scraper_tab = tk.Frame(self._notebook, bg=C["bg"])
+        self._notebook.add(
+            self._scraper_tab,
+            text="  🔎  Blind Scraper  "
+        )
+        self._build_scraper_tab(self._scraper_tab)
+
+        # ── Tab 2: Browse & Pick ──────────────────────────────────────────────
+        self._attach_browse_tab()
+
+    def _attach_browse_tab(self):
+        try:
+            from smutscrape.browse_tab import BrowseTab
+
+            def _get_general_config():
+                try:
+                    return load_configuration('general')
+                except Exception:
+                    return {}
+
+            def _get_driver():
+                """Return the live Selenium driver if one is already open."""
+                try:
+                    from smutscrape.config import get_selenium_driver
+                    return get_selenium_driver()
+                except Exception:
+                    return None
+
+            self._browse_tab = BrowseTab(
+                self._notebook,
+                get_general_config=_get_general_config,
+                get_driver=_get_driver,
+                C=C,
+                mk=self._mk_dict(),
+            )
+            self._notebook.add(
+                self._browse_tab.frame,
+                text="  📂  Browse & Pick  "
+            )
+        except Exception as exc:
+            # Graceful degradation: show an error tab instead of crashing
+            import traceback
+            err_frame = tk.Frame(self._notebook, bg=C["bg"])
+            self._notebook.add(err_frame, text="  Browse & Pick  ")
+            tk.Label(
+                err_frame,
+                text=f"Browse & Pick tab failed to load:\n\n{traceback.format_exc()}",
+                bg=C["bg"], fg="#ff3333",
+                font=("Courier", 9), justify="left", anchor="nw"
+            ).pack(fill="both", expand=True, padx=20, pady=20)
+
+    def _build_scraper_tab(self, parent):
+        """Original blind-scraper UI — zero changes from the original build."""
+
+        # ── Scrollable content area ──────────────────────────────────────────
+        self._main_canvas = tk.Canvas(parent, bg=C["bg"],
                                       highlightthickness=0, bd=0)
-        self._main_vsb    = ttk.Scrollbar(self.root, orient="vertical",
+        self._main_vsb    = ttk.Scrollbar(parent, orient="vertical",
                                           command=self._main_canvas.yview)
         self._main_canvas.configure(yscrollcommand=self._main_vsb.set)
         self._main_vsb.pack(side="right", fill="y")
@@ -388,7 +464,7 @@ class SmutscrapeGUI:
         self._inner.bind("<Configure>", self._on_inner_configure)
         self._main_canvas.bind("<Configure>", self._on_canvas_configure)
 
-        # ── Configure button row ──────────────────────────────────────────────
+        # ── Configure button row ─────────────────────────────────────────────
         cfg_bar = tk.Frame(self._inner, bg=C["panel"])
         cfg_bar.pack(fill="x", padx=10, pady=(8, 2))
         self._button(
@@ -398,7 +474,7 @@ class SmutscrapeGUI:
             padx=12, pady=3
         ).pack(side="left")
 
-        # ── TARGET ───────────────────────────────────────────────────────────
+        # ── TARGET ──────────────────────────────────────────────────────────
         top = self._lf(self._inner, "  TARGET ")
         top.pack(fill="x", padx=10, pady=(4, 4))
 
@@ -427,7 +503,7 @@ class SmutscrapeGUI:
         self.query_entry.grid(row=2, column=1, columnspan=2, sticky="ew", padx=6, pady=3)
         top.columnconfigure(1, weight=1)
 
-        # ── CATEGORIES ────────────────────────────────────────────────────────
+        # ── CATEGORIES ──────────────────────────────────────────────────────
         self.cat_frame = self._lf(
             self._inner,
             "  CATEGORIES  (check one or more \u2014 each scraped in sequence)",
@@ -461,7 +537,7 @@ class SmutscrapeGUI:
                     fg=C["fg_dim"], font=("Courier", 8)
                     ).pack(side="left", padx=10)
 
-        # ── FILTERS ──────────────────────────────────────────────────────────
+        # ── FILTERS ─────────────────────────────────────────────────────────
         filters = self._lf(self._inner, "  FILTERS ")
         filters.pack(fill="x", padx=10, pady=4)
 
@@ -503,7 +579,7 @@ class SmutscrapeGUI:
         self._label(filters, "Begin scraping from this page",
                     fg=C["fg_dim"]).grid(row=2, column=2, sticky="w")
 
-        # ── OPTIONS ───────────────────────────────────────────────────────────
+        # ── OPTIONS ─────────────────────────────────────────────────────────
         opts = self._lf(self._inner, "  OPTIONS ", borderless=True, pady=4)
         opts.pack(fill="x", padx=10, pady=4)
         self.overwrite_var  = tk.BooleanVar()
@@ -516,7 +592,7 @@ class SmutscrapeGUI:
         self._checkbutton(opts, "Apply state (skip already seen)",
                           self.applystate_var).grid(row=0, column=2, sticky="w", padx=10)
 
-        # ── BUTTONS ───────────────────────────────────────────────────────────
+        # ── BUTTONS ─────────────────────────────────────────────────────────
         btn_frame = tk.Frame(self._inner, bg=C["bg"])
         btn_frame.pack(pady=6)
 
@@ -584,7 +660,7 @@ class SmutscrapeGUI:
                     fg=C["fg"], font=("Courier", 9)
                     ).grid(row=3, column=2, sticky="w", padx=4)
 
-        # ── STATUS BAR ────────────────────────────────────────────────────────
+        # ── STATUS BAR ──────────────────────────────────────────────────────
         self.status_var = tk.StringVar(value="Ready")
         tk.Label(self._inner, textvariable=self.status_var,
                  anchor="w", relief="flat",
@@ -592,7 +668,7 @@ class SmutscrapeGUI:
                  font=("Courier", 9), padx=8
                  ).pack(fill="x", padx=10, pady=(0, 2))
 
-        # ── LOG ───────────────────────────────────────────────────────────────
+        # ── LOG ─────────────────────────────────────────────────────────────
         self.log_outer = tk.Frame(self._inner, bg=C["bg"])
         self.log_outer.pack(fill="both", expand=True, padx=10, pady=(2, 10))
 
@@ -609,7 +685,7 @@ class SmutscrapeGUI:
         )
         self.log_text.pack(fill="both", expand=True)
         self.log_text.tag_config("filter",  foreground=C["log_filter"])
-        self.log_text.tag_config("probe",   foreground=C["log_probe"])   # magenta
+        self.log_text.tag_config("probe",   foreground=C["log_probe"])
         self.log_text.tag_config("success", foreground=C["log_success"])
         self.log_text.tag_config("error",   foreground=C["log_error"])
         self.log_text.tag_config("warn",    foreground=C["log_warn"])
@@ -707,7 +783,6 @@ class SmutscrapeGUI:
         caps = self._filter_caps.get(site_name, {'date': True, 'duration': True, 'probe': False})
         probe = caps.get('probe', False)
 
-        # Badge: show ✔ with (via probe) note when yt-dlp covers it
         if caps['date'] and caps['duration']:
             if probe:
                 badge = "\u2714 date & duration  (via yt-dlp probe)"
@@ -720,7 +795,6 @@ class SmutscrapeGUI:
             badge = "\u26a0 " + ", ".join(missing)
         self.filter_badge_var.set(badge)
 
-        # Date fields — always enabled for yt-dlp sites
         date_state = "normal"
         date_bg    = C["entry_bg"]
         hint_fg    = C["fg_dim"]
@@ -734,7 +808,6 @@ class SmutscrapeGUI:
             e.config(state=date_state, bg=date_bg)
         self.after_hint.config(fg=hint_fg, text=hint_txt)
 
-        # Duration field
         if caps['duration']:
             self.min_dur_entry.config(state="normal", bg=C["entry_bg"])
             self.dur_hint.config(fg=C["fg_dim"], text="e.g. 10  (skip shorter than this)")
@@ -800,14 +873,13 @@ class SmutscrapeGUI:
                 if kind == "log":
                     msg = item[1]
                     low = msg.lower()
-                    # [PROBE] lines get their own magenta colour
-                    if   "[probe]" in low:                                tag = "probe"
-                    elif "[filter]" in low or "skip" in low:             tag = "filter"
-                    elif "success"  in low or "finished" in low:         tag = "success"
-                    elif "stopped"  in low or "abort"    in low:         tag = "stopped"
-                    elif "error"    in low or "failed"   in low:         tag = "error"
-                    elif "warn"     in low:                               tag = "warn"
-                    else:                                                 tag = "info"
+                    if   "[probe]"   in low:                            tag = "probe"
+                    elif "[filter]" in low or "skip" in low:           tag = "filter"
+                    elif "success"  in low or "finished" in low:       tag = "success"
+                    elif "stopped"  in low or "abort"    in low:       tag = "stopped"
+                    elif "error"    in low or "failed"   in low:       tag = "error"
+                    elif "warn"     in low:                             tag = "warn"
+                    else:                                               tag = "info"
                     self._log(msg.rstrip(), tag)
                 elif kind == "dl_progress":
                     _, pct, speed, eta = item
@@ -914,11 +986,6 @@ class SmutscrapeGUI:
             re_nfo       = self.renfo_var.get()
             try:    start_page = int(self.page_entry.get().strip())
             except: start_page = 1
-
-            # No longer gate filters on caps — probe handles missing HTML data
-            # caps = self._filter_caps.get(site_name, ...)
-            # if not caps['date']:     after_date   = None   <-- removed
-            # if not caps['duration']: min_duration = None   <-- removed
 
             def dl_progress_cb(pct, speed="", eta=""):
                 self.log_queue.put(("dl_progress", pct, speed, eta))

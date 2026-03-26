@@ -110,11 +110,13 @@ SITES = {
         "use_selenium": True,
         "encoding": lambda s: s.replace(" ", "+"),
         "page_offset": -1,
-        "card":      "div.thumb-under",
-        "thumb":     ("img.thumb, img[src*='thumb']", "src"),
-        "thumb_alt": ("img", "data-src"),
-        "url":       ("a", "href"),
-        "title":     ("a", "title"),
+        # XVideos card structure: div.thumb-block wraps div.thumb (image) + div.thumb-under (meta)
+        # Selecting the parent block lets us reach the img in div.thumb which has data-src
+        "card":      "div.thumb-block",
+        "thumb":     ("img", "data-src"),
+        "thumb_alt": ("img", "src"),
+        "url":       ("div.thumb-under a", "href"),
+        "title":     ("div.thumb-under a", "title"),
         "duration":  ("span.duration", None),
         "date":      (None, None),
     },
